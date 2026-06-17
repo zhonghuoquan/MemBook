@@ -103,6 +103,25 @@ export function Canvas() {
   // ── Keyboard ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+S save
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        const pages = useEditorStore.getState().pages;
+        const photos = usePhotoStore.getState().photos;
+        const projectId = localStorage.getItem('membook_current_project_id');
+        if (projectId && pages.length > 0) {
+          import('../../db').then(({ loadProject, saveProject, savePhotos }) => {
+            loadProject(projectId).then((existing) => {
+              if (existing) {
+                saveProject({ ...existing, pages, updatedAt: new Date().toISOString() });
+                savePhotos(photos);
+                addToast({ type: 'success', message: '💾 已保存' });
+              }
+            });
+          });
+        }
+        return;
+      }
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         const entry = useHistoryStore.getState().undo();
@@ -249,23 +268,20 @@ export function Canvas() {
                     clipY={0}
                     clipWidth={sw}
                     clipHeight={sh}
-                    rotation={photo && placement?.rotation ? placement.rotation : 0}
-                    offsetX={photo && placement?.rotation ? sw / 2 : 0}
-                    offsetY={photo && placement?.rotation ? sh / 2 : 0}
+                    rotation={0}
+                    offsetX={0}
+                    offsetY={0}
                     onClick={() => setSelectedSlot(slot.id)}
                     onTap={() => setSelectedSlot(slot.id)}
                     onDblClick={() => handleSlotDblClick(slot.id)}
                     onDblTap={() => handleSlotDblClick(slot.id)}
                   >
-                    {/* Undo rotation offset for the background rect */}
+                    {/* Slot background / placeholder */}
                     <Rect
-                      x={-sx}
-                      y={-sy}
+                      x={0}
+                      y={0}
                       width={sw}
                       height={sh}
-                      offsetX={photo && placement?.rotation ? -sw/2 : 0}
-                      offsetY={photo && placement?.rotation ? -sh/2 : 0}
-                      rotation={photo && placement?.rotation ? -placement.rotation : 0}
                       fill={isDragTarget ? 'rgba(108,99,255,0.12)' : photo ? undefined : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')}
                       stroke={isDragTarget ? '#6C63FF' : isSelected ? '#6C63FF' : (photo ? 'transparent' : '#DEE2E6')}
                       strokeWidth={isDragTarget ? 2.5 : (isSelected ? 2 : 1)}
@@ -329,6 +345,7 @@ function CanvasPhotoRenderer({
   const [loaded, setLoaded] = useState(false);
   const adj = placement?.adjustments;
   const filterName = placement?.filter;
+  const rotation = placement?.rotation || 0;
 
   const cover = calcCoverFit(photo.width, photo.height, slotW, slotH);
 
@@ -382,15 +399,23 @@ function CanvasPhotoRenderer({
   }, [loaded, adj, filterName]);
 
   return (
-    <KonvaImage
-      ref={imageRef}
-      image={loadImage(photo.src, handleImageLoad)}
-      x={cover.x}
-      y={cover.y}
-      width={cover.width}
-      height={cover.height}
-      cornerRadius={2}
-    />
+    <Group
+      x={slotW / 2}
+      y={slotH / 2}
+      rotation={rotation}
+      offsetX={slotW / 2}
+      offsetY={slotH / 2}
+    >
+      <KonvaImage
+        ref={imageRef}
+        image={loadImage(photo.src, handleImageLoad)}
+        x={cover.x - slotW / 2}
+        y={cover.y - slotH / 2}
+        width={cover.width}
+        height={cover.height}
+        cornerRadius={2}
+      />
+    </Group>
   );
 }
 

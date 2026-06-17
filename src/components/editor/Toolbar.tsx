@@ -1,5 +1,7 @@
 import { useUIStore, useEditorStore, useHistoryStore } from '../../store';
 import { Button } from '../common/Button';
+import { loadProject, saveProject, savePhotos } from '../../db';
+import { usePhotoStore } from '../../store';
 
 interface ToolbarProps {
   onBack?: () => void;
@@ -25,6 +27,29 @@ export function Toolbar({ onBack }: ToolbarProps) {
       useEditorStore.getState().setPages(entry.pages);
       if (entry.selectedSlotId) useEditorStore.getState().setSelectedSlot(entry.selectedSlotId);
       addToast({ type: 'info', message: '已重做' });
+    }
+  };
+
+  // ── 手动保存 ──
+  const handleSave = async () => {
+    try {
+      const pages = useEditorStore.getState().pages;
+      const photos = usePhotoStore.getState().photos;
+      const projectId = localStorage.getItem('membook_current_project_id');
+
+      if (!projectId || pages.length === 0) {
+        addToast({ type: 'warning', message: '暂无内容可保存' });
+        return;
+      }
+
+      const existing = await loadProject(projectId);
+      if (existing) {
+        await saveProject({ ...existing, pages, updatedAt: new Date().toISOString() });
+      }
+      await savePhotos(photos);
+      addToast({ type: 'success', message: '💾 已保存' });
+    } catch {
+      addToast({ type: 'error', message: '保存失败，请重试' });
     }
   };
 
@@ -90,6 +115,16 @@ export function Toolbar({ onBack }: ToolbarProps) {
           maxLength={40}
         />
       </div>
+
+      {/* Right: Save */}
+      <Button variant="secondary" size="sm" onClick={handleSave}>
+        <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5l-3-3z" />
+          <path d="M5 2v4h6V2" />
+          <path d="M5 10h6v4H5z" />
+        </svg>
+        保存
+      </Button>
 
       {/* Right: Export */}
       <Button variant="primary" size="sm" onClick={() => addToast({ type: 'success', message: '导出功能即将上线' })}>
