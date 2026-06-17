@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { Stage, Layer, Rect, Image as KonvaImage, Transformer, Group, Text } from 'react-konva';
 import Konva from 'konva';
 import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
@@ -12,6 +12,7 @@ export function Canvas() {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
 
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const pages = useEditorStore((s) => s.pages);
@@ -26,7 +27,21 @@ export function Canvas() {
     ? TEMPLATES.find((t) => t.id === currentPage.templateId)
     : undefined;
 
-  // Attach transformer to selected node
+  // ── Observe container resize ──
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerSize({ w: width, h: height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── Attach transformer to selected node ──
   useEffect(() => {
     if (!transformerRef.current || !stageRef.current) return;
     const stage = stageRef.current;
@@ -42,7 +57,7 @@ export function Canvas() {
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedSlotId, currentPageIndex, currentPage?.placements]);
 
-  // Ctrl + wheel zoom → sync zoom state
+  // ── Ctrl + wheel zoom — whole page scaling ──
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     if (e.evt.ctrlKey || e.evt.metaKey) {
       e.evt.preventDefault();
@@ -51,7 +66,7 @@ export function Canvas() {
     }
   }, [setCanvasZoom]);
 
-  // Keyboard shortcuts
+  // ── Keyboard shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === '=') { e.preventDefault(); setCanvasZoom(canvasZoom + 0.1); }
@@ -73,116 +88,145 @@ export function Canvas() {
     return <CanvasEmptyState />;
   }
 
+  // Scaled dimensions for scroll spacer
+  const scaledW = CANVAS_W * canvasZoom;
+  const scaledH = CANVAS_H * canvasZoom;
+  const padding = 48; // 24px each side
+  const scrollW = Math.max(containerSize.w, scaledW + padding);
+  const scrollH = Math.max(containerSize.h, scaledH + padding);
+
   const slotWidth = (s: SlotLayout) => (s.width / 100) * CANVAS_W;
   const slotHeight = (s: SlotLayout) => (s.height / 100) * CANVAS_H;
   const slotX = (s: SlotLayout) => (s.x / 100) * CANVAS_W;
   const slotY = (s: SlotLayout) => (s.y / 100) * CANVAS_H;
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-auto flex items-start justify-center p-6 bg-[var(--color-gray-100)] relative">
-      <Stage
-        ref={stageRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
-        scaleX={canvasZoom}
-        scaleY={canvasZoom}
-        style={{
-          background: currentPage.background,
-          borderRadius: '2px',
-          boxShadow: '0 2px 12px rgba(33,37,41,0.1)',
-        }}
-        onWheel={handleWheel}
-        onMouseDown={(e) => {
-          if (e.target === e.target.getStage()) {
-            setSelectedSlot(null);
-          }
-        }}
+    <div ref={containerRef} className="flex-1 overflow-auto bg-[var(--color-gray-100)] relative">
+      {/* Scroll spacer ensures the container has room when zoomed in */}
+      <div
+        className="flex items-center justify-center"
+        style={{ width: scrollW, height: scrollH, padding }}
       >
-        <Layer>
-          {/* Background */}
-          <Rect
-            x={0}
-            y={0}
+        {/* CSS transform: scales the entire Stage uniformly (page + slots + photos) */}
+        <div
+          style={{
+            transform: `scale(${canvasZoom})`,
+            transformOrigin: 'center center',
+            width: CANVAS_W,
+            height: CANVAS_H,
+            flexShrink: 0,
+          }}
+        >
+          <Stage
+            ref={stageRef}
             width={CANVAS_W}
             height={CANVAS_H}
-            fill={currentPage.background}
-            listening={false}
-          />
+            style={{
+              background: currentPage.background,
+              borderRadius: '2px',
+              boxShadow: '0 2px 12px rgba(33,37,41,0.1)',
+            }}
+            onWheel={handleWheel}
+            onMouseDown={(e) => {
+              if (e.target === e.target.getStage()) {
+                setSelectedSlot(null);
+              }
+            }}
+          >
+            <Layer>
+              {/* Page background — fills the entire stage */}
+              <Rect
+                x={0} y={0}
+                width={CANVAS_W} height={CANVAS_H}
+                fill={currentPage.background}
+                listening={false}
+              />
 
-          {/* Slot placeholders + Photo render */}
-          {template.slots.map((slot) => {
-            const placement = currentPage.placements.find((p) => p.slotId === slot.id);
-            const photo = placement?.photoId
-              ? photos.find((p) => p.id === placement.photoId)
-              : undefined;
-            const isSelected = selectedSlotId === slot.id;
-            const sx = slotX(slot);
-            const sy = slotY(slot);
-            const sw = slotWidth(slot);
-            const sh = slotHeight(slot);
+              {/* Subtle page edge */}
+              <Rect
+                x={0} y={0}
+                width={CANVAS_W} height={CANVAS_H}
+                stroke={currentPage.background === '#FFFFFF' ? '#E9ECEF' : 'rgba(0,0,0,0.06)'}
+                strokeWidth={1}
+                listening={false}
+              />
 
-            return (
-              <Group
-                key={slot.id}
-                id={`slot-${slot.id}`}
-                x={sx}
-                y={sy}
-                width={sw}
-                height={sh}
-                onClick={() => setSelectedSlot(slot.id)}
-                onTap={() => setSelectedSlot(slot.id)}
-              >
-                <Rect
-                  width={sw}
-                  height={sh}
-                  fill={photo ? undefined : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')}
-                  stroke={isSelected ? '#6C63FF' : (photo ? 'transparent' : '#DEE2E6')}
-                  strokeWidth={isSelected ? 2 : 1}
-                  strokeScaleEnabled={false}
-                  cornerRadius={photo ? 2 : 4}
-                  dash={photo ? undefined : [4, 4]}
-                />
-                {photo && (
-                  <KonvaImage
-                    image={loadImage(photo.src)}
+              {/* Slot placeholders + Photo render */}
+              {template.slots.map((slot) => {
+                const placement = currentPage.placements.find((p) => p.slotId === slot.id);
+                const photo = placement?.photoId
+                  ? photos.find((p) => p.id === placement.photoId)
+                  : undefined;
+                const isSelected = selectedSlotId === slot.id;
+                const sx = slotX(slot);
+                const sy = slotY(slot);
+                const sw = slotWidth(slot);
+                const sh = slotHeight(slot);
+
+                return (
+                  <Group
+                    key={slot.id}
+                    id={`slot-${slot.id}`}
+                    x={sx}
+                    y={sy}
                     width={sw}
                     height={sh}
-                    cornerRadius={2}
-                  />
-                )}
-                {!photo && (
-                  <Text
-                    text="拖入照片"
-                    x={0}
-                    y={0}
-                    width={sw}
-                    height={sh}
-                    align="center"
-                    verticalAlign="middle"
-                    fontSize={11}
-                    fill="#ADB5BD"
-                  />
-                )}
-              </Group>
-            );
-          })}
+                    onClick={() => setSelectedSlot(slot.id)}
+                    onTap={() => setSelectedSlot(slot.id)}
+                  >
+                    <Rect
+                      width={sw}
+                      height={sh}
+                      fill={photo ? undefined : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')}
+                      stroke={isSelected ? '#6C63FF' : (photo ? 'transparent' : '#DEE2E6')}
+                      strokeWidth={isSelected ? 2 : 1}
+                      strokeScaleEnabled={false}
+                      cornerRadius={photo ? 2 : 4}
+                      dash={photo ? undefined : [4, 4]}
+                    />
+                    {photo && (
+                      <KonvaImage
+                        image={loadImage(photo.src)}
+                        width={sw}
+                        height={sh}
+                        cornerRadius={2}
+                      />
+                    )}
+                    {!photo && (
+                      <Text
+                        text="拖入照片"
+                        x={0}
+                        y={0}
+                        width={sw}
+                        height={sh}
+                        align="center"
+                        verticalAlign="middle"
+                        fontSize={11}
+                        fill="#ADB5BD"
+                      />
+                    )}
+                  </Group>
+                );
+              })}
 
-          <Transformer
-            ref={transformerRef}
-            borderStroke="#6C63FF"
-            borderStrokeWidth={1.5}
-            anchorStroke="#6C63FF"
-            anchorFill="#fff"
-            anchorSize={8}
-            rotateEnabled={false}
-            enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
-          />
-        </Layer>
-      </Stage>
+              <Transformer
+                ref={transformerRef}
+                borderStroke="#6C63FF"
+                borderStrokeWidth={1.5}
+                anchorStroke="#6C63FF"
+                anchorFill="#fff"
+                anchorSize={8}
+                rotateEnabled={false}
+                enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
+              />
+            </Layer>
+          </Stage>
+        </div>
+      </div>
 
-      {/* Corner hint */}
-      <div className="absolute bottom-2 right-3 text-[var(--text-nano)] text-[var(--color-gray-400)] select-none pointer-events-none">
-        Ctrl+滚轮缩放 · 第{currentPageIndex + 1}页
+      {/* Zoom indicator */}
+      <div className="absolute bottom-2 right-3 text-[var(--text-nano)] text-[var(--color-gray-500)] select-none pointer-events-none bg-[var(--color-gray-100)]/80 px-1.5 py-0.5 rounded-[var(--radius-xs)]">
+        {Math.round(canvasZoom * 100)}% · 第{currentPageIndex + 1}页
       </div>
     </div>
   );

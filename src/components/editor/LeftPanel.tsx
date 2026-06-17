@@ -1,3 +1,4 @@
+import { useRef, useState, useCallback, useEffect } from 'react';
 import type { PanelTab } from '../../types';
 import { useUIStore } from '../../store';
 import { PhotoPanel } from './PhotoPanel';
@@ -49,17 +50,74 @@ const tabs: TabItem[] = [
 const panelContent: Record<PanelTab, React.ReactNode> = {
   photos: <PhotoPanel />,
   templates: <TemplatePanel />,
-  theme: <ToolsPanel />,    // 主题归入工具面板
+  theme: <ToolsPanel />,
   tools: <ToolsPanel />,
   market: <ToolsPanel />,
 };
 
+const MIN_PANEL_WIDTH = 220;
+const MAX_PANEL_WIDTH = 480;
+const STORAGE_KEY = 'membook-panel-width';
+
+function loadSavedWidth(): number {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const w = parseInt(saved, 10);
+      if (!isNaN(w) && w >= MIN_PANEL_WIDTH && w <= MAX_PANEL_WIDTH) return w;
+    }
+  } catch { /* ignore */ }
+  return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--layout-panel-width')) || 220;
+}
+
 export function LeftPanel() {
   const activePanel = useUIStore((s) => s.activePanel);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
+  const [panelWidth, setPanelWidth] = useState(loadSavedWidth);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startW.current = panelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [panelWidth]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging.current) return;
+    const delta = e.clientX - startX.current;
+    const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, startW.current + delta));
+    setPanelWidth(newWidth);
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(STORAGE_KEY, String(panelWidth));
+      } catch { /* ignore */ }
+    }
+  }, [panelWidth]);
+
+  useEffect(() => {
+    if (isDragging.current) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [handleMouseMove, handleMouseUp]);
 
   return (
-    <div className="flex shrink-0" style={{ width: 'var(--layout-panel-width)' }}>
+    <div className="flex shrink-0 relative" style={{ width: panelWidth }}>
       {/* Vertical Tab Bar */}
       <nav className="w-[var(--layout-nav-width)] bg-[var(--color-surface-panel)] border-r border-[var(--color-border)] flex flex-col items-center py-3 gap-1 shrink-0">
         {tabs.map((item) => {
@@ -89,8 +147,16 @@ export function LeftPanel() {
       </nav>
 
       {/* Panel Content */}
-      <div className="flex-1 bg-[var(--color-surface)] border-r border-[var(--color-border)] overflow-y-auto">
+      <div className="flex-1 bg-[var(--color-surface)] overflow-y-auto">
         {panelContent[activePanel]}
+      </div>
+
+      {/* Drag handle */}
+      <div
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 group"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="w-0.5 h-full mx-auto bg-[var(--color-border)] opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity" />
       </div>
     </div>
   );

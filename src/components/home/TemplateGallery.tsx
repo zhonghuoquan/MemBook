@@ -102,51 +102,8 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
     });
   }, [allTemplates, countFilter]);
 
-  // 分组：系统模板按数量分组，自定义模板单独一组
-  const grouped = useMemo(() => {
-    interface Group { title: string; templates: FlatTemplate[]; isCustom?: boolean }
-
-    const groups: Group[] = [];
-    const countCategories: { label: string; min: number; max: number }[] = [
-      { label: '单图布局', min: 1, max: 1 },
-      { label: '双图布局', min: 2, max: 2 },
-      { label: '三图布局', min: 3, max: 3 },
-      { label: '四图布局', min: 4, max: 4 },
-      { label: '多图布局', min: 5, max: Infinity },
-    ];
-
-    // 分离系统模板和自定义模板
-    const sysTemplates = filteredAll.filter((t) => t.isBuiltIn);
-    const custTemplates = filteredAll.filter((t) => !t.isBuiltIn);
-
-    // 系统模板按数量分组
-    if (countFilter !== 'all') {
-      const cat = countCategories.find(
-        (c) => c.min <= countFilter && c.max >= (countFilter === 5 ? Infinity : countFilter),
-      );
-      if (cat && sysTemplates.length > 0) {
-        groups.push({ title: cat.label, templates: sysTemplates });
-      }
-    } else {
-      for (const cat of countCategories) {
-        const tms = sysTemplates.filter((t) => t.slots.length >= cat.min && t.slots.length <= cat.max);
-        if (tms.length > 0) {
-          groups.push({ title: cat.label, templates: tms });
-        }
-      }
-    }
-
-    // 自定义模板单独一组（有数据时）
-    if (custTemplates.length > 0) {
-      groups.push({
-        title: '我的模板',
-        templates: custTemplates,
-        isCustom: true,
-      });
-    }
-
-    return groups;
-  }, [filteredAll, countFilter]);
+  // 渲染全部模板为平面网格
+  const displayTemplates = filteredAll;
 
   // 创建相册弹窗
   const [showCreateAlbum, setShowCreateAlbum] = useState(false);
@@ -242,8 +199,8 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         </div>
       </div>
 
-      {/* ── Template Groups ── */}
-      {grouped.length === 0 ? (
+      {/* ── Flat Template Grid ── */}
+      {displayTemplates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-tertiary)]">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-12 h-12 mb-3 text-[var(--color-gray-300)]">
             <rect x="4" y="4" width="40" height="40" rx="4" strokeDasharray="4 4" />
@@ -254,41 +211,18 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
           <p className="text-[var(--text-caption)] mt-1">试试其他筛选条件</p>
         </div>
       ) : (
-        <div className="space-y-8">
-          {grouped.map((group) => (
-            <div key={group.title}>
-              {/* Section header */}
-              <div className="flex items-center gap-2 mb-3">
-                <h3 className="text-[var(--text-body)] font-[500] text-[var(--color-gray-600)]">
-                  {group.title}
-                </h3>
-                <span className="text-[var(--text-caption)] text-[var(--color-gray-400)]">
-                  {group.templates.length} 套
-                </span>
-                {group.isCustom && (
-                  <span className="text-[var(--text-nano)] px-1.5 py-0.5 rounded-full bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
-                    自定义
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-                {group.templates.map((tmpl) => (
-                  <TemplateCard
-                    key={tmpl.id}
-                    template={tmpl}
-                    isHovered={hoveredId === tmpl.id}
-                    onHover={setHoveredId}
-                    onClick={() => handleTemplateClick(tmpl.id)}
-                  />
-                ))}
-                {/* "+" create card at the end of custom templates section */}
-                {group.isCustom && (
-                  <CreateTemplateCard onClick={() => setShowTemplateMaker(true)} />
-                )}
-              </div>
-            </div>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+          {displayTemplates.map((tmpl) => (
+            <TemplateCard
+              key={tmpl.id}
+              template={tmpl}
+              isHovered={hoveredId === tmpl.id}
+              onHover={setHoveredId}
+              onClick={() => handleTemplateClick(tmpl.id)}
+            />
           ))}
+          {/* Create template entry */}
+          <CreateTemplateCard onClick={() => setShowTemplateMaker(true)} />
         </div>
       )}
 

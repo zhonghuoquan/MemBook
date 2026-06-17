@@ -1,4 +1,5 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
+import exifr from 'exifr';
 import { usePhotoStore, useUIStore } from '../../store';
 import type { Photo } from '../../types';
 
@@ -8,10 +9,25 @@ export function PhotoPanel() {
   const removePhoto = usePhotoStore((s) => s.removePhoto);
   const addToast = useUIStore((s) => s.addToast);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [thumbSize, setThumbSize] = useState(56);
-  const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  // ── 加载 EXIF 日期 ──
+  const loadExifDate = useCallback(async (file: File): Promise<Date | null> => {
+    try {
+      const dt: string | undefined = await exifr.parse(file, ['DateTimeOriginal']);
+      if (dt) {
+        // EXIF DateTimeOriginal string format: "YYYY:MM:DD HH:mm:ss"
+        const normalized = dt.replace(/:/g, '-').replace(' ', 'T');
+        return new Date(normalized);
+      }
+    } catch {
+      // fallback to file lastModified
+    }
+    return new Date(file.lastModified);
+  }, []);
+
+  // ── 处理导入文件 ──
   const handleFiles = useCallback(async (files: FileList) => {
     const newPhotos: Photo[] = [];
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -25,11 +41,14 @@ export function PhotoPanel() {
       try {
         const src = URL.createObjectURL(file);
         const img = await loadImageDimensions(src);
+        const exifDate = await loadExifDate(file);
+        const isoDate = exifDate ? exifDate.toISOString() : new Date(file.lastModified).toISOString();
+
         newPhotos.push({
           id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           src,
-          name: file.name,
-          date: new Date(file.lastModified).toISOString().split('T')[0],
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          date: isoDate,
           width: img.width,
           height: img.height,
           orientation: img.width > img.height ? 'landscape' : img.width < img.height ? 'portrait' : 'square',
@@ -41,28 +60,59 @@ export function PhotoPanel() {
     }
 
     if (newPhotos.length > 0) {
+      // Sort by date ascending before adding
+      newPhotos.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       addPhotos(newPhotos);
+
+      // Auto-expand the groups of newly added photos
+      const newGroups = new Set(expandedGroups);
+      for (const p of newPhotos) {
+        newGroups.add(formatGroupKey(p.date));
+      }
+      setExpandedGroups(newGroups);
       addToast({ type: 'success', message: `已导入 ${newPhotos.length} 张照片` });
     }
-  }, [addPhotos, addToast]);
+  }, [addPhotos, addToast, loadExifDate, expandedGroups]);
 
-  const handleFileSelect = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  // ── 按日期分组 ──
+  const groupedPhotos = useMemo(() => {
+    const groups = new Map<string, Photo[]>();
+    // Sort by date descending (newest first)
+    const sorted = [...photos].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      handleFiles(e.target.files);
-      e.target.value = '';
+    for (const photo of sorted) {
+      const key = formatGroupKey(photo.date);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(photo);
     }
+    return groups;
+  }, [photos]);
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Auto-expand newest group on mount
+  useEffect(() => {
+    if (groupedPhotos.size > 0 && expandedGroups.size === 0) {
+      setExpandedGroups(new Set([groupedPhotos.keys().next().value as string]));
+    }
+  }, [groupedPhotos, expandedGroups]);
+
+  const handleFileSelect = useCallback(() => fileInputRef.current?.click(), []);
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) { handleFiles(e.target.files); e.target.value = ''; }
   }, [handleFiles]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files) {
-      handleFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -70,173 +120,149 @@ export function PhotoPanel() {
     setIsDragOver(true);
   }, []);
 
-  const handleDragLeave = useCallback(() => {
-    setIsDragOver(false);
-  }, []);
-
-  const sortedPhotos = [...photos].sort((a, b) => {
-    if (sortBy === 'date') return b.date.localeCompare(a.date);
-    return a.name.localeCompare(b.name);
-  });
+  const handleDragLeave = useCallback(() => setIsDragOver(false), []);
 
   return (
-    <aside className="w-[var(--layout-panel-width)] bg-[var(--color-surface-panel)] border-r border-[var(--color-border)]
-                      flex flex-col shrink-0 overflow-hidden"
+    <div
+      className="flex flex-col h-full select-none"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-light)]">
-        <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">
-          照片 {photos.length > 0 && <span className="text-[var(--color-gray-400)] font-[400]">({photos.length})</span>}
-        </span>
-        <div className="flex items-center gap-2">
-          <select
-            className="text-[var(--text-caption)] text-[var(--color-gray-600)] bg-transparent border border-[var(--color-border)]
-                       rounded-[var(--radius-xs)] px-1.5 py-0.5 outline-none cursor-pointer"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'date' | 'name')}
-          >
-            <option value="date">按日期</option>
-            <option value="name">按名称</option>
-          </select>
-          <input
-            type="range"
-            className="w-14 h-1 accent-[var(--color-primary-600)]"
-            min="40" max={80} value={thumbSize}
-            onChange={(e) => setThumbSize(Number(e.target.value))}
-            title="缩略图大小"
-          />
+      {/* ── 上传区 ── */}
+      <div
+        className={`
+          mx-3 mt-3 mb-2 px-3 py-5 rounded-[var(--radius-md)] text-center cursor-pointer
+          border-2 border-dashed transition-all duration-150
+          ${isDragOver
+            ? 'border-[var(--color-primary-400)] bg-[var(--color-primary-50)]'
+            : 'border-[var(--color-border)] hover:border-[var(--color-primary-300)] hover:bg-[var(--color-gray-25)]'
+          }
+        `}
+        onClick={handleFileSelect}
+      >
+        <div className="flex justify-center mb-2">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-7 h-7 text-[var(--color-gray-400)]">
+            <rect x="3" y="3" width="26" height="26" rx="4" strokeDasharray="3 3" />
+            <circle cx="13" cy="12" r="2.5" fill="currentColor" stroke="none" />
+            <path d="M5 25l8-8 5 5 7-7 7 10" strokeLinecap="round" />
+          </svg>
         </div>
+        <p className="text-[var(--text-body-sm)] text-[var(--color-gray-600)] font-[500]">
+          拖拽或点击上传
+        </p>
+        <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">
+          支持JPG/PNG/HEIC等格式
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleInputChange}
+        />
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-3 py-3">
-        {sortedPhotos.length === 0 ? (
-          /* Empty state with drag zone */
-          <div
-            className={`
-              text-center py-10 px-3 rounded-[var(--radius-lg)]
-              border-2 border-dashed transition-colors duration-150
-              ${isDragOver
-                ? 'border-[var(--color-primary-400)] bg-[var(--color-primary-50)]'
-                : 'border-[var(--color-border)]'
-              }
-            `}
-          >
-            <div className="flex justify-center mb-3">
-              <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-10 h-10 text-[var(--color-gray-300)]">
-                <rect x="4" y="4" width="32" height="32" rx="4" strokeDasharray="3 3" />
-                <circle cx="17" cy="16" r="3" fill="currentColor" stroke="none" />
-                <path d="M6 30l10-10 6 6 8-8 10 12" strokeLinecap="round" />
-              </svg>
-            </div>
-            <p className="text-[var(--text-body-sm)] text-[var(--color-text-tertiary)]">
-              {isDragOver ? '释放以导入照片' : '拖拽照片到此处'}
+      {/* ── 标题区 ── */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-light)]">
+        <span className="text-[var(--text-h3)] font-[700] text-[var(--color-gray-800)]">照片</span>
+        <span className="text-[var(--text-body-sm)] text-[var(--color-gray-500)]">
+          总共{photos.length}张
+        </span>
+      </div>
+
+      {/* ── 照片列表（按日期分组） ── */}
+      <div className="flex-1 overflow-y-auto px-3 py-2">
+        {groupedPhotos.size === 0 ? (
+          <div className="flex flex-col items-center justify-center h-40 text-center">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-8 h-8 text-[var(--color-gray-300)] mb-2">
+              <rect x="4" y="4" width="32" height="32" rx="4" strokeDasharray="3 3" />
+              <circle cx="16" cy="15" r="2" fill="currentColor" stroke="none" />
+              <path d="M6 32l10-10 5 5 6-6 7 10" strokeLinecap="round" />
+            </svg>
+            <p className="text-[var(--text-body-sm)] text-[var(--color-gray-400)]">
+              暂无照片，点击上方导入
             </p>
-            <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-1">或</p>
-            <button
-              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--color-primary-600)] text-white
-                         border-none rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[500] cursor-pointer
-                         hover:bg-[var(--color-primary-700)] transition-colors"
-              onClick={handleFileSelect}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
-                <line x1="8" y1="2" x2="8" y2="14" /><line x1="2" y1="8" x2="14" y2="8" />
-              </svg>
-              导入照片
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleInputChange}
-            />
           </div>
         ) : (
-          /* Photo grid */
-          <>
-            {/* Add more button */}
-            <div className="mb-3">
-              <button
-                className="w-full py-2 flex items-center justify-center gap-1.5 border border-dashed border-[var(--color-border)]
-                           rounded-[var(--radius-md)] text-[var(--text-body-sm)] text-[var(--color-gray-500)]
-                           bg-transparent cursor-pointer hover:border-[var(--color-primary-400)] hover:text-[var(--color-primary-600)]
-                           transition-colors"
-                onClick={handleFileSelect}
-              >
-                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
-                  <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
-                </svg>
-                添加照片
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handleInputChange}
-              />
-            </div>
-
-            {/* Photo grid */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
-              {sortedPhotos.map((photo) => (
-                <div
-                  key={photo.id}
-                  className="group relative aspect-square bg-[var(--color-gray-100)] rounded-[var(--radius-md)]
-                             overflow-hidden border border-[var(--color-border)]
-                             hover:border-[var(--color-primary-400)] hover:shadow-[var(--shadow-card-hover)]
-                             transition-all duration-150 cursor-grab active:cursor-grabbing"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('text/plain', photo.id);
-                    e.dataTransfer.effectAllowed = 'copy';
-                  }}
+          Array.from(groupedPhotos.entries()).map(([key, groupPhotos]) => {
+            const isExpanded = expandedGroups.has(key);
+            const [year, month] = key.split('-');
+            return (
+              <div key={key} className="mb-3">
+                {/* Group header */}
+                <button
+                  className="flex items-center gap-1.5 w-full text-left px-0.5 py-1.5 border-none bg-transparent cursor-pointer group"
+                  onClick={() => toggleGroup(key)}
                 >
-                  <img
-                    src={photo.src}
-                    alt={photo.name}
-                    className="w-full h-full object-cover"
-                    draggable={false}
-                  />
+                  <svg
+                    viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                    className={`w-2.5 h-2.5 text-[var(--color-gray-500)] transition-transform duration-150 ${isExpanded ? '' : '-rotate-90'}`}
+                  >
+                    <path d="M3 2l4 3-4 3" />
+                  </svg>
+                  <span className="text-[var(--text-body-sm)] font-[600] text-[var(--color-gray-700)]">
+                    {year}年{month}月
+                  </span>
+                  <span className="text-[var(--text-caption)] text-[var(--color-gray-400)]">
+                    {groupPhotos.length}张
+                  </span>
+                </button>
 
-                  {/* Overlay on hover */}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end justify-end p-1">
-                    <button
-                      className="w-5 h-5 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100
-                                 text-white hover:bg-[var(--color-error)] transition-all"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removePhoto(photo.id);
-                      }}
-                      title="删除照片"
-                    >
-                      <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-2.5 h-2.5">
-                        <line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" />
-                      </svg>
-                    </button>
+                {/* Photo grid when expanded */}
+                {isExpanded && (
+                  <div className="grid grid-cols-3 gap-1.5 mt-1">
+                    {groupPhotos.map((photo) => (
+                      <div
+                        key={photo.id}
+                        className="group/thumb relative aspect-square bg-[var(--color-gray-100)] rounded-[var(--radius-sm)]
+                                   overflow-hidden border border-[var(--color-border-light)]
+                                   hover:border-[var(--color-primary-400)] hover:shadow-[var(--shadow-card-hover)]
+                                   transition-all duration-150 cursor-grab active:cursor-grabbing"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', photo.id);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                      >
+                        <img
+                          src={photo.src}
+                          alt={photo.name}
+                          className="w-full h-full object-cover"
+                          draggable={false}
+                        />
+                        {/* Delete overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/15 transition-colors flex items-start justify-end p-0.5">
+                          <button
+                            className="w-4 h-4 flex items-center justify-center rounded-full bg-black/40 opacity-0 group-hover/thumb:opacity-100
+                                       text-white hover:bg-[var(--color-error)] transition-all text-[8px]"
+                            onClick={(e) => { e.stopPropagation(); removePhoto(photo.id); }}
+                            title="删除照片"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-
-                  {/* Photo name tooltip */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-[var(--text-nano)] text-white truncate block">{photo.name}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
-/** Load image and return its natural dimensions */
+/** Get the formatted date group key: "YYYY-MM" */
+function formatGroupKey(isoDate: string): string {
+  const d = new Date(isoDate);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Load image dimensions */
 function loadImageDimensions(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new window.Image();
