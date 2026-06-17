@@ -95,6 +95,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     mode: 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br' | 'resize-l' | 'resize-r' | 'resize-t' | 'resize-b' | null;
     idx: number;
     sx: number; sy: number;
+    mx: number; my: number;     // 鼠标按下时的位置
     startX: number; startY: number;
   } | null>(null);
 
@@ -107,21 +108,20 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       setSlots(editTemplate.slots.map((s) => ({ ...s })));
     } else {
       setName('');
-      setSlots(genSlots('2x2', margin, gap, 3, 3));
+      setSlots(genSlots(selectedPreset, margin, gap, customRows, customCols));
     }
     setSelectedIdx(null);
-    setSelectedPreset('2x2');
+    // 不重置 selectedPreset，保留当前选中状态
   }, [editTemplate?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedPreset, setSelectedPreset] = useState<LayoutPresetId>('2x2');
   const isCustomRC = selectedPreset === 'custom-rc';
 
-  // 预设切换 → 重新生成
+  // 预设切换 → 重新生成（创建和编辑模式都生效）
   useEffect(() => {
-    if (isEditing) return;
     setSlots(genSlots(selectedPreset, margin, gap, customRows, customCols));
     setSelectedIdx(null);
-  }, [selectedPreset, margin, gap, customRows, customCols, isEditing]);
+  }, [selectedPreset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Canvas 坐标转换 ── */
   const getPct = useCallback((clientX: number, clientY: number) => {
@@ -141,11 +141,15 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     const p = getPct(e.clientX, e.clientY);
     const s = slotsRef.current[idx];
     if (!s) return;
-    dragRef.current = { mode: mode as any, idx, sx: s.x, sy: s.y, startX: s.x + s.width, startY: s.y + s.height, ...p };
-    dragRef.current.sx = s.x;
-    dragRef.current.sy = s.y;
-    dragRef.current.startX = s.x + s.width;
-    dragRef.current.startY = s.y + s.height;
+    // 记录鼠标点击位置和槽位起始位置（用于计算 dx/dy）
+    dragRef.current = {
+      mode: mode as any,
+      idx,
+      sx: s.x, sy: s.y,
+      mx: p.x, my: p.y,           // 鼠标按下时的位置
+      startX: s.x + s.width,      // 右下角（缩放用）
+      startY: s.y + s.height,
+    };
   }, [getPct]);
 
   /* ── 全局鼠标事件：移动 + 抬起 ── */
@@ -155,8 +159,9 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       if (!dr) return;
       const p = getPct(e.clientX, e.clientY);
       const M = marginRef.current;
-      const dx = p.x - dr.sx;
-      const dy = p.y - dr.sy;
+      // dx/dy 相对于鼠标按下的位置，不是槽位位置
+      const dx = p.x - dr.mx;
+      const dy = p.y - dr.my;
 
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
@@ -166,16 +171,14 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         if (dr.mode === 'move') {
           let nx = dr.sx + dx;
           let ny = dr.sy + dy;
-          // 边界限制
+          // 边界限制（不吸附，避免拖拽漂移）
           nx = Math.max(M, Math.min(100 - M - slot.width, nx));
           ny = Math.max(M, Math.min(100 - M - slot.height, ny));
-          // 网格吸附
-          slot.x = snap(nx);
-          slot.y = snap(ny);
+          slot.x = nx;
+          slot.y = ny;
         } else {
-          // 缩放 — 基于第一次点击时的起始值计算
+          // 缩放
           let { x: ox, y: oy, width: ow, height: oh } = prev[dr.idx];
-          // 用 dr.startX/dr.startY 作为右下角起始位置
           let nw = ow, nh = oh, nx = ox, ny = oy;
           if (dr.mode?.includes('r')) nw = Math.max(MIN_SLOT, dr.startX - ox + dx);
           if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = ox + (ow - nw); }
@@ -188,17 +191,35 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           if (ny + nh > 100 - M) { nh = 100 - M - ny; }
           nw = Math.max(MIN_SLOT, nw);
           nh = Math.max(MIN_SLOT, nh);
-          // 网格吸附
-          slot.x = snap(nx);
-          slot.y = snap(ny);
-          slot.width = snap(nw);
-          slot.height = snap(nh);
+          slot.x = nx;
+          slot.y = ny;
+          slot.width = nw;
+          slot.height = nh;
         }
         return next;
       });
     };
 
-    const onUp = () => { dragRef.current = null; };
+    const onUp = () => {
+      // 抬起时吸附到网格
+      if (dragRef.current) {
+        const dr = dragRef.current;
+        setSlots((prev) => {
+          if (!snapToGrid) return prev;
+          const next = prev.map((s) => ({ ...s }));
+          const slot = next[dr.idx];
+          if (!slot) return prev;
+          slot.x = Math.round(slot.x / GRID) * GRID;
+          slot.y = Math.round(slot.y / GRID) * GRID;
+          if (dr.mode !== 'move') {
+            slot.width = Math.max(MIN_SLOT, Math.round(slot.width / GRID) * GRID);
+            slot.height = Math.max(MIN_SLOT, Math.round(slot.height / GRID) * GRID);
+          }
+          return next;
+        });
+      }
+      dragRef.current = null;
+    };
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
