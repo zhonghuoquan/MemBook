@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
 import { CreateDialog } from './../home/CreateDialog';
-import { useEditorStore, usePhotoStore } from '../../store';
+import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
 import { createAndSaveProject, savePhotos } from '../../db';
 import { TEMPLATES, PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import type { AlbumSize, AlbumPage, AlbumProject, PageMargin } from '../../types';
@@ -31,6 +31,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
   const setPages = useEditorStore((s) => s.setPages);
   const setAlbumSize = useEditorStore((s) => s.setAlbumSize);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
+  const setStorageMode = useUIStore((s) => s.setStorageMode);
 
   const loadDemoAndNavigate = async () => {
     const demo = getDemoProject();
@@ -56,6 +57,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPhotos([]);
     await savePhotos([]);
     await createAndSaveProject(_name || '未命名相册', _size, [blankPage], _margin);
+    setStorageMode(null);  // 重置存储偏好，下次导入时重新选择
     onNavigateToEditor();
   };
 
@@ -78,6 +80,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPhotos([]);
     await savePhotos([]);
     await createAndSaveProject(name || '未命名相册', size, [page], { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT });
+    setStorageMode(null);  // 重置存储偏好，下次导入时重新选择
     onNavigateToEditor();
   };
 

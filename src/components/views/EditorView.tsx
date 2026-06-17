@@ -65,18 +65,21 @@ export function EditorView({ onBack }: EditorViewProps) {
   }, [pages]);
 
   // ── 页面离开/返回主页时强制保存 ──
-  const handleBack = () => {
-    // 立即保存
+  const handleBack = async () => {
+    // 立即保存（await 确保数据写完后才切回主页）
     const currentPages = useEditorStore.getState().pages;
     const currentPhotos = usePhotoStore.getState().photos;
     const projectId = localStorage.getItem(SAVED_PROJECT_KEY);
     if (projectId && currentPages.length > 0) {
-      loadProject(projectId).then((existing) => {
+      try {
+        const existing = await loadProject(projectId);
         if (existing) {
-          saveProject({ ...existing, pages: currentPages, updatedAt: new Date().toISOString() });
+          await saveProject({ ...existing, pages: currentPages, updatedAt: new Date().toISOString() });
         }
-      });
-      savePhotos(currentPhotos);
+        await savePhotos(currentPhotos);
+      } catch (e) {
+        console.error('保存失败:', e);
+      }
     }
     onBack?.();
   };

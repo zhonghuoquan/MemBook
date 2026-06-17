@@ -13,6 +13,7 @@ import type { AlbumProject, Photo } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import { EmptyState } from './EmptyState';
 import { PageThumbnail } from './PageThumbnail';
+import { makeDirectPhotoUrl } from '../../engine/storage-engine';
 
 interface ProjectGridProps {
   onOpenProject?: (project: AlbumProject) => void;
@@ -39,7 +40,21 @@ export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
       listProjects(),
       loadPhotos(),
     ])
-      .then(([projects, photos]) => { setProjects(projects); setAllPhotos(photos); setLoaded(true); })
+      .then(async ([projects, photos]) => {
+        // direct 模式照片的 src 只是文件名，需要转成 blob URL 才能展示
+        const processed = await Promise.all(
+          photos.map(async (photo) => {
+            if (photo.storageMode === 'direct') {
+              const url = await makeDirectPhotoUrl(photo);
+              if (url) return { ...photo, src: url };
+            }
+            return photo;
+          })
+        );
+        setProjects(projects);
+        setAllPhotos(processed);
+        setLoaded(true);
+      })
       .catch(() => { setLoaded(true); });
   }, []);
 

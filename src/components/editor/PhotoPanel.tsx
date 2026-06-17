@@ -293,10 +293,11 @@ export function PhotoPanel() {
                     <div className="grid grid-cols-3 gap-1.5 mt-1">
                       {groupPhotos.map((photo) => (
                         <div key={photo.id}
-                          className="group/thumb relative aspect-square bg-[var(--color-gray-100)] rounded-[var(--radius-sm)]
+                          className="group/thumb relative bg-[var(--color-gray-100)] rounded-[var(--radius-sm)]
                                      overflow-hidden border border-[var(--color-border-light)]
                                      hover:border-[var(--color-primary-400)] hover:shadow-[var(--shadow-card-hover)]
                                      transition-all duration-150 cursor-grab active:cursor-grabbing"
+                          style={{ aspectRatio: photo.width / photo.height }}
                           draggable
                           onDragStart={(e) => {
                             e.dataTransfer.setData('text/plain', photo.id);
