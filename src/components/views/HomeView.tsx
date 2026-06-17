@@ -3,7 +3,7 @@ import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
 import { CreateDialog } from './../home/CreateDialog';
 import { useEditorStore, usePhotoStore } from '../../store';
-import { createAndSaveProject } from '../../db';
+import { createAndSaveProject, savePhotos } from '../../db';
 import { TEMPLATES, PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import type { AlbumSize, AlbumPage, AlbumProject, PageMargin } from '../../types';
 import type { HomeTab } from '../../types';
@@ -37,6 +37,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPages(demo.pages);
     setAlbumSize(demo.size);
     setPhotos(getDemoPhotos());
+    await savePhotos(getDemoPhotos());
     // 保存到 IndexedDB，刷新不丢失
     await createAndSaveProject('我的旅行回忆', demo.size, demo.pages, demo.margin);
     onNavigateToEditor();
@@ -53,6 +54,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPages([blankPage]);
     setAlbumSize(_size);
     setPhotos([]);
+    await savePhotos([]);
     await createAndSaveProject(_name || '未命名相册', _size, [blankPage], _margin);
     onNavigateToEditor();
   };
@@ -74,6 +76,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPages([page]);
     setAlbumSize(size);
     setPhotos([]);
+    await savePhotos([]);
     await createAndSaveProject(name || '未命名相册', size, [page], { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT });
     onNavigateToEditor();
   };

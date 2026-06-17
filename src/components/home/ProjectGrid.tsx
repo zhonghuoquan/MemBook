@@ -8,11 +8,11 @@ import {
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { listProjects, saveProject, deleteProject } from '../../db';
-import type { AlbumProject } from '../../types';
+import { listProjects, saveProject, deleteProject, loadPhotos } from '../../db';
+import type { AlbumProject, Photo } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import { EmptyState } from './EmptyState';
-import { templatePreview } from '../../utils/templatePreview';
+import { PageThumbnail } from './PageThumbnail';
 
 interface ProjectGridProps {
   onOpenProject?: (project: AlbumProject) => void;
@@ -21,6 +21,7 @@ interface ProjectGridProps {
 
 export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
   const [projects, setProjects] = useState<AlbumProject[]>([]);
+  const [allPhotos, setAllPhotos] = useState<Photo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -34,8 +35,11 @@ export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
 
   const load = useCallback(() => {
     setLoaded(false);
-    listProjects()
-      .then((data) => { setProjects(data); setLoaded(true); })
+    Promise.all([
+      listProjects(),
+      loadPhotos(),
+    ])
+      .then(([projects, photos]) => { setProjects(projects); setAllPhotos(photos); setLoaded(true); })
       .catch(() => { setLoaded(true); });
   }, []);
 
@@ -232,6 +236,7 @@ export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
                   <SortableCard
                     key={proj.id}
                     proj={proj}
+                    photos={allPhotos}
                     isDemo={isDemo}
                     isSortable={!isDemo && isReal}
                     editingId={editingId}
@@ -260,12 +265,13 @@ export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
 
 /* ── Sortable Card ── */
 function SortableCard({
-  proj, isDemo, isSortable,
+  proj, photos, isDemo, isSortable,
   editingId, editName, menuOpenId, inputRef,
   onOpen, onStartRename, onConfirmRename, onRenameKeyDown, onEditNameChange,
   onDelete, onDuplicate, onToggleMenu, onCloseMenu,
 }: {
   proj: AlbumProject;
+  photos: Photo[];
   isDemo: boolean;
   isSortable: boolean;
   editingId: string | null;
@@ -326,7 +332,7 @@ function SortableCard({
 
         <div className="w-full h-full relative">
           {proj.pages && proj.pages.length > 0 ? (
-            templatePreview(proj.pages[0].templateId)
+            <PageThumbnail page={proj.pages[0]} photos={photos} />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-[var(--color-gray-50)]">
               <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-8 h-8 text-[var(--color-gray-300)]">
