@@ -88,7 +88,7 @@ interface EditorState {
   setPages: (pages: AlbumPage[]) => void;
   setAlbumSize: (size: AlbumSize) => void;
   updatePageBackground: (index: number, color: string) => void;
-  setPageTemplate: (pageIndex: number, templateId: string) => void;
+  setPageTemplate: (pageIndex: number, templateId: string, preservePhotoIds?: string[]) => void;
   placePhoto: (pageIndex: number, slotId: string, photoId: string) => void;
   removePhotoFromSlot: (pageIndex: number, slotId: string) => void;
   /* 照片编辑 */
@@ -192,20 +192,55 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return { pages: newPages };
     });
   },
-  setPageTemplate: (pageIndex, templateId) => {
+  setPageTemplate: (pageIndex, templateId, preservePhotoIds) => {
     pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
       const template = TEMPLATES.find((t) => t.id === templateId);
       if (!template) return s;
-      newPages[pageIndex] = {
-        ...newPages[pageIndex],
-        templateId,
-        placements: template.slots.map((slot) => ({
+
+      const currentPage = newPages[pageIndex];
+
+      // 获取已有照片的有序 ID 列表（已填充的非空槽位）
+      const currentFilled = currentPage.placements
+        .filter((p) => p.photoId !== null)
+        .map((p) => p.photoId as string);
+
+      // 当调用方指定了保留照片列表时使用它，否则使用当前已填充的照片
+      const photoIds = preservePhotoIds ?? currentFilled;
+
+      // 构建 photoId → oldPlacement 查找表（保留编辑数据）
+      const oldPlacementMap = new Map(
+        currentPage.placements
+          .filter((p) => p.photoId !== null)
+          .map((p) => [p.photoId as string, p])
+      );
+
+      // 智能迁移：按序填充新模板的槽位
+      const newPlacements = template.slots.map((slot, i) => {
+        const photoId = i < photoIds.length ? photoIds[i] : null;
+        const old = photoId ? oldPlacementMap.get(photoId) : undefined;
+        return {
           slotId: slot.id,
-          photoId: null,
-        })),
+          photoId: photoId ?? null,
+          ...(old
+            ? {
+                crop: old.crop,
+                rotation: old.rotation,
+                flipH: old.flipH,
+                flipV: old.flipV,
+                adjustments: old.adjustments,
+                filter: old.filter,
+              }
+            : {}),
+        };
+      });
+
+      newPages[pageIndex] = {
+        ...currentPage,
+        templateId,
+        placements: newPlacements,
       };
       return { pages: newPages };
     });

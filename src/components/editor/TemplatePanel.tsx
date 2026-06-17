@@ -1,20 +1,68 @@
-import { useEditorStore, useUIStore } from '../../store';
+import { useState, useCallback } from 'react';
+import { useEditorStore, useUIStore, usePhotoStore } from '../../store';
 import { TEMPLATES } from '../../types';
+import { TemplateSwitchDialog } from './TemplateSwitchDialog';
 
 export function TemplatePanel() {
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const pages = useEditorStore((s) => s.pages);
   const setPageTemplate = useEditorStore((s) => s.setPageTemplate);
   const addToast = useUIStore((s) => s.addToast);
+  const photos = usePhotoStore((s) => s.photos);
 
-  const handleSelect = (templateId: string) => {
+  // 模板切换弹窗状态
+  const [switchDialog, setSwitchDialog] = useState<{
+    targetTemplateId: string;
+    filledPhotos: { id: string; src: string; name: string }[];
+  } | null>(null);
+
+  const currentPage = pages[currentPageIndex];
+
+  const handleSelect = useCallback((templateId: string) => {
     if (pages.length === 0) {
       addToast({ type: 'info', message: '请先创建相册页面' });
       return;
     }
-    setPageTemplate(currentPageIndex, templateId);
-    addToast({ type: 'success', message: '模板已应用' });
-  };
+
+    const page = pages[currentPageIndex];
+    if (!page) return;
+
+    // 获取已填充的照片
+    const filledPlacements = page.placements.filter((p) => p.photoId !== null);
+    const N = filledPlacements.length;
+    const targetTemplate = TEMPLATES.find((t) => t.id === templateId);
+    if (!targetTemplate) return;
+    const M = targetTemplate.slots.length;
+
+    if (N > M) {
+      // 场景 2：新模板更少 → 弹出选择对话框
+      const filledPhotoList = filledPlacements
+        .map((p) => {
+          const photo = photos.find((ph) => ph.id === p.photoId);
+          return photo ? { id: photo.id, src: photo.src, name: photo.name } : null;
+        })
+        .filter(Boolean) as { id: string; src: string; name: string }[];
+
+      setSwitchDialog({ targetTemplateId: templateId, filledPhotos: filledPhotoList });
+    } else {
+      // 场景 1 & 3：N ≤ M → 直接切换，已有照片按序迁移
+      setPageTemplate(currentPageIndex, templateId);
+      addToast({ type: 'success', message: `已切换至「${targetTemplate.name}」` });
+    }
+  }, [pages, currentPageIndex, setPageTemplate, addToast, photos]);
+
+  const handleSwitchConfirm = useCallback((selectedIds: string[]) => {
+    if (switchDialog) {
+      setPageTemplate(currentPageIndex, switchDialog.targetTemplateId, selectedIds);
+      const targetTemplate = TEMPLATES.find((t) => t.id === switchDialog.targetTemplateId);
+      addToast({ type: 'success', message: `已切换至「${targetTemplate?.name}」` });
+    }
+    setSwitchDialog(null);
+  }, [switchDialog, currentPageIndex, setPageTemplate, addToast]);
+
+  const handleSwitchCancel = useCallback(() => {
+    setSwitchDialog(null);
+  }, []);
 
   const classicTemplates = TEMPLATES.filter((t) => t.category === 'classic');
   const creativeTemplates = TEMPLATES.filter((t) => t.category === 'creative');
@@ -43,6 +91,21 @@ export function TemplatePanel() {
           onSelect={handleSelect}
         />
       </div>
+
+      {/* 模板切换选择对话框（N > M） */}
+      {switchDialog && currentPage && (
+        <TemplateSwitchDialog
+          open
+          currentPage={currentPage}
+          targetTemplateId={switchDialog.targetTemplateId}
+          filledPhotos={switchDialog.filledPhotos.map((fp) => {
+            const full = photos.find((p) => p.id === fp.id);
+            return full || { ...fp, date: '', width: 0, height: 0, orientation: 'square' as const };
+          })}
+          onConfirm={handleSwitchConfirm}
+          onCancel={handleSwitchCancel}
+        />
+      )}
     </aside>
   );
 }
