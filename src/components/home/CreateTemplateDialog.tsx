@@ -11,91 +11,81 @@ interface CreateTemplateDialogProps {
   editTemplate?: { id: string; name: string; slots: SlotLayout[] } | null;
 }
 
-/* ── Layout presets ── */
-type LayoutPresetId = '2x2' | '2x3' | '3x3' | '4x4' | 'pin-2' | 'pin-3' | 'stagger-4' | 'custom-rc';
-
-const LAYOUT_PRESETS: { id: LayoutPresetId; label: string }[] = [
-  { id: '2x2', label: '2×2' }, { id: '2x3', label: '2×3' },
-  { id: '3x3', label: '3×3' }, { id: '4x4', label: '4×4' },
-  { id: 'pin-2', label: '品2' }, { id: 'pin-3', label: '品3' },
-  { id: 'stagger-4', label: '错落' }, { id: 'custom-rc', label: 'R×C' },
-];
+/* ── 内置间距（已移除间距滑块，固定为 1.5%） ── */
+const G = 1.5;
 
 /* ── Slot generators ── */
-function genGrid(rows: number, cols: number, m: number, g: number): SlotLayout[] {
-  const sw = (100 - 2 * m - (cols - 1) * g) / cols;
-  const sh = (100 - 2 * m - (rows - 1) * g) / rows;
+function genGrid(rows: number, cols: number, m: number): SlotLayout[] {
+  const sw = (100 - 2 * m - (cols - 1) * G) / cols;
+  const sh = (100 - 2 * m - (rows - 1) * G) / rows;
   return Array.from({ length: rows * cols }, (_, i) => {
     const r = Math.floor(i / cols), c = i % cols;
-    return { id: `slot_${i}`, x: +(m + c * (sw + g)).toFixed(1), y: +(m + r * (sh + g)).toFixed(1), width: +sw.toFixed(1), height: +sh.toFixed(1) };
+    return { id: `slot_${i}`, x: +(m + c * (sw + G)).toFixed(1), y: +(m + r * (sh + G)).toFixed(1), width: +sw.toFixed(1), height: +sh.toFixed(1) };
   });
 }
-function genPin2(m: number, g: number): SlotLayout[] {
-  const w = 100 - 2 * m, th = (100 - 2 * m - g) * 0.55, bh = (100 - 2 * m - g) * 0.45, sw = (w - g) / 2;
+function genPin2(m: number): SlotLayout[] {
+  const w = 100 - 2 * m, th = (100 - 2 * m - G) * 0.55, bh = (100 - 2 * m - G) * 0.45, sw = (w - G) / 2;
   return [
     { id: 'slot_0', x: m, y: m, width: +w.toFixed(1), height: +th.toFixed(1) },
-    { id: 'slot_1', x: m, y: +(m + th + g).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
-    { id: 'slot_2', x: +(m + sw + g).toFixed(1), y: +(m + th + g).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
+    { id: 'slot_1', x: m, y: +(m + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
+    { id: 'slot_2', x: +(m + sw + G).toFixed(1), y: +(m + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
   ];
 }
-function genPin3(m: number, g: number): SlotLayout[] {
-  const lw = (100 - 2 * m - g) * 0.55, rw = (100 - 2 * m - g) * 0.45, h = (100 - 2 * m - g) / 2;
+function genPin3(m: number): SlotLayout[] {
+  const lw = (100 - 2 * m - G) * 0.55, rw = (100 - 2 * m - G) * 0.45, h = (100 - 2 * m - G) / 2;
   return [
     { id: 'slot_0', x: m, y: m, width: +lw.toFixed(1), height: +(100 - 2 * m).toFixed(1) },
-    { id: 'slot_1', x: +(m + lw + g).toFixed(1), y: m, width: +rw.toFixed(1), height: +h.toFixed(1) },
-    { id: 'slot_2', x: +(m + lw + g).toFixed(1), y: +(m + h + g).toFixed(1), width: +rw.toFixed(1), height: +h.toFixed(1) },
+    { id: 'slot_1', x: +(m + lw + G).toFixed(1), y: m, width: +rw.toFixed(1), height: +h.toFixed(1) },
+    { id: 'slot_2', x: +(m + lw + G).toFixed(1), y: +(m + h + G).toFixed(1), width: +rw.toFixed(1), height: +h.toFixed(1) },
   ];
 }
-function genStagger(m: number, g: number): SlotLayout[] {
-  const bw = (100 - 2 * m - g) * 0.55, sw = (100 - 2 * m - g) * 0.45, srh = (100 - 2 * m - g * 2) / 3, bh = srh * 2 + g;
+function genStagger(m: number): SlotLayout[] {
+  const bw = (100 - 2 * m - G) * 0.55, sw = (100 - 2 * m - G) * 0.45, srh = (100 - 2 * m - G * 2) / 3, bh = srh * 2 + G;
   return [
     { id: 'slot_0', x: m, y: m, width: +bw.toFixed(1), height: +bh.toFixed(1) },
-    { id: 'slot_1', x: +(m + bw + g).toFixed(1), y: m, width: +sw.toFixed(1), height: +srh.toFixed(1) },
-    { id: 'slot_2', x: +(m + bw + g).toFixed(1), y: +(m + srh + g).toFixed(1), width: +sw.toFixed(1), height: +srh.toFixed(1) },
-    { id: 'slot_3', x: m, y: +(m + bh + g).toFixed(1), width: +(bw + g + sw).toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_1', x: +(m + bw + G).toFixed(1), y: m, width: +sw.toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_2', x: +(m + bw + G).toFixed(1), y: +(m + srh + G).toFixed(1), width: +sw.toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_3', x: m, y: +(m + bh + G).toFixed(1), width: +(bw + G + sw).toFixed(1), height: +srh.toFixed(1) },
   ];
 }
-function genSlots(preset: LayoutPresetId, m: number, g: number, r: number, c: number): SlotLayout[] {
+function genSlots(preset: string, m: number, r: number, c: number): SlotLayout[] {
   switch (preset) {
-    case '2x2': return genGrid(2, 2, m, g);
-    case '2x3': return genGrid(2, 3, m, g);
-    case '3x3': return genGrid(3, 3, m, g);
-    case '4x4': return genGrid(4, 4, m, g);
-    case 'pin-2': return genPin2(m, g);
-    case 'pin-3': return genPin3(m, g);
-    case 'stagger-4': return genStagger(m, g);
-    case 'custom-rc': return genGrid(Math.max(1, r), Math.max(1, c), m, g);
+    case '2x2': return genGrid(2, 2, m);
+    case '2x3': return genGrid(2, 3, m);
+    case '3x3': return genGrid(3, 3, m);
+    case '4x4': return genGrid(4, 4, m);
+    case '5x5': return genGrid(5, 5, m);
+    case 'pin-2': return genPin2(m);
+    case 'pin-3': return genPin3(m);
+    case 'stagger-4': return genStagger(m);
+    default: return genGrid(Math.max(1, r), Math.max(1, c), m);
   }
 }
 
-const GRID = 5;        // 吸附网格步进(%)
-const MIN_SLOT = 5;    // 最小槽位尺寸(%)
+const GRID = 5;
+const MIN_SLOT = 5;
 
 export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const isEditing = !!editTemplate;
   const [name, setName] = useState('');
   const [margin, setMargin] = useState(10);
-  const [gap, setGap] = useState(4);
-  const [customRows, setCustomRows] = useState(3);
-  const [customCols, setCustomCols] = useState(3);
+  const [rows, setRows] = useState(3);
+  const [cols, setCols] = useState(3);
   const [slots, setSlots] = useState<SlotLayout[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [preset, setPreset] = useState('2x2');
 
-  // Refs 保持最新值，解决闭包过期
   const marginRef = useRef(margin);
   marginRef.current = margin;
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
 
-  // Canvas + 拖拽
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
-    mode: 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br' | 'resize-l' | 'resize-r' | 'resize-t' | 'resize-b' | null;
-    idx: number;
-    sx: number; sy: number;
-    mx: number; my: number;     // 鼠标按下时的位置
+    mode: string | null; idx: number;
+    sx: number; sy: number; mx: number; my: number;
     startX: number; startY: number;
   } | null>(null);
 
@@ -108,32 +98,25 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       setSlots(editTemplate.slots.map((s) => ({ ...s })));
     } else {
       setName('');
-      setSlots(genSlots(selectedPreset, margin, gap, customRows, customCols));
+      setSlots(genSlots('2x2', margin, 3, 3));
     }
     setSelectedIdx(null);
-    // 不重置 selectedPreset，保留当前选中状态
-  }, [editTemplate?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editTemplate?.id]); // eslint-disable-line
 
-  const [selectedPreset, setSelectedPreset] = useState<LayoutPresetId>('2x2');
-  const isCustomRC = selectedPreset === 'custom-rc';
-
-  // 预设切换 → 重新生成（创建和编辑模式都生效）
+  /* ── 预设/边距/行列变化 → 重新生成网格 ── */
   useEffect(() => {
-    setSlots(genSlots(selectedPreset, margin, gap, customRows, customCols));
+    setSlots(genSlots(preset, margin, rows, cols));
     setSelectedIdx(null);
-  }, [selectedPreset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [preset, margin, rows, cols]);
 
-  /* ── Canvas 坐标转换 ── */
+  /* ── 画布坐标 ── */
   const getPct = useCallback((clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
-    return {
-      x: ((clientX - rect.left) / rect.width) * 100,
-      y: ((clientY - rect.top) / rect.height) * 100,
-    };
+    return { x: ((clientX - rect.left) / rect.width) * 100, y: ((clientY - rect.top) / rect.height) * 100 };
   }, []);
 
-  /* ── 拖拽开始 ── */
+  /* ── 拖拽 ── */
   const onDragStart = useCallback((e: React.MouseEvent, idx: number, mode: string) => {
     e.stopPropagation();
     if (mode !== 'move') e.preventDefault();
@@ -141,67 +124,42 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     const p = getPct(e.clientX, e.clientY);
     const s = slotsRef.current[idx];
     if (!s) return;
-    // 记录鼠标点击位置和槽位起始位置（用于计算 dx/dy）
-    dragRef.current = {
-      mode: mode as any,
-      idx,
-      sx: s.x, sy: s.y,
-      mx: p.x, my: p.y,           // 鼠标按下时的位置
-      startX: s.x + s.width,      // 右下角（缩放用）
-      startY: s.y + s.height,
-    };
+    dragRef.current = { mode, idx, sx: s.x, sy: s.y, mx: p.x, my: p.y, startX: s.x + s.width, startY: s.y + s.height };
   }, [getPct]);
 
-  /* ── 全局鼠标事件：移动 + 抬起 ── */
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const dr = dragRef.current;
       if (!dr) return;
       const p = getPct(e.clientX, e.clientY);
       const M = marginRef.current;
-      // dx/dy 相对于鼠标按下的位置，不是槽位位置
-      const dx = p.x - dr.mx;
-      const dy = p.y - dr.my;
-
+      const dx = p.x - dr.mx, dy = p.y - dr.my;
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
         const slot = next[dr.idx];
         if (!slot) return prev;
-
         if (dr.mode === 'move') {
-          let nx = dr.sx + dx;
-          let ny = dr.sy + dy;
-          // 边界限制（不吸附，避免拖拽漂移）
-          nx = Math.max(M, Math.min(100 - M - slot.width, nx));
-          ny = Math.max(M, Math.min(100 - M - slot.height, ny));
-          slot.x = nx;
-          slot.y = ny;
+          slot.x = Math.max(M, Math.min(100 - M - slot.width, dr.sx + dx));
+          slot.y = Math.max(M, Math.min(100 - M - slot.height, dr.sy + dy));
         } else {
-          // 缩放
           let { x: ox, y: oy, width: ow, height: oh } = prev[dr.idx];
           let nw = ow, nh = oh, nx = ox, ny = oy;
           if (dr.mode?.includes('r')) nw = Math.max(MIN_SLOT, dr.startX - ox + dx);
           if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = ox + (ow - nw); }
           if (dr.mode?.includes('b')) nh = Math.max(MIN_SLOT, dr.startY - oy + dy);
           if (dr.mode?.includes('t')) { nh = Math.max(MIN_SLOT, oh - dy); ny = oy + (oh - nh); }
-          // 边界约束
           if (nx < M) { nw -= (M - nx); nx = M; }
           if (ny < M) { nh -= (M - ny); ny = M; }
           if (nx + nw > 100 - M) { nw = 100 - M - nx; }
           if (ny + nh > 100 - M) { nh = 100 - M - ny; }
-          nw = Math.max(MIN_SLOT, nw);
-          nh = Math.max(MIN_SLOT, nh);
-          slot.x = nx;
-          slot.y = ny;
-          slot.width = nw;
-          slot.height = nh;
+          slot.x = nx; slot.y = ny;
+          slot.width = Math.max(MIN_SLOT, nw);
+          slot.height = Math.max(MIN_SLOT, nh);
         }
         return next;
       });
     };
-
     const onUp = () => {
-      // 抬起时吸附到网格
       if (dragRef.current) {
         const dr = dragRef.current;
         setSlots((prev) => {
@@ -220,26 +178,14 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       }
       dragRef.current = null;
     };
-
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [getPct, snapToGrid]);
 
   /* ── 操作 ── */
-  const addPhotoSlot = () => {
-    setSlots((prev) => {
-      const n = prev.length;
-      const ref = prev[0] || { width: 30, height: 40 };
-      return [...prev, { id: `slot_${n}`, x: snap(Math.max(marginRef.current, 3)), y: snap(Math.max(marginRef.current, 3)), width: snap(ref.width), height: snap(ref.height) }];
-    });
-  };
-  const addTextZone = () => {
-    setSlots((prev) => [...prev, { id: `text_${prev.length}`, x: snap(10), y: snap(80), width: snap(80), height: snap(12) }]);
-  };
+  const addPhotoSlot = () => setSlots((prev) => [...prev, { id: `slot_${prev.length}`, x: snap(Math.max(marginRef.current, 3)), y: snap(Math.max(marginRef.current, 3)), width: 25, height: 25 }]);
+  const addTextZone = () => setSlots((prev) => [...prev, { id: `text_${prev.length}`, x: snap(10), y: snap(80), width: snap(80), height: snap(12) }]);
   const removeSelectedSlot = () => {
     if (selectedIdx === null) return;
     setSlots((prev) => prev.filter((_, i) => i !== selectedIdx).map((s, i) => ({ ...s, id: s.id.startsWith('text_') ? `text_${i}` : `slot_${i}` })));
@@ -255,7 +201,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     setSlots((prev) => { const n = [...prev]; [n[selectedIdx], n[selectedIdx + 1]] = [n[selectedIdx + 1], n[selectedIdx]]; return n; });
     setSelectedIdx(selectedIdx + 1);
   };
-
   const updateSlot = useCallback((idx: number, patch: Partial<SlotLayout>) => {
     setSlots((prev) => { const n = [...prev]; n[idx] = { ...n[idx], ...patch }; return n; });
   }, []);
@@ -263,7 +208,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   const photoCount = slots.filter((s) => s.id.startsWith('slot_')).length;
   const textCount = slots.filter((s) => s.id.startsWith('text_')).length;
 
-  /* ── 保存 ── */
   const handleSave = async () => {
     if (photoCount === 0) return;
     setSaving(true);
@@ -280,14 +224,23 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       }
       onCreated();
       onClose();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  /* ── 渲染 ── */
+  /* ── 布局预设按钮 ── */
+  const presets = [
+    { id: '2x2', label: '2×2', icon: 'grid', desc: '4等分' },
+    { id: '2x3', label: '2×3', icon: 'grid', desc: '6格' },
+    { id: '3x3', label: '3×3', icon: 'grid', desc: '9格' },
+    { id: '4x4', label: '4×4', icon: 'grid', desc: '16格' },
+    { id: '5x5', label: '5×5', icon: 'grid', desc: '25格' },
+    { id: 'pin-2', label: '品字2', icon: 'pin', desc: '大+2小' },
+    { id: 'pin-3', label: '品字3', icon: 'pin', desc: '左2+右1' },
+    { id: 'stagger-4', label: '错落4', icon: 'pin', desc: '大+3小' },
+  ];
+
   return (
-    <Modal open={open} onClose={onClose} title={isEditing ? '编辑模板' : '创建模板'} maxWidth="840px">
+    <Modal open={open} onClose={onClose} title={isEditing ? '编辑模板' : '创建模板'} maxWidth="860px">
       {/* 顶部：名称 + 吸附 */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-1">
@@ -306,60 +259,52 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       </div>
 
       <div className="flex gap-5">
-        {/* ── 左栏：控件面板 ── */}
-        <div className="w-[240px] shrink-0 space-y-4">
-          {/* 布局预设 */}
+        {/* ── 左栏 ── */}
+        <div className="w-[220px] shrink-0 space-y-4">
+          {/* 网格预设 */}
           <div>
-            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">快速布局</div>
-            <div className="grid grid-cols-4 gap-1">
-              {LAYOUT_PRESETS.map((p) => (
+            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">快速网格</div>
+            <div className="grid grid-cols-3 gap-1">
+              {presets.map((p) => (
                 <button key={p.id}
-                  className={`p-1 rounded-[var(--radius-xs)] text-center cursor-pointer border transition-all text-[9.5px] font-[500] leading-tight ${
-                    selectedPreset === p.id ? 'border-[var(--color-primary-500)] bg-[var(--color-surface-selected)] text-[var(--color-primary-700)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:border-[var(--color-primary-300)]'
+                  className={`p-1.5 rounded-[var(--radius-xs)] text-center cursor-pointer border transition-all ${
+                    preset === p.id
+                      ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-50)]'
+                      : 'border-[var(--color-border)] bg-white hover:border-[var(--color-primary-300)]'
                   }`}
-                  onClick={() => setSelectedPreset(p.id)}>
-                  {p.label}
+                  onClick={() => setPreset(p.id)}>
+                  <div className="flex justify-center gap-[1px] mx-auto w-6 h-6">
+                    {p.icon === 'grid' ? <GridIcon id={p.id} /> : <PinIcon id={p.id} />}
+                  </div>
+                  <div className="text-[9px] font-[500] text-[var(--color-gray-700)] mt-0.5">{p.label}</div>
+                  <div className="text-[7px] text-[var(--color-gray-400)]">{p.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
-          {isCustomRC && (
-            <div className="flex items-center gap-2 p-2 bg-[var(--color-gray-50)] rounded-[var(--radius-sm)] border border-[var(--color-border-light)]">
-              <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">行</span>
-              <input type="number" min={1} max={10} value={customRows}
-                onChange={(e) => setCustomRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
-                className="w-12 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
-              <span className="text-[var(--color-gray-300)] text-[10px]">×</span>
-              <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">列</span>
-              <input type="number" min={1} max={10} value={customCols}
-                onChange={(e) => setCustomCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
-                className="w-12 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
-              <span className="text-[9px] text-[var(--color-text-tertiary)] ml-auto">{customRows * customCols}</span>
-            </div>
-          )}
+          {/* 自定义行列 */}
+          <div className="flex items-center gap-2 p-2 bg-[var(--color-gray-50)] rounded-[var(--radius-sm)] border border-[var(--color-border-light)]">
+            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">行</span>
+            <input type="number" min={1} max={12} value={rows}
+              onChange={(e) => { setRows(Math.max(1, Math.min(12, Number(e.target.value) || 1))); setPreset('custom'); }}
+              className="w-11 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
+            <span className="text-[var(--color-gray-300)] text-[10px]">×</span>
+            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">列</span>
+            <input type="number" min={1} max={12} value={cols}
+              onChange={(e) => { setCols(Math.max(1, Math.min(12, Number(e.target.value) || 1))); setPreset('custom'); }}
+              className="w-11 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
+            <span className="text-[9px] text-[var(--color-text-tertiary)] ml-auto">{rows * cols}</span>
+          </div>
 
           {/* 边距 */}
           <div>
             <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[9px] font-[500] text-[var(--color-gray-500)]">边距(边界)</span>
+              <span className="text-[9px] font-[500] text-[var(--color-gray-500)]">边距</span>
               <span className="text-[8px] text-[var(--color-text-tertiary)]">{margin}%</span>
             </div>
             <input type="range" min={2} max={20} value={margin}
               onChange={(e) => setMargin(Number(e.target.value))}
-              className="w-full h-1 rounded-full appearance-none bg-[var(--color-gray-200)] cursor-pointer
-                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-                         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-primary-600)]
-                         [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white" />
-          </div>
-          {/* 间距 */}
-          <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[9px] font-[500] text-[var(--color-gray-500)]">间距</span>
-              <span className="text-[8px] text-[var(--color-text-tertiary)]">{gap}%</span>
-            </div>
-            <input type="range" min={0} max={10} step={0.5} value={gap}
-              onChange={(e) => setGap(Number(e.target.value))}
               className="w-full h-1 rounded-full appearance-none bg-[var(--color-gray-200)] cursor-pointer
                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                          [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-primary-600)]
@@ -371,11 +316,11 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
             <div className="flex gap-1.5">
               <button onClick={addPhotoSlot}
                 className="flex-1 h-7 flex items-center justify-center gap-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] font-[500] text-[var(--color-gray-600)] hover:border-[var(--color-primary-400)] hover:text-[var(--color-primary-600)] cursor-pointer transition-all">
-                +照片位
+                +照片
               </button>
               <button onClick={addTextZone}
                 className="flex-1 h-7 flex items-center justify-center gap-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] font-[500] text-[var(--color-gray-600)] hover:border-[var(--color-primary-400)] hover:text-[var(--color-primary-600)] cursor-pointer transition-all">
-                +文字区
+                +文字
               </button>
             </div>
             <button onClick={removeSelectedSlot} disabled={selectedIdx === null}
@@ -383,23 +328,26 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               删除选中
             </button>
           </div>
+
+          {/* 提示 */}
+          <div className="text-[8px] text-[var(--color-text-tertiary)] leading-relaxed">
+            点击网格预设自动生成 ·<br />
+            拖拽移动/缩放微调 ·<br />
+            吸附件辅助对齐
+          </div>
         </div>
 
         {/* ── 右栏：画布 + 属性 ── */}
         <div className="flex-1 min-w-0">
-          {/* 画布 */}
           <div ref={canvasRef} className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden select-none">
-            {/* 边界指示 */}
             <div className="absolute pointer-events-none z-[2]"
-              style={{ left: `${margin}%`, top: `${margin}%`, width: `${100 - margin * 2}%`, height: `${100 - margin * 2}%`, border: '1px dashed var(--color-primary-300)', opacity: 0.45 }} />
-            {/* 网格 */}
+              style={{ left: `${margin}%`, top: `${margin}%`, width: `${100 - margin * 2}%`, height: `${100 - margin * 2}%`, border: '1px dashed var(--color-primary-300)', opacity: 0.4 }} />
             {snapToGrid && (
               <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs><pattern id="g" width={GRID} height={GRID} patternUnits="userSpaceOnUse"><path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="var(--color-gray-200)" strokeWidth="0.3" /></pattern></defs>
                 <rect width="100" height="100" fill="url(#g)" />
               </svg>
             )}
-            {/* 槽位 */}
             {slots.map((slot, i) => {
               const isText = slot.id.startsWith('text_');
               const sel = selectedIdx === i;
@@ -411,14 +359,12 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                     left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%`,
                     backgroundColor: isText ? 'hsl(30,40%,88%)' : `hsl(250,${55 + (i * 5) % 25}%,${sel ? 72 : 65 + (i * 3) % 15}%)`,
                     border: isText ? '1.5px dashed #d4a854' : '1px solid rgba(255,255,255,0.4)',
-                    outline: sel ? '2px solid var(--color-primary-500)' : 'none',
-                    outlineOffset: -1,
+                    outline: sel ? '2px solid var(--color-primary-500)' : 'none', outlineOffset: -1,
                   }}
                   onMouseDown={(e) => onDragStart(e, i, 'move')}>
                   <span className="text-[10px] font-[500] pointer-events-none" style={{ color: isText ? '#a08040' : 'rgba(255,255,255,0.7)' }}>
                     {isText ? '📝' : photoN + 1}
                   </span>
-                  {/* 缩放控制柄 */}
                   {sel && ['tl','tr','bl','br','t','b','l','r'].map((pos) => (
                     <Handle key={pos} pos={pos} onMouseDown={(e) => onDragStart(e, i, `resize-${pos}`)} />
                   ))}
@@ -427,13 +373,11 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
             })}
           </div>
 
-          {/* 统计 */}
           <div className="flex items-center justify-center gap-3 mt-1.5 text-[10px] text-[var(--color-text-tertiary)]">
             <span>📷 {photoCount} 个照片位</span>
             {textCount > 0 && <span>📝 {textCount} 个文字区</span>}
           </div>
 
-          {/* 选中属性 */}
           {selectedIdx !== null && (
             <div className="mt-3 p-3 bg-[var(--color-gray-50)] rounded-[var(--radius-lg)] border border-[var(--color-border-light)]">
               <div className="flex items-center justify-between mb-2">
@@ -458,7 +402,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                   </div>
                 ))}
               </div>
-              {/* 尺寸预设 */}
               <div className="flex items-center gap-1 mt-2 flex-wrap">
                 <span className="text-[8px] text-[var(--color-gray-400)]">预设:</span>
                 {[{l:'1:1',w:25,h:25},{l:'4:3',w:28,h:21},{l:'3:4',w:21,h:28},{l:'2:1',w:35,h:17.5},{l:'横条',w:80,h:12},{l:'竖条',w:12,h:80}].map((p) => (
@@ -474,9 +417,8 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         </div>
       </div>
 
-      {/* 底部 */}
       <div className="flex justify-between items-center mt-4 pt-3 border-t border-[var(--color-border-light)]">
-        <span className="text-[9px] text-[var(--color-text-tertiary)]">拖拽移动 · 拖拽缩放 · 选中调参</span>
+        <span className="text-[9px] text-[var(--color-text-tertiary)]">{slots.length} 个区域</span>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onClose}>取消</Button>
           <Button variant="primary" onClick={handleSave} disabled={saving || photoCount === 0}>
@@ -490,7 +432,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
 /* ── 缩放控制柄 ── */
 function Handle({ pos, onMouseDown }: { pos: string; onMouseDown: (e: React.MouseEvent) => void }) {
-  const positions: Record<string, React.CSSProperties> = {
+  const p: Record<string, React.CSSProperties> = {
     tl: { top: -4, left: -4, cursor: 'nw-resize' },
     tr: { top: -4, right: -4, cursor: 'ne-resize' },
     bl: { bottom: -4, left: -4, cursor: 'sw-resize' },
@@ -500,9 +442,44 @@ function Handle({ pos, onMouseDown }: { pos: string; onMouseDown: (e: React.Mous
     l: { top: '50%', left: -4, cursor: 'w-resize', transform: 'translateY(-50%)' },
     r: { top: '50%', right: -4, cursor: 'e-resize', transform: 'translateY(-50%)' },
   };
+  return <div onMouseDown={onMouseDown}
+    className="absolute bg-white border border-[var(--color-primary-500)] rounded-full z-20"
+    style={{ width: 10, height: 10, ...p[pos], boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} />;
+}
+
+/* ── 网格图标 ── */
+function GridIcon({ id }: { id: string }) {
+  const m = { '2x2': [2,2], '2x3': [2,3], '3x3': [3,3], '4x4': [4,4], '5x5': [5,5] }[id] || [2,2];
+  const [rows, cols] = m;
+  const cw = 20 / cols, ch = 20 / rows;
   return (
-    <div onMouseDown={onMouseDown}
-      className="absolute bg-white border border-[var(--color-primary-500)] rounded-full z-20"
-      style={{ width: 10, height: 10, ...positions[pos], boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} />
+    <svg viewBox="0 0 20 20" className="w-6 h-6">
+      {Array.from({ length: rows * cols }, (_, i) => (
+        <rect key={i} x={i % cols * cw + 0.3} y={Math.floor(i / cols) * ch + 0.3}
+          width={cw - 0.6} height={ch - 0.6} rx={1} fill="#6C63FF" opacity={0.7 - i * 0.04} />
+      ))}
+    </svg>
+  );
+}
+
+/* ── 特殊布局图标 ── */
+function PinIcon({ id }: { id: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className="w-6 h-6">
+      {id === 'pin-2' ? (
+        <><rect x="2" y="2" width="20" height="11" rx="1.5" fill="#6C63FF" opacity="0.8" />
+          <rect x="2" y="15" width="9" height="7" rx="1.5" fill="#6C63FF" opacity="0.6" />
+          <rect x="13" y="15" width="9" height="7" rx="1.5" fill="#6C63FF" opacity="0.4" /></>
+      ) : id === 'pin-3' ? (
+        <><rect x="2" y="2" width="10" height="20" rx="1.5" fill="#6C63FF" opacity="0.8" />
+          <rect x="14" y="2" width="8" height="9" rx="1.5" fill="#6C63FF" opacity="0.6" />
+          <rect x="14" y="13" width="8" height="9" rx="1.5" fill="#6C63FF" opacity="0.4" /></>
+      ) : (
+        <><rect x="2" y="2" width="13" height="15" rx="1.5" fill="#6C63FF" opacity="0.8" />
+          <rect x="17" y="2" width="5" height="7" rx="1.5" fill="#6C63FF" opacity="0.6" />
+          <rect x="17" y="11" width="5" height="6" rx="1.5" fill="#6C63FF" opacity="0.4" />
+          <rect x="2" y="19" width="20" height="3" rx="1" fill="#6C63FF" opacity="0.3" /></>
+      )}
+    </svg>
   );
 }

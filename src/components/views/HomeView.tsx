@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
 import { CreateDialog } from './../home/CreateDialog';
@@ -7,6 +7,9 @@ import { getDemoPhotos, getDemoProject } from '../../utils/demoData';
 import { createAndSaveProject } from '../../db';
 import { TEMPLATES } from '../../types';
 import type { AlbumSize, AlbumPage, AlbumProject } from '../../types';
+import type { HomeTab } from '../../types';
+
+const NAV_SESSION_KEY = 'membook-home-nav';
 
 interface HomeViewProps {
   onNavigateToEditor: () => void;
@@ -14,7 +17,18 @@ interface HomeViewProps {
 
 export function HomeView({ onNavigateToEditor }: HomeViewProps) {
   const [showCreate, setShowCreate] = useState(false);
-  const [activeNav, setActiveNav] = useState<'create' | 'projects' | 'templates'>('projects');
+  const [activeNav, setActiveNav] = useState<HomeTab>(() => {
+    try {
+      const saved = sessionStorage.getItem(NAV_SESSION_KEY);
+      if (saved === 'create' || saved === 'projects' || saved === 'templates') return saved;
+    } catch { /* ignore */ }
+    return 'projects';
+  });
+
+  // 持久化当前导航 Tab
+  useEffect(() => {
+    try { sessionStorage.setItem(NAV_SESSION_KEY, activeNav); } catch { /* ignore */ }
+  }, [activeNav]);
   const setPages = useEditorStore((s) => s.setPages);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
 
