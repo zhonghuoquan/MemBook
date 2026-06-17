@@ -91,13 +91,19 @@ export function Canvas() {
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedSlotId, currentPageIndex, currentPage?.placements]);
 
-  // ── Ctrl + wheel ──
-  const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
-    if (e.evt.ctrlKey || e.evt.metaKey) {
-      e.evt.preventDefault();
-      const delta = e.evt.deltaY > 0 ? -0.1 : 0.1;
-      setCanvasZoom(useUIStore.getState().canvasZoom + delta);
-    }
+  // ── Ctrl + wheel zoom (on entire canvas container) ──
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setCanvasZoom(useUIStore.getState().canvasZoom + delta);
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
   }, [setCanvasZoom]);
 
   // ── Keyboard ──
@@ -239,7 +245,6 @@ export function Canvas() {
             width={CANVAS_W}
             height={CANVAS_H}
             style={{ background: currentPage.background, borderRadius: '2px', boxShadow: '0 2px 12px rgba(33,37,41,0.1)' }}
-            onWheel={handleWheel}
             onMouseDown={(e) => { if (e.target === e.target.getStage()) setSelectedSlot(null); }}
           >
             <Layer>

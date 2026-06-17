@@ -62,8 +62,19 @@ function genSlots(preset: string, m: number, r: number, c: number): SlotLayout[]
   }
 }
 
-const GRID = 5;
-const MIN_SLOT = 5;
+const GRID = 3;         // 网格步进(%) — 更精细
+const MIN_SLOT = 5;     // 最小槽位尺寸(%)
+const SNAP_DIST = 2.5;  // 边缘吸附最大距离(%)
+
+/* ── 智能吸附：在多条候选线中找到最近一条 ── */
+function smartSnap(val: number, targets: number[], maxDist: number): number {
+  let best = val, bestDist = maxDist;
+  for (const t of targets) {
+    const d = Math.abs(val - t);
+    if (d < bestDist) { bestDist = d; best = t; }
+  }
+  return best;
+}
 
 export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const isEditing = !!editTemplate;
@@ -124,23 +135,25 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     const p = getPct(e.clientX, e.clientY);
     const s = slotsRef.current[idx];
     if (!s) return;
+    // 记录鼠标按下位置(mx/my)和槽位起始位置(sx/sy)
+    // 拖拽中 slot.pos = 起始 + (鼠标当前 - 鼠标起始)，精确跟随
     dragRef.current = { mode, idx, sx: s.x, sy: s.y, mx: p.x, my: p.y, startX: s.x + s.width, startY: s.y + s.height };
   }, [getPct]);
 
   useEffect(() => {
+    /* 拖拽中：自由移动，无吸附、无边界限制（抬起时才处理） */
     const onMove = (e: MouseEvent) => {
       const dr = dragRef.current;
       if (!dr) return;
       const p = getPct(e.clientX, e.clientY);
-      const M = marginRef.current;
       const dx = p.x - dr.mx, dy = p.y - dr.my;
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
         const slot = next[dr.idx];
         if (!slot) return prev;
         if (dr.mode === 'move') {
-          slot.x = Math.max(M, Math.min(100 - M - slot.width, dr.sx + dx));
-          slot.y = Math.max(M, Math.min(100 - M - slot.height, dr.sy + dy));
+          slot.x = dr.sx + dx;
+          slot.y = dr.sy + dy;
         } else {
           let { x: ox, y: oy, width: ow, height: oh } = prev[dr.idx];
           let nw = ow, nh = oh, nx = ox, ny = oy;
@@ -148,10 +161,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = ox + (ow - nw); }
           if (dr.mode?.includes('b')) nh = Math.max(MIN_SLOT, dr.startY - oy + dy);
           if (dr.mode?.includes('t')) { nh = Math.max(MIN_SLOT, oh - dy); ny = oy + (oh - nh); }
-          if (nx < M) { nw -= (M - nx); nx = M; }
-          if (ny < M) { nh -= (M - ny); ny = M; }
-          if (nx + nw > 100 - M) { nw = 100 - M - nx; }
-          if (ny + nh > 100 - M) { nh = 100 - M - ny; }
           slot.x = nx; slot.y = ny;
           slot.width = Math.max(MIN_SLOT, nw);
           slot.height = Math.max(MIN_SLOT, nh);
@@ -159,25 +168,86 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         return next;
       });
     };
+
+    /* 抬起时：边界约束 + 网格吸附 + 边缘对齐 */
     const onUp = () => {
-      if (dragRef.current) {
-        const dr = dragRef.current;
-        setSlots((prev) => {
-          if (!snapToGrid) return prev;
-          const next = prev.map((s) => ({ ...s }));
-          const slot = next[dr.idx];
-          if (!slot) return prev;
-          slot.x = Math.round(slot.x / GRID) * GRID;
-          slot.y = Math.round(slot.y / GRID) * GRID;
-          if (dr.mode !== 'move') {
-            slot.width = Math.max(MIN_SLOT, Math.round(slot.width / GRID) * GRID);
-            slot.height = Math.max(MIN_SLOT, Math.round(slot.height / GRID) * GRID);
-          }
-          return next;
-        });
-      }
+      const dr = dragRef.current;
       dragRef.current = null;
+      if (!dr) return;
+      const M = marginRef.current;
+
+      setSlots((prev) => {
+        const next = prev.map((s) => ({ ...s }));
+        const slot = next[dr.idx];
+        if (!slot) return prev;
+
+        let { x, y, width, height } = slot;
+
+        // 1. 边界约束
+        x = Math.max(M, Math.min(100 - M - width, x));
+        y = Math.max(M, Math.min(100 - M - height, y));
+        if (x + width > 100 - M) width = 100 - M - x;
+        if (y + height > 100 - M) height = 100 - M - y;
+        width = Math.max(MIN_SLOT, width);
+        height = Math.max(MIN_SLOT, height);
+
+        // 2. 收集所有可吸附的参考线
+        const snapX: number[] = [M, 50, 100 - M];
+        const snapY: number[] = [M, 50, 100 - M];
+        for (let i = 0; i < prev.length; i++) {
+          if (i === dr.idx) continue;
+          const o = prev[i];
+          snapX.push(o.x, o.x + o.width);
+          snapY.push(o.y, o.y + o.height);
+        }
+
+        if (snapToGrid) {
+          // 网格吸附：四边分别吸附到最近的网格线
+          const gridSnap = (v: number) => Math.round(v / GRID) * GRID;
+          const left = gridSnap(x);
+          const right = gridSnap(x + width);
+          width = right - left;
+          x = left;
+
+          const top = gridSnap(y);
+          const bottom = gridSnap(y + height);
+          height = bottom - top;
+          y = top;
+        }
+
+        // 3. 边缘对齐吸附（仅在启用吸附时）
+        if (snapToGrid) {
+          const left = smartSnap(x, snapX, SNAP_DIST);
+          const right = smartSnap(x + width, snapX, SNAP_DIST);
+          const top = smartSnap(y, snapY, SNAP_DIST);
+          const bottom = smartSnap(y + height, snapY, SNAP_DIST);
+
+          // 选择偏移更小的方向
+          const dxL = Math.abs(left - x), dxR = Math.abs(right - (x + width));
+          const dyT = Math.abs(top - y), dyB = Math.abs(bottom - (y + height));
+
+          if (dxL <= dxR) { x = left; width = (x + width) - left; }
+          else { width = right - x; }
+
+          if (dyT <= dyB) { y = top; height = (y + height) - top; }
+          else { height = bottom - y; }
+
+          width = Math.max(MIN_SLOT, width);
+          height = Math.max(MIN_SLOT, height);
+        }
+
+        // 4. 最终边界保护
+        x = Math.max(M, Math.min(100 - M - width, x));
+        y = Math.max(M, Math.min(100 - M - height, y));
+
+        slot.x = x;
+        slot.y = y;
+        slot.width = width;
+        slot.height = height;
+        return next;
+      });
     };
+
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };

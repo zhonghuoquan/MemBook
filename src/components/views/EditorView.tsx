@@ -84,12 +84,18 @@ export function EditorView({ onBack }: EditorViewProps) {
   return (
     <div className="flex flex-col h-full">
       <Toolbar onBack={handleBack} />
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden">
+        {/* 左侧面板占满整列高度 */}
         <LeftPanel />
-        <Canvas />
-        <EditFlyout />
+        {/* 右侧：画布 + 底部导航 */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden relative">
+            <Canvas />
+            <EditFlyout />
+          </div>
+          <BottomNav />
+        </div>
       </div>
-      <BottomNav />
     </div>
   );
 }
