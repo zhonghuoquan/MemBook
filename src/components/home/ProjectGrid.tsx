@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
   type DragEndEvent,
@@ -11,12 +11,15 @@ import { CSS } from '@dnd-kit/utilities';
 import { listProjects, saveProject, deleteProject } from '../../db';
 import type { AlbumProject } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
+import { EmptyState } from './EmptyState';
+import { templatePreview } from '../../utils/templatePreview';
 
 interface ProjectGridProps {
   onOpenProject?: (project: AlbumProject) => void;
+  onCreateNew?: () => void;
 }
 
-export function ProjectGrid({ onOpenProject }: ProjectGridProps) {
+export function ProjectGrid({ onOpenProject, onCreateNew }: ProjectGridProps) {
   const [projects, setProjects] = useState<AlbumProject[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -26,6 +29,8 @@ export function ProjectGrid({ onOpenProject }: ProjectGridProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'createdAt' | 'name'>('updatedAt');
+  const [sortOpen, setSortOpen] = useState(false);
 
   const load = useCallback(() => {
     setLoaded(false);
@@ -40,11 +45,33 @@ export function ProjectGrid({ onOpenProject }: ProjectGridProps) {
     ? projects.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : projects;
 
-  const hasRealProjects = filtered.length > 0;
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    if (sortBy === 'name') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === 'createdAt') {
+      list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    } else {
+      list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    }
+    return list;
+  }, [filtered, sortBy]);
+
+  const hasRealProjects = projects.length > 0;
   // 只有在 Dexie 查询完成后、且没有真实项目时，才显示示例数据
   const displayProjects = loaded
-    ? (hasRealProjects ? filtered : demoProjects)
+    ? (hasRealProjects ? sorted : demoProjects)
     : [];
+
+  const noRealProjects = loaded && projects.length === 0 && !searchQuery;
+
+  if (noRealProjects) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6">
+        <EmptyState onCreateAlbum={onCreateNew || (() => {})} />
+      </div>
+    );
+  }
 
   /* ── Drag to reorder (only real projects) ── */
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -132,6 +159,56 @@ export function ProjectGrid({ onOpenProject }: ProjectGridProps) {
                        outline-none hover:border-[var(--color-border-hover)] focus:border-[var(--color-border-focus)] focus:shadow-[0_0_0_3px_rgba(108,99,255,0.15)]
                        transition-all"
           />
+        </div>
+
+        {/* Sort */}
+        <div className="relative">
+          <button
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[var(--color-border)]
+                       rounded-[var(--radius-md)] text-[var(--text-body-sm)] text-[var(--color-gray-600)]
+                       hover:border-[var(--color-border-hover)] hover:text-[var(--color-gray-800)]
+                       transition-all cursor-pointer"
+            onClick={() => setSortOpen(!sortOpen)}
+          >
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+              <path d="M3 3.5h8" /><path d="M4.5 7h5" /><path d="M6.5 10.5h1" />
+            </svg>
+            <span>
+              {sortBy === 'updatedAt' ? '最近更新' : sortBy === 'createdAt' ? '创建时间' : '名称'}
+            </span>
+          </button>
+
+          {sortOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
+              <div className="absolute top-full right-0 mt-1 z-20 bg-white border border-[var(--color-border)]
+                              rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1 min-w-[130px]">
+                {[
+                  { key: 'updatedAt' as const, label: '最近更新' },
+                  { key: 'createdAt' as const, label: '创建时间' },
+                  { key: 'name' as const, label: '名称 A-Z' },
+                ].map((option) => (
+                  <button
+                    key={option.key}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                               border-none bg-transparent cursor-pointer transition-colors
+                               ${sortBy === option.key
+                                 ? 'text-[var(--color-brand)] bg-[var(--color-surface-selected)]'
+                                 : 'text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]'
+                               }`}
+                    onClick={() => { setSortBy(option.key); setSortOpen(false); }}
+                  >
+                    {sortBy === option.key && (
+                      <svg viewBox="0 0 12 12" fill="currentColor" className="w-3 h-3 shrink-0">
+                        <path d="M10.5 3L5 9L2 6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    <span className={sortBy === option.key ? '' : 'ml-[18px]'}>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -247,18 +324,18 @@ function SortableCard({
           </div>
         )}
 
-        <div className="w-full h-full grid grid-cols-3 grid-rows-3 gap-0.5">
-          {Array.from({ length: 9 }, (_, i) => (
-            <div key={i} className="rounded-[2px]" style={{
-              backgroundColor: [
-                'var(--color-primary-200)', 'var(--color-primary-100)',
-                'var(--color-primary-300)', 'var(--color-gray-150)',
-                'var(--color-primary-200)', 'var(--color-gray-100)',
-                'var(--color-gray-200)', 'var(--color-gray-150)',
-                'var(--color-gray-100)',
-              ][i],
-            }} />
-          ))}
+        <div className="w-full h-full relative">
+          {proj.pages && proj.pages.length > 0 ? (
+            templatePreview(proj.pages[0].templateId)
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-[var(--color-gray-50)]">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-8 h-8 text-[var(--color-gray-300)]">
+                <rect x="4" y="4" width="24" height="24" rx="3" />
+                <circle cx="13" cy="12" r="3.5" />
+                <path d="M6 26l7-8 5 5 7-7 6 10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
         </div>
       </div>
 

@@ -148,7 +148,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
         {/* Content */}
         <div className="flex-1 flex bg-[var(--color-gray-50)]">
           {activeNav === 'projects' && (
-            <ProjectGrid onOpenProject={handleOpenProject} />
+            <ProjectGrid onOpenProject={handleOpenProject} onCreateNew={() => setShowCreate(true)} />
           )}
           {activeNav === 'templates' && (
             <TemplateGallery onCreateFromTemplate={handleCreateFromTemplate} />
