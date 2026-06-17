@@ -10,9 +10,10 @@ interface CreateDialogProps {
   open: boolean;
   onClose: () => void;
   onCreate: (name: string, size: AlbumSize) => void;
+  title?: string;
 }
 
-export function CreateDialog({ open, onClose, onCreate }: CreateDialogProps) {
+export function CreateDialog({ open, onClose, onCreate, title = '创建新相册' }: CreateDialogProps) {
   const [name, setName] = useState('');
   const [selectedSize, setSelectedSize] = useState<AlbumSize>(ALBUM_SIZES[0]);
   const [customW, setCustomW] = useState(CUSTOM_SIZE_DEFAULT);
@@ -39,7 +40,7 @@ export function CreateDialog({ open, onClose, onCreate }: CreateDialogProps) {
   const canCreate = !isCustom || (customW >= CUSTOM_SIZE_MIN && customH >= CUSTOM_SIZE_MIN);
 
   return (
-    <Modal open={open} onClose={onClose} title="创建新相册" maxWidth="520px">
+    <Modal open={open} onClose={onClose} title={title} maxWidth="520px">
       <div className="space-y-5">
         {/* Album Name */}
         <div>

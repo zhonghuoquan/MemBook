@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { ProjectGrid } from './../home/ProjectGrid';
+import { TemplateGallery } from './../home/TemplateGallery';
 import { CreateDialog } from './../home/CreateDialog';
 import { useEditorStore, usePhotoStore } from '../../store';
 import { getDemoPhotos, getDemoProject } from '../../utils/demoData';
 import { createAndSaveProject } from '../../db';
-import type { AlbumSize, AlbumProject } from '../../types';
+import { TEMPLATES } from '../../types';
+import type { AlbumSize, AlbumPage, AlbumProject } from '../../types';
 
 interface HomeViewProps {
   onNavigateToEditor: () => void;
@@ -30,6 +32,26 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPages(demo.pages);
     setPhotos(getDemoPhotos());
     await createAndSaveProject(_name || '未命名相册', _size, demo.pages);
+    onNavigateToEditor();
+  };
+
+  const handleCreateFromTemplate = async (templateId: string, name: string, size: AlbumSize) => {
+    const template = TEMPLATES.find((t) => t.id === templateId);
+    if (!template) return;
+
+    const page: AlbumPage = {
+      id: `page-${Date.now()}`,
+      templateId,
+      placements: template.slots.map((slot) => ({
+        slotId: slot.id,
+        photoId: null,
+      })),
+      background: '#FFFFFF',
+    };
+
+    setPages([page]);
+    setPhotos(getDemoPhotos());
+    await createAndSaveProject(name || '未命名相册', size, [page]);
     onNavigateToEditor();
   };
 
@@ -105,14 +127,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             <ProjectGrid onOpenProject={handleOpenProject} />
           )}
           {activeNav === 'templates' && (
-            <div className="flex-1 flex items-center justify-center text-[var(--color-text-tertiary)]">
-              <div className="text-center">
-                <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-10 h-10 mx-auto mb-3 text-[var(--color-gray-300)]">
-                  <rect x="4" y="4" width="32" height="32" rx="4" strokeDasharray="3 3" />
-                </svg>
-                <p className="text-[var(--text-body-sm)]">模板市场即将上线</p>
-              </div>
-            </div>
+            <TemplateGallery onCreateFromTemplate={handleCreateFromTemplate} />
           )}
         </div>
       </div>
