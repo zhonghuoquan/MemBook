@@ -236,8 +236,9 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         onCreated={handleTemplateCreated}
       />
 
-      {/* Edit Template Dialog */}
+      {/* Edit Template Dialog — 用 key 强制重建 */}
       <CreateTemplateDialog
+        key={editTemplateData?.id || 'edit-dialog'}
         open={showEditMaker}
         editTemplate={editTemplateData}
         onClose={() => { setShowEditMaker(false); setEditTemplateData(null); }}
@@ -306,13 +307,14 @@ function TemplateCard({
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  const hasActions = !!onEdit || !!onDelete;
+  // 系统模板只有创建功能，自定义模板可以创建/编辑/删除
+  const hasMenu = !!onEdit || !!onDelete;
 
   return (
     <div
       className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
                  hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
-                 transition-all duration-200 group cursor-pointer"
+                 transition-all duration-200 cursor-pointer"
       onMouseEnter={() => onHover(template.id)}
       onMouseLeave={() => onHover(null)}
     >
@@ -324,67 +326,73 @@ function TemplateCard({
         </div>
       </div>
 
-      {/* Info + Action button */}
-      <div className="p-3 space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate pr-1"
-                onClick={onCreate}>
-            {template.name}
-          </span>
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[var(--text-nano)] text-[var(--color-gray-400)] bg-[var(--color-gray-50)] px-1.5 py-0.5 rounded-full">
-              {template.slots.length}位
-            </span>
-            {hasActions && (
-              <div className="relative" ref={menuRef}>
-                <button
-                  className="w-6 h-6 flex items-center justify-center rounded-[var(--radius-sm)]
-                             text-[var(--color-gray-400)] hover:text-[var(--color-gray-700)]
-                             hover:bg-[var(--color-gray-50)] border-none cursor-pointer transition-colors"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-                    <circle cx="8" cy="3.5" r="1.5" />
-                    <circle cx="8" cy="8" r="1.5" />
-                    <circle cx="8" cy="12.5" r="1.5" />
-                  </svg>
-                </button>
-
-                {/* Dropdown menu */}
-                {menuOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-[140px] bg-white rounded-[var(--radius-lg)]
-                                  border border-[var(--color-border)] shadow-[var(--shadow-md)]
-                                  py-1 z-20 animate-[fadeIn_0.1s_ease-out]">
-                    <MenuItem
-                      label="创建相册"
-                      onClick={() => { setMenuOpen(false); onCreate(); }}
-                    />
-                    {onEdit && (
-                      <MenuItem label="编辑模板" onClick={() => { setMenuOpen(false); onEdit(); }} />
-                    )}
-                    {onDelete && (
-                      <div className="border-t border-[var(--color-border-light)] pt-1 mt-1">
-                        <MenuItem
-                          label="删除模板"
-                          danger
-                          onClick={() => { setMenuOpen(false); onDelete(); }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+      {/* Info + Action buttons */}
+      <div className="p-3">
+        {/* Name + badge */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
+                 onClick={onCreate}>
+              {template.name}
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
+                {template.slots.length}位 · {template.category || '模板'}
+              </span>
+              {!template.isBuiltIn && (
+                <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
+                  自定义
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
-            {template.category || '模板'}
-          </span>
-          {!template.isBuiltIn && (
-            <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
-              自定义
-            </span>
+
+          {/* Action buttons for custom templates */}
+          {hasMenu && (
+            <div className="relative shrink-0" ref={menuRef}>
+              <button
+                className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-md)]
+                           bg-[var(--color-gray-50)] border border-[var(--color-border-light)]
+                           text-[var(--color-gray-500)] hover:text-[var(--color-gray-700)]
+                           hover:bg-[var(--color-gray-100)] cursor-pointer transition-colors"
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+                title="更多操作"
+              >
+                <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
+                  <circle cx="7" cy="2.5" r="1.2" />
+                  <circle cx="7" cy="7" r="1.2" />
+                  <circle cx="7" cy="11.5" r="1.2" />
+                </svg>
+              </button>
+
+              {/* Dropdown menu */}
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-[150px] bg-white rounded-[var(--radius-lg)]
+                                border border-[var(--color-border)] shadow-[var(--shadow-md)]
+                                py-1.5 z-20 animate-[fadeIn_0.1s_ease-out]">
+                  <MenuItem
+                    label="📷 创建相册"
+                    onClick={() => { setMenuOpen(false); onCreate(); }}
+                  />
+                  {onEdit && (
+                    <MenuItem
+                      label="✏️ 编辑模板"
+                      onClick={() => { setMenuOpen(false); onEdit(); }}
+                    />
+                  )}
+                  {onDelete && (
+                    <>
+                      <div className="mx-2 my-1 border-t border-[var(--color-border-light)]" />
+                      <MenuItem
+                        label="🗑 删除模板"
+                        danger
+                        onClick={() => { setMenuOpen(false); onDelete(); }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

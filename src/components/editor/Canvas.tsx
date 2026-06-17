@@ -13,19 +13,54 @@ export function Canvas() {
   const transformerRef = useRef<Konva.Transformer>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
+  const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const pages = useEditorStore((s) => s.pages);
   const selectedSlotId = useEditorStore((s) => s.selectedSlotId);
   const setSelectedSlot = useEditorStore((s) => s.setSelectedSlot);
+  const placePhoto = useEditorStore((s) => s.placePhoto);
   const photos = usePhotoStore((s) => s.photos);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
+  const addToast = useUIStore((s) => s.addToast);
 
   const currentPage = pages[currentPageIndex];
   const template: Template | undefined = currentPage
     ? TEMPLATES.find((t) => t.id === currentPage.templateId)
     : undefined;
+
+  // Helper to compute slot bounds in stage coordinates
+  const getSlotBounds = useCallback((slot: SlotLayout) => ({
+    x: (slot.x / 100) * CANVAS_W,
+    y: (slot.y / 100) * CANVAS_H,
+    w: (slot.width / 100) * CANVAS_W,
+    h: (slot.height / 100) * CANVAS_H,
+  }), []);
+
+  // Convert mouse event client coords to stage-local coords
+  const clientToStage = useCallback((clientX: number, clientY: number) => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const stageBox = stage.container().getBoundingClientRect();
+    return {
+      x: (clientX - stageBox.left) / canvasZoom,
+      y: (clientY - stageBox.top) / canvasZoom,
+    };
+  }, [canvasZoom]);
+
+  // Find which slot is hit by a given stage coordinate
+  const hitTestSlots = useCallback((stageX: number, stageY: number): string | null => {
+    if (!template) return null;
+    for (const slot of template.slots) {
+      const b = getSlotBounds(slot);
+      if (stageX >= b.x && stageX <= b.x + b.w && stageY >= b.y && stageY <= b.y + b.h) {
+        return slot.id;
+      }
+    }
+    return null;
+  }, [template, getSlotBounds]);
 
   // ── Observe container resize ──
   useEffect(() => {
@@ -57,7 +92,7 @@ export function Canvas() {
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedSlotId, currentPageIndex, currentPage?.placements]);
 
-  // ── Ctrl + wheel zoom — whole page scaling ──
+  // ── Ctrl + wheel zoom ──
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     if (e.evt.ctrlKey || e.evt.metaKey) {
       e.evt.preventDefault();
@@ -84,6 +119,45 @@ export function Canvas() {
     return () => window.removeEventListener('keydown', handler);
   }, [canvasZoom, selectedSlotId, currentPageIndex, setSelectedSlot, setCanvasZoom]);
 
+  // ── Drop handler — receive photo from PhotoPanel drag ──
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    setDragOverSlotId(null);
+
+    const photoId = e.dataTransfer.getData('text/plain');
+    if (!photoId) return;
+
+    const pt = clientToStage(e.clientX, e.clientY);
+    if (!pt) return;
+
+    const hitSlotId = hitTestSlots(pt.x, pt.y);
+    if (hitSlotId) {
+      placePhoto(currentPageIndex, hitSlotId, photoId);
+      setSelectedSlot(hitSlotId);
+      addToast({ type: 'success', message: '照片已放入页内' });
+    } else {
+      addToast({ type: 'info', message: '请拖到页面中的照片槽位' });
+    }
+  }, [clientToStage, hitTestSlots, currentPageIndex, placePhoto, setSelectedSlot, addToast]);
+
+  // ── Drag over — update visual feedback ──
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isDraggingFile) setIsDraggingFile(true);
+    const pt = clientToStage(e.clientX, e.clientY);
+    if (pt) {
+      const hitId = hitTestSlots(pt.x, pt.y);
+      setDragOverSlotId(hitId);
+    }
+  }, [clientToStage, hitTestSlots, isDraggingFile]);
+
+  const handleDragLeave = useCallback(() => {
+    setIsDraggingFile(false);
+    setDragOverSlotId(null);
+  }, []);
+
   if (!currentPage || !template) {
     return <CanvasEmptyState />;
   }
@@ -91,7 +165,7 @@ export function Canvas() {
   // Scaled dimensions for scroll spacer
   const scaledW = CANVAS_W * canvasZoom;
   const scaledH = CANVAS_H * canvasZoom;
-  const padding = 48; // 24px each side
+  const padding = 48;
   const scrollW = Math.max(containerSize.w, scaledW + padding);
   const scrollH = Math.max(containerSize.h, scaledH + padding);
 
@@ -101,13 +175,28 @@ export function Canvas() {
   const slotY = (s: SlotLayout) => (s.y / 100) * CANVAS_H;
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-auto bg-[var(--color-gray-100)] relative">
-      {/* Scroll spacer ensures the container has room when zoomed in */}
+    <div
+      ref={containerRef}
+      className={`flex-1 overflow-auto bg-[var(--color-gray-100)] relative transition-colors duration-150 ${isDraggingFile ? 'bg-[var(--color-primary-50)]' : ''}`}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onDragLeave={handleDragLeave}
+    >
+      {/* Drop zone overlay */}
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-[var(--z-overlay)] pointer-events-none flex items-center justify-center">
+          <div className="px-6 py-3 bg-[var(--color-primary-600)]/90 text-white rounded-[var(--radius-lg)] shadow-lg text-[var(--text-body-sm)] font-[500]">
+            {dragOverSlotId ? '📷 放入此槽位' : '拖到照片槽位中放置'}
+          </div>
+        </div>
+      )}
+
+      {/* Scroll spacer */}
       <div
         className="flex items-center justify-center"
         style={{ width: scrollW, height: scrollH, padding }}
       >
-        {/* CSS transform: scales the entire Stage uniformly (page + slots + photos) */}
+        {/* CSS transform: scales the entire Stage uniformly */}
         <div
           style={{
             transform: `scale(${canvasZoom})`,
@@ -128,13 +217,11 @@ export function Canvas() {
             }}
             onWheel={handleWheel}
             onMouseDown={(e) => {
-              if (e.target === e.target.getStage()) {
-                setSelectedSlot(null);
-              }
+              if (e.target === e.target.getStage()) setSelectedSlot(null);
             }}
           >
             <Layer>
-              {/* Page background — fills the entire stage */}
+              {/* Page background */}
               <Rect
                 x={0} y={0}
                 width={CANVAS_W} height={CANVAS_H}
@@ -158,6 +245,7 @@ export function Canvas() {
                   ? photos.find((p) => p.id === placement.photoId)
                   : undefined;
                 const isSelected = selectedSlotId === slot.id;
+                const isDragTarget = dragOverSlotId === slot.id;
                 const sx = slotX(slot);
                 const sy = slotY(slot);
                 const sw = slotWidth(slot);
@@ -177,12 +265,24 @@ export function Canvas() {
                     <Rect
                       width={sw}
                       height={sh}
-                      fill={photo ? undefined : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')}
-                      stroke={isSelected ? '#6C63FF' : (photo ? 'transparent' : '#DEE2E6')}
-                      strokeWidth={isSelected ? 2 : 1}
+                      fill={
+                        isDragTarget
+                          ? 'rgba(108,99,255,0.12)'
+                          : photo
+                            ? undefined
+                            : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')
+                      }
+                      stroke={
+                        isDragTarget
+                          ? '#6C63FF'
+                          : isSelected
+                            ? '#6C63FF'
+                            : (photo ? 'transparent' : '#DEE2E6')
+                      }
+                      strokeWidth={isDragTarget ? 2.5 : (isSelected ? 2 : 1)}
                       strokeScaleEnabled={false}
                       cornerRadius={photo ? 2 : 4}
-                      dash={photo ? undefined : [4, 4]}
+                      dash={isDragTarget ? undefined : (photo ? undefined : [4, 4])}
                     />
                     {photo && (
                       <KonvaImage
@@ -194,7 +294,7 @@ export function Canvas() {
                     )}
                     {!photo && (
                       <Text
-                        text="拖入照片"
+                        text={isDragTarget ? '释放放置' : '拖入照片'}
                         x={0}
                         y={0}
                         width={sw}
@@ -202,7 +302,8 @@ export function Canvas() {
                         align="center"
                         verticalAlign="middle"
                         fontSize={11}
-                        fill="#ADB5BD"
+                        fill={isDragTarget ? '#6C63FF' : '#ADB5BD'}
+                        fontStyle={isDragTarget ? 'bold' : 'normal'}
                       />
                     )}
                   </Group>

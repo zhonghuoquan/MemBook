@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import type { PanelTab } from '../../types';
 import { useUIStore } from '../../store';
 import { PhotoPanel } from './PhotoPanel';
@@ -77,15 +77,8 @@ export function LeftPanel() {
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    startX.current = e.clientX;
-    startW.current = panelWidth;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [panelWidth]);
+  const mouseMoveRef = useRef<((e: MouseEvent) => void) | null>(null);
+  const mouseUpRef = useRef<(() => void) | null>(null);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging.current) return;
@@ -95,26 +88,32 @@ export function LeftPanel() {
   }, []);
 
   const handleMouseUp = useCallback(() => {
-    if (isDragging.current) {
-      isDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      try {
-        localStorage.setItem(STORAGE_KEY, String(panelWidth));
-      } catch { /* ignore */ }
-    }
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', mouseMoveRef.current!);
+    window.removeEventListener('mouseup', mouseUpRef.current!);
+    try { localStorage.setItem(STORAGE_KEY, String(panelWidth)); } catch { /* */ }
   }, [panelWidth]);
 
-  useEffect(() => {
-    if (isDragging.current) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [handleMouseMove, handleMouseUp]);
+  // Store refs so we can remove them from within handleMouseUp
+  mouseMoveRef.current = handleMouseMove;
+  mouseUpRef.current = handleMouseUp;
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startW.current = panelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', mouseMoveRef.current!);
+    window.addEventListener('mouseup', mouseUpRef.current!);
+  }, [panelWidth]);
+
+  // No useEffect needed — events are added in handleMouseDown, removed in handleMouseUp
 
   return (
     <div className="flex shrink-0 relative" style={{ width: panelWidth }}>
