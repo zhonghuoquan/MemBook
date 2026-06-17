@@ -88,6 +88,20 @@ function generateSlots(preset: LayoutPresetId, m: number, g: number, r: number, 
 }
 
 const GRID = 5; // snap grid in percent
+const SNAP_EDGE_DIST = 2; // 边缘吸附距离(%)
+
+/** 边界限制：确保槽位不超出边距范围 */
+function clampToMargin(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+/** 边缘吸附：检测与其他槽位边缘的距离，靠近则吸附 */
+function snapEdge(val: number, edges: number[], dist: number): number {
+  for (const e of edges) {
+    if (Math.abs(val - e) <= dist) return e;
+  }
+  return val;
+}
 
 export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const [name, setName] = useState('');
@@ -147,7 +161,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     };
   }, [getCanvasPct, slots]);
 
-  // 全局 mousemove / mouseup
+  // 全局 mousemove / mouseup — 带边界约束 + 边缘吸附
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const dr = dragRef.current;
@@ -156,29 +170,64 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       const dx = pos.x - dr.startX;
       const dy = pos.y - dr.startY;
       const s = dr.startSlot;
+      const M = margin; // 边界
+      const ED = SNAP_EDGE_DIST;
 
       setSlots((prev) => {
         const next = [...prev];
         const slot = { ...next[dr.slotIdx] };
         const snap = (v: number) => snapToGrid ? Math.round(v / GRID) * GRID : Math.round(v * 10) / 10;
 
+        // 收集所有其他槽位的边用于吸附
+        const otherEdges: { x: number[]; y: number[] } = { x: [M, 100 - M], y: [M, 100 - M] };
+        for (let i = 0; i < prev.length; i++) {
+          if (i === dr.slotIdx) continue;
+          const o = prev[i];
+          otherEdges.x.push(o.x, o.x + o.width);
+          otherEdges.y.push(o.y, o.y + o.height);
+        }
+
         if (dr.mode === 'move') {
-          slot.x = snap(Math.max(0, Math.min(100 - slot.width, s.x + dx)));
-          slot.y = snap(Math.max(0, Math.min(100 - slot.height, s.y + dy)));
+          let nx = s.x + dx;
+          let ny = s.y + dy;
+          // 边界约束
+          nx = clampToMargin(nx, M, 100 - M - slot.width);
+          ny = clampToMargin(ny, M, 100 - M - slot.height);
+          // 边缘吸附
+          if (snapToGrid) {
+            nx = snapEdge(nx, otherEdges.x, ED);
+            ny = snapEdge(ny, otherEdges.y, ED);
+          }
+          slot.x = snap(nx);
+          slot.y = snap(ny);
         } else {
           // Resize
           let { x, y, width, height } = s;
-          if (dr.mode?.includes('r')) { width = Math.max(5, s.width + dx); }
-          if (dr.mode?.includes('l')) { width = Math.max(5, s.width - dx); x = s.x + (s.width - Math.max(5, s.width - dx)); }
-          if (dr.mode?.includes('b')) { height = Math.max(5, s.height + dy); }
-          if (dr.mode?.includes('t')) { height = Math.max(5, s.height - dy); y = s.y + (s.height - Math.max(5, s.height - dy)); }
-          // Clamp
-          if (x < 0) { width += x; x = 0; }
-          if (y < 0) { height += y; y = 0; }
-          if (x + width > 100) { width = 100 - x; }
-          if (y + height > 100) { height = 100 - y; }
-          slot.x = snap(x);
-          slot.y = snap(y);
+          if (dr.mode?.includes('r')) { width = s.width + dx; }
+          if (dr.mode?.includes('l')) { width = s.width - dx; x = s.x + (s.width - width); }
+          if (dr.mode?.includes('b')) { height = s.height + dy; }
+          if (dr.mode?.includes('t')) { height = s.height - dy; y = s.y + (s.height - height); }
+          // 最小尺寸
+          width = Math.max(5, width);
+          height = Math.max(5, height);
+          // 边界约束
+          if (x < M) { width -= (M - x); x = M; }
+          if (y < M) { height -= (M - y); y = M; }
+          if (x + width > 100 - M) { width = 100 - M - x; }
+          if (y + height > 100 - M) { height = 100 - M - y; }
+          // 边缘吸附
+          if (snapToGrid) {
+            let right = x + width;
+            let bottom = y + height;
+            x = snapEdge(x, otherEdges.x, ED);
+            right = snapEdge(right, otherEdges.x, ED);
+            width = right - x;
+            y = snapEdge(y, otherEdges.y, ED);
+            bottom = snapEdge(bottom, otherEdges.y, ED);
+            height = bottom - y;
+          }
+          slot.x = snap(Math.max(M, x));
+          slot.y = snap(Math.max(M, y));
           slot.width = snap(Math.max(5, width));
           slot.height = snap(Math.max(5, height));
         }
@@ -391,7 +440,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           {/* Sliders */}
           <div>
             <div className="flex items-center justify-between mb-0.5">
-              <label className="text-[10px] font-[500] text-[var(--color-gray-600)]">边距</label>
+              <label className="text-[10px] font-[500] text-[var(--color-gray-600)]">边距(边界)</label>
               <span className="text-[9px] text-[var(--color-text-tertiary)]">{margin}%</span>
             </div>
             <input type="range" min={2} max={20} value={margin}
@@ -446,7 +495,16 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         <div className="flex-1 min-w-0">
           {/* Interactive preview */}
           <div ref={canvasRef} className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden">
-            {/* Grid overlay */}
+            {/* 边距边界指示 */}
+            <div className="absolute pointer-events-none z-[2]"
+              style={{
+                left: `${margin}%`, top: `${margin}%`,
+                width: `${100 - margin * 2}%`, height: `${100 - margin * 2}%`,
+                border: '1px dashed var(--color-primary-300)',
+                opacity: 0.5,
+              }}
+            />
+            {/* 网格 */}
             {snapToGrid && (
               <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
@@ -466,6 +524,8 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               const sat = isText ? 40 : 55;
               const lig = isSelected ? 72 : isText ? 88 : 65 + (i * 3) % 15;
 
+              // 照片位序号（只对 photo slot 计数，文字区不计入）
+              const photoN = slots.filter((s, j) => j < i && !s.id.startsWith('text_')).length;
               return (
                 <div
                   key={slot.id}
@@ -484,7 +544,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                 >
                   <span className="text-[10px] font-[500] pointer-events-none select-none"
                         style={{ color: isText ? '#a08040' : 'rgba(255,255,255,0.7)' }}>
-                    {isText ? 'T' : i + 1}
+                    {isText ? '📝' : photoN + 1}
                   </span>
 
                   {/* 选中时显示缩放控制柄 */}

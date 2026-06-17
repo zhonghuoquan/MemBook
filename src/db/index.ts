@@ -138,6 +138,22 @@ export async function createCustomTemplate(
   return id;
 }
 
+/* ── Photo CRUD ── */
+
+export async function savePhotos(photos: Photo[]): Promise<void> {
+  const db = getDB();
+  // 清除旧照片再写入
+  await db.photos.clear();
+  if (photos.length > 0) {
+    await db.photos.bulkPut(photos);
+  }
+}
+
+export async function loadPhotos(): Promise<Photo[]> {
+  const db = getDB();
+  return db.photos.toArray();
+}
+
 /* ── Auto-save helper ── */
 
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;

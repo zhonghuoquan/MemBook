@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Toolbar } from '../editor/Toolbar';
 import { LeftPanel } from '../editor/LeftPanel';
 import { Canvas } from '../editor/Canvas';
@@ -6,46 +6,89 @@ import { EditFlyout } from '../editor/EditFlyout';
 import { BottomNav } from '../editor/BottomNav';
 import { useUIStore, useEditorStore, usePhotoStore } from '../../store';
 import { getDemoPhotos, getDemoProject } from '../../utils/demoData';
-import { createAndSaveProject } from '../../db';
+import { loadProject, loadPhotos, createAndSaveProject, saveProject, savePhotos, scheduleAutoSave } from '../../db';
 
 interface EditorViewProps {
   onBack?: () => void;
 }
+
+const SAVED_PROJECT_KEY = 'membook_current_project_id';
 
 export function EditorView({ onBack }: EditorViewProps) {
   const pages = useEditorStore((s) => s.pages);
   const setPages = useEditorStore((s) => s.setPages);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
   const addToast = useUIStore((s) => s.addToast);
+  const initialized = useRef(false);
 
+  // ── 加载已保存项目 ──
   useEffect(() => {
-    if (pages.length === 0) {
+    if (initialized.current) return;
+    initialized.current = true;
+
+    (async () => {
+      const savedId = localStorage.getItem(SAVED_PROJECT_KEY);
+      if (savedId) {
+        // 有保存的项目 → 加载
+        try {
+          const project = await loadProject(savedId);
+          if (project && project.pages.length > 0) {
+            setPages(project.pages);
+            // 恢复照片
+            const savedPhotos = await loadPhotos();
+            if (savedPhotos.length > 0) {
+              setPhotos(savedPhotos);
+            } else {
+              setPhotos(getDemoPhotos());
+            }
+            addToast({ type: 'info', message: `已恢复项目「${project.name}」` });
+            return;
+          }
+        } catch {
+          // 加载失败，回退到 demo
+        }
+      }
+
+      // 没有已保存项目 → 创建新项目（用 demo 数据）
       const demo = getDemoProject();
       setPages(demo.pages);
       setPhotos(getDemoPhotos());
-      createAndSaveProject('未命名相册', demo.size, demo.pages);
-      addToast({ type: 'info', message: '已加载示例数据，试试编辑吧 ✨' });
-    }
+      await createAndSaveProject('未命名相册', demo.size, demo.pages);
+      addToast({ type: 'info', message: '已创建新相册，开始制作吧 ✨' });
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 自动保存：每次 pages 变化时调度 ──
+  useEffect(() => {
+    if (pages.length === 0) return;
+    scheduleAutoSave(2000); // 2s 防抖
+  }, [pages]);
+
+  // ── 页面离开/返回主页时强制保存 ──
+  const handleBack = () => {
+    // 立即保存
+    const currentPages = useEditorStore.getState().pages;
+    const currentPhotos = usePhotoStore.getState().photos;
+    const projectId = localStorage.getItem(SAVED_PROJECT_KEY);
+    if (projectId && currentPages.length > 0) {
+      loadProject(projectId).then((existing) => {
+        if (existing) {
+          saveProject({ ...existing, pages: currentPages, updatedAt: new Date().toISOString() });
+        }
+      });
+      savePhotos(currentPhotos);
+    }
+    onBack?.();
+  };
 
   return (
     <div className="flex flex-col h-full">
-      {/* 顶部工具栏：简化版 — 去掉 +页、删除页、预览 */}
-      <Toolbar onBack={onBack} />
-
-      {/* 主体区域：左侧面板(Tab导航+内容) + 中央画布 */}
+      <Toolbar onBack={handleBack} />
       <div className="flex flex-1 overflow-hidden relative">
-        {/* 左侧面板：垂直Tab导航 + 面板内容 */}
         <LeftPanel />
-
-        {/* 中央画布 */}
         <Canvas />
-
-        {/* 编辑浮层（双击照片时覆盖左侧区域） */}
         <EditFlyout />
       </div>
-
-      {/* 底部页面导航栏：缩略图 + 控制栏（页码+缩放滑块+页面按钮） */}
       <BottomNav />
     </div>
   );
