@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { TEMPLATES } from '../../types';
 import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
 import { CreateDialog } from './CreateDialog';
@@ -292,27 +292,11 @@ function TemplateCard({
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpen]);
-
-  // 系统模板只有创建功能，自定义模板可以创建/编辑/删除
-  const hasMenu = !!onEdit || !!onDelete;
+  const isCustom = !template.isBuiltIn;
 
   return (
     <div
-      className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
+      className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-hidden
                  hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
                  transition-all duration-200 cursor-pointer"
       onMouseEnter={() => onHover(template.id)}
@@ -328,7 +312,6 @@ function TemplateCard({
 
       {/* Info + Action buttons */}
       <div className="p-3">
-        {/* Name + badge */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
@@ -339,99 +322,82 @@ function TemplateCard({
               <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
                 {template.slots.length}位 · {template.category || '模板'}
               </span>
-              {!template.isBuiltIn && (
+              {isCustom && (
                 <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
                   自定义
                 </span>
               )}
             </div>
           </div>
-
-          {/* Action buttons for custom templates */}
-          {hasMenu && (
-            <div className="relative shrink-0" ref={menuRef}>
-              <button
-                className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-md)]
-                           bg-[var(--color-gray-50)] border border-[var(--color-border-light)]
-                           text-[var(--color-gray-500)] hover:text-[var(--color-gray-700)]
-                           hover:bg-[var(--color-gray-100)] cursor-pointer transition-colors"
-                onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-                title="更多操作"
-              >
-                <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
-                  <circle cx="7" cy="2.5" r="1.2" />
-                  <circle cx="7" cy="7" r="1.2" />
-                  <circle cx="7" cy="11.5" r="1.2" />
-                </svg>
-              </button>
-
-              {/* Dropdown menu */}
-              {menuOpen && (
-                <div className="absolute right-0 top-full mt-1 w-[150px] bg-white rounded-[var(--radius-lg)]
-                                border border-[var(--color-border)] shadow-[var(--shadow-md)]
-                                py-1.5 z-20 animate-[fadeIn_0.1s_ease-out]">
-                  <MenuItem
-                    label="📷 创建相册"
-                    onClick={() => { setMenuOpen(false); onCreate(); }}
-                  />
-                  {onEdit && (
-                    <MenuItem
-                      label="✏️ 编辑模板"
-                      onClick={() => { setMenuOpen(false); onEdit(); }}
-                    />
-                  )}
-                  {onDelete && (
-                    <>
-                      <div className="mx-2 my-1 border-t border-[var(--color-border-light)]" />
-                      <MenuItem
-                        label="🗑 删除模板"
-                        danger
-                        onClick={() => { setMenuOpen(false); onDelete(); }}
-                      />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Action buttons — always visible for custom templates */}
+        {isCustom && onEdit && onDelete && (
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-light)]">
+            <button
+              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
+                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
+                         text-[var(--color-gray-600)] hover:text-[var(--color-primary-600)]
+                         hover:border-[var(--color-primary-400)] cursor-pointer transition-all"
+              onClick={(e) => { e.stopPropagation(); onCreate(); }}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
+                <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" />
+                <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                <path d="M1.5 9l3-2.5 2.5 2.5 1.5-1.5L12.5 11" />
+              </svg>
+              创建相册
+            </button>
+            <button
+              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
+                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
+                         text-[var(--color-gray-600)] hover:text-[var(--color-primary-600)]
+                         hover:border-[var(--color-primary-400)] cursor-pointer transition-all"
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
+              </svg>
+              编辑
+            </button>
+            <button
+              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
+                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
+                         text-[var(--color-gray-400)] hover:text-[var(--color-error)]
+                         hover:border-[var(--color-error)]/40 cursor-pointer transition-all"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <polyline points="2 3.5 12 3.5" />
+                <path d="M4.5 3.5V2a1 1 0 011-1h3a1 1 0 011 1v1.5" />
+                <path d="M3 3.5l.7 8.4a1 1 0 001 .9h4.6a1 1 0 001-.9l.7-8.4" />
+              </svg>
+              删除
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Hover overlay — create button */}
-      <div
-        className={`
-          absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent
-          flex items-end justify-center pb-5 pointer-events-none
-          transition-opacity duration-200
-          ${isHovered ? 'opacity-100' : 'opacity-0'}
-        `}
-      >
-        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-white rounded-full
-                         text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-800)]
-                         shadow-[var(--shadow-md)]">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-            <circle cx="6" cy="6.5" r="1.5" />
-            <path d="M1.5 10l3.5-3 3 3 2-2 4.5 4.5" />
-          </svg>
-          使用此模板创建
-        </span>
-      </div>
+      {/* Hover overlay — create button for system templates */}
+      {!isCustom && (
+        <div
+          className={`absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent
+            flex items-end justify-center pb-5 pointer-events-none
+            transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-white rounded-full
+                           text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-800)]
+                           shadow-[var(--shadow-md)]">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+              <circle cx="6" cy="6.5" r="1.5" />
+              <path d="M1.5 10l3.5-3 3 3 2-2 4.5 4.5" />
+            </svg>
+            使用此模板创建
+          </span>
+        </div>
+      )}
     </div>
-  );
-}
-
-function MenuItem({ label, danger, onClick }: { label: string; danger?: boolean; onClick: () => void }) {
-  return (
-    <button
-      className={`w-full px-3 py-1.5 text-left text-[var(--text-caption)] font-[500] border-none cursor-pointer
-        transition-colors duration-100
-        ${danger ? 'text-[var(--color-error)] hover:bg-[var(--color-error)]/5' : 'text-[var(--color-gray-700)] hover:bg-[var(--color-gray-50)]'}
-      `}
-      onClick={onClick}
-    >
-      {label}
-    </button>
   );
 }
 

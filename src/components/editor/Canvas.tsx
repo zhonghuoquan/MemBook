@@ -259,6 +259,10 @@ export function Canvas() {
                     y={sy}
                     width={sw}
                     height={sh}
+                    clipX={0}
+                    clipY={0}
+                    clipWidth={sw}
+                    clipHeight={sh}
                     onClick={() => setSelectedSlot(slot.id)}
                     onTap={() => setSelectedSlot(slot.id)}
                   >
@@ -284,14 +288,19 @@ export function Canvas() {
                       cornerRadius={photo ? 2 : 4}
                       dash={isDragTarget ? undefined : (photo ? undefined : [4, 4])}
                     />
-                    {photo && (
-                      <KonvaImage
-                        image={loadImage(photo.src)}
-                        width={sw}
-                        height={sh}
-                        cornerRadius={2}
-                      />
-                    )}
+                    {photo && (() => {
+                      const cover = calcCoverFit(photo.width, photo.height, sw, sh);
+                      return (
+                        <KonvaImage
+                          image={loadImage(photo.src)}
+                          x={cover.x}
+                          y={cover.y}
+                          width={cover.width}
+                          height={cover.height}
+                          cornerRadius={2}
+                        />
+                      );
+                    })()}
                     {!photo && (
                       <Text
                         text={isDragTarget ? '释放放置' : '拖入照片'}
@@ -331,6 +340,31 @@ export function Canvas() {
       </div>
     </div>
   );
+}
+
+/* ── Cover-fit 裁剪计算 (object-fit: cover) ──
+ * 等比例缩放照片填满槽位，超出部分隐藏。
+ * 返回图片绘制参数（偏移 + 尺寸），配合 Group clip 实现裁剪。 */
+function calcCoverFit(
+  photoW: number,
+  photoH: number,
+  slotW: number,
+  slotH: number,
+): { x: number; y: number; width: number; height: number } {
+  const slotAspect = slotW / slotH;
+  const photoAspect = photoW / photoH;
+
+  if (photoAspect > slotAspect) {
+    // 照片比槽位更宽 → 高度匹配，裁剪左右两侧
+    const h = slotH;
+    const w = slotH * photoAspect;
+    return { x: (slotW - w) / 2, y: 0, width: w, height: h };
+  } else {
+    // 照片比槽位更高 → 宽度匹配，裁剪上下两侧
+    const w = slotW;
+    const h = slotW / photoAspect;
+    return { x: 0, y: (slotH - h) / 2, width: w, height: h };
+  }
 }
 
 /* Image cache for Konva */
