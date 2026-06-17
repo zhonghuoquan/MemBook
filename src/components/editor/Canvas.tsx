@@ -3,7 +3,7 @@ import { Stage, Layer, Rect, Image as KonvaImage, Transformer, Group, Text } fro
 import Konva from 'konva';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
 import { TEMPLATES } from '../../types';
-import type { Template, SlotLayout } from '../../types';
+import type { Template, SlotLayout, PhotoPlacement, Photo } from '../../types';
 
 const CANVAS_W = 420;
 const CANVAS_H = 560;
@@ -24,6 +24,8 @@ export function Canvas() {
   const photos = usePhotoStore((s) => s.photos);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
+  const setEditFlyoutOpen = useUIStore((s) => s.setEditFlyoutOpen);
+  const setEditFlyoutTab = useUIStore((s) => s.setEditFlyoutTab);
   const addToast = useUIStore((s) => s.addToast);
 
   const currentPage = pages[currentPageIndex];
@@ -31,7 +33,6 @@ export function Canvas() {
     ? TEMPLATES.find((t) => t.id === currentPage.templateId)
     : undefined;
 
-  // Helper to compute slot bounds in stage coordinates
   const getSlotBounds = useCallback((slot: SlotLayout) => ({
     x: (slot.x / 100) * CANVAS_W,
     y: (slot.y / 100) * CANVAS_H,
@@ -39,7 +40,6 @@ export function Canvas() {
     h: (slot.height / 100) * CANVAS_H,
   }), []);
 
-  // Convert mouse event client coords to stage-local coords
   const clientToStage = useCallback((clientX: number, clientY: number) => {
     const stage = stageRef.current;
     if (!stage) return null;
@@ -50,7 +50,6 @@ export function Canvas() {
     };
   }, [canvasZoom]);
 
-  // Find which slot is hit by a given stage coordinate
   const hitTestSlots = useCallback((stageX: number, stageY: number): string | null => {
     if (!template) return null;
     for (const slot of template.slots) {
@@ -76,7 +75,7 @@ export function Canvas() {
     return () => ro.disconnect();
   }, []);
 
-  // ── Attach transformer to selected node ──
+  // ── Attach transformer ──
   useEffect(() => {
     if (!transformerRef.current || !stageRef.current) return;
     const stage = stageRef.current;
@@ -92,7 +91,7 @@ export function Canvas() {
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedSlotId, currentPageIndex, currentPage?.placements]);
 
-  // ── Ctrl + wheel zoom ──
+  // ── Ctrl + wheel ──
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     if (e.evt.ctrlKey || e.evt.metaKey) {
       e.evt.preventDefault();
@@ -101,10 +100,9 @@ export function Canvas() {
     }
   }, [setCanvasZoom]);
 
-  // ── Keyboard shortcuts ──
+  // ── Keyboard ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+Z undo
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         const entry = useHistoryStore.getState().undo();
@@ -115,7 +113,6 @@ export function Canvas() {
         }
         return;
       }
-      // Ctrl+Shift+Z or Ctrl+Y redo
       if ((e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey)))) {
         e.preventDefault();
         const entry = useHistoryStore.getState().redo();
@@ -141,38 +138,29 @@ export function Canvas() {
     return () => window.removeEventListener('keydown', handler);
   }, [canvasZoom, selectedSlotId, currentPageIndex, setSelectedSlot, setCanvasZoom, addToast]);
 
-  // ── Drop handler — receive photo from PhotoPanel drag ──
+  // ── Drop handler ──
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingFile(false);
     setDragOverSlotId(null);
-
     const photoId = e.dataTransfer.getData('text/plain');
-    if (!photoId) return;
-
+    if (!photoId) { /* file drop handled by PhotoPanel */ return; }
     const pt = clientToStage(e.clientX, e.clientY);
     if (!pt) return;
-
     const hitSlotId = hitTestSlots(pt.x, pt.y);
     if (hitSlotId) {
       placePhoto(currentPageIndex, hitSlotId, photoId);
       setSelectedSlot(hitSlotId);
       addToast({ type: 'success', message: '照片已放入页内' });
-    } else {
-      addToast({ type: 'info', message: '请拖到页面中的照片槽位' });
     }
   }, [clientToStage, hitTestSlots, currentPageIndex, placePhoto, setSelectedSlot, addToast]);
 
-  // ── Drag over — update visual feedback ──
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     if (!isDraggingFile) setIsDraggingFile(true);
     const pt = clientToStage(e.clientX, e.clientY);
-    if (pt) {
-      const hitId = hitTestSlots(pt.x, pt.y);
-      setDragOverSlotId(hitId);
-    }
+    if (pt) setDragOverSlotId(hitTestSlots(pt.x, pt.y));
   }, [clientToStage, hitTestSlots, isDraggingFile]);
 
   const handleDragLeave = useCallback(() => {
@@ -180,11 +168,24 @@ export function Canvas() {
     setDragOverSlotId(null);
   }, []);
 
+  // ── Double-click to edit ──
+  const handleSlotDblClick = useCallback((slotId: string) => {
+    if (!slotId) return;
+    // 检查槽位是否有照片
+    const page = pages[currentPageIndex];
+    if (!page) return;
+    const placement = page.placements.find((p) => p.slotId === slotId);
+    if (placement?.photoId) {
+      setSelectedSlot(slotId);
+      setEditFlyoutOpen(true);
+      setEditFlyoutTab('adjust');
+    }
+  }, [currentPageIndex, pages, setSelectedSlot, setEditFlyoutOpen, setEditFlyoutTab]);
+
   if (!currentPage || !template) {
     return <CanvasEmptyState />;
   }
 
-  // Scaled dimensions for scroll spacer
   const scaledW = CANVAS_W * canvasZoom;
   const scaledH = CANVAS_H * canvasZoom;
   const padding = 48;
@@ -204,7 +205,6 @@ export function Canvas() {
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}
     >
-      {/* Drop zone overlay */}
       {isDraggingFile && (
         <div className="absolute inset-0 z-[var(--z-overlay)] pointer-events-none flex items-center justify-center">
           <div className="px-6 py-3 bg-[var(--color-primary-600)]/90 text-white rounded-[var(--radius-lg)] shadow-lg text-[var(--text-body-sm)] font-[500]">
@@ -213,59 +213,23 @@ export function Canvas() {
         </div>
       )}
 
-      {/* Scroll spacer */}
-      <div
-        className="flex items-center justify-center"
-        style={{ width: scrollW, height: scrollH, padding }}
-      >
-        {/* CSS transform: scales the entire Stage uniformly */}
-        <div
-          style={{
-            transform: `scale(${canvasZoom})`,
-            transformOrigin: 'center center',
-            width: CANVAS_W,
-            height: CANVAS_H,
-            flexShrink: 0,
-          }}
-        >
+      <div className="flex items-center justify-center" style={{ width: scrollW, height: scrollH, padding }}>
+        <div style={{ transform: `scale(${canvasZoom})`, transformOrigin: 'center center', width: CANVAS_W, height: CANVAS_H, flexShrink: 0 }}>
           <Stage
             ref={stageRef}
             width={CANVAS_W}
             height={CANVAS_H}
-            style={{
-              background: currentPage.background,
-              borderRadius: '2px',
-              boxShadow: '0 2px 12px rgba(33,37,41,0.1)',
-            }}
+            style={{ background: currentPage.background, borderRadius: '2px', boxShadow: '0 2px 12px rgba(33,37,41,0.1)' }}
             onWheel={handleWheel}
-            onMouseDown={(e) => {
-              if (e.target === e.target.getStage()) setSelectedSlot(null);
-            }}
+            onMouseDown={(e) => { if (e.target === e.target.getStage()) setSelectedSlot(null); }}
           >
             <Layer>
-              {/* Page background */}
-              <Rect
-                x={0} y={0}
-                width={CANVAS_W} height={CANVAS_H}
-                fill={currentPage.background}
-                listening={false}
-              />
+              <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} fill={currentPage.background} listening={false} />
+              <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} stroke={currentPage.background === '#FFFFFF' ? '#E9ECEF' : 'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
 
-              {/* Subtle page edge */}
-              <Rect
-                x={0} y={0}
-                width={CANVAS_W} height={CANVAS_H}
-                stroke={currentPage.background === '#FFFFFF' ? '#E9ECEF' : 'rgba(0,0,0,0.06)'}
-                strokeWidth={1}
-                listening={false}
-              />
-
-              {/* Slot placeholders + Photo render */}
               {template.slots.map((slot) => {
                 const placement = currentPage.placements.find((p) => p.slotId === slot.id);
-                const photo = placement?.photoId
-                  ? photos.find((p) => p.id === placement.photoId)
-                  : undefined;
+                const photo = placement?.photoId ? photos.find((p) => p.id === placement.photoId) : undefined;
                 const isSelected = selectedSlotId === slot.id;
                 const isDragTarget = dragOverSlotId === slot.id;
                 const sx = slotX(slot);
@@ -285,53 +249,36 @@ export function Canvas() {
                     clipY={0}
                     clipWidth={sw}
                     clipHeight={sh}
+                    rotation={photo && placement?.rotation ? placement.rotation : 0}
+                    offsetX={photo && placement?.rotation ? sw / 2 : 0}
+                    offsetY={photo && placement?.rotation ? sh / 2 : 0}
                     onClick={() => setSelectedSlot(slot.id)}
                     onTap={() => setSelectedSlot(slot.id)}
+                    onDblClick={() => handleSlotDblClick(slot.id)}
+                    onDblTap={() => handleSlotDblClick(slot.id)}
                   >
+                    {/* Undo rotation offset for the background rect */}
                     <Rect
+                      x={-sx}
+                      y={-sy}
                       width={sw}
                       height={sh}
-                      fill={
-                        isDragTarget
-                          ? 'rgba(108,99,255,0.12)'
-                          : photo
-                            ? undefined
-                            : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')
-                      }
-                      stroke={
-                        isDragTarget
-                          ? '#6C63FF'
-                          : isSelected
-                            ? '#6C63FF'
-                            : (photo ? 'transparent' : '#DEE2E6')
-                      }
+                      offsetX={photo && placement?.rotation ? -sw/2 : 0}
+                      offsetY={photo && placement?.rotation ? -sh/2 : 0}
+                      rotation={photo && placement?.rotation ? -placement.rotation : 0}
+                      fill={isDragTarget ? 'rgba(108,99,255,0.12)' : photo ? undefined : (currentPage.background === '#FFFFFF' ? '#F8F9FA' : 'rgba(255,255,255,0.08)')}
+                      stroke={isDragTarget ? '#6C63FF' : isSelected ? '#6C63FF' : (photo ? 'transparent' : '#DEE2E6')}
                       strokeWidth={isDragTarget ? 2.5 : (isSelected ? 2 : 1)}
                       strokeScaleEnabled={false}
                       cornerRadius={photo ? 2 : 4}
                       dash={isDragTarget ? undefined : (photo ? undefined : [4, 4])}
                     />
-                    {photo && (() => {
-                      const cover = calcCoverFit(photo.width, photo.height, sw, sh);
-                      return (
-                        <KonvaImage
-                          image={loadImage(photo.src)}
-                          x={cover.x}
-                          y={cover.y}
-                          width={cover.width}
-                          height={cover.height}
-                          cornerRadius={2}
-                        />
-                      );
-                    })()}
+                    {photo && <CanvasPhotoRenderer placement={placement} photo={photo} slotW={sw} slotH={sh} />}
                     {!photo && (
                       <Text
                         text={isDragTarget ? '释放放置' : '拖入照片'}
-                        x={0}
-                        y={0}
-                        width={sw}
-                        height={sh}
-                        align="center"
-                        verticalAlign="middle"
+                        x={0} y={0} width={sw} height={sh}
+                        align="center" verticalAlign="middle"
                         fontSize={11}
                         fill={isDragTarget ? '#6C63FF' : '#ADB5BD'}
                         fontStyle={isDragTarget ? 'bold' : 'normal'}
@@ -356,7 +303,6 @@ export function Canvas() {
         </div>
       </div>
 
-      {/* Zoom indicator */}
       <div className="absolute bottom-2 right-3 text-[var(--text-nano)] text-[var(--color-gray-500)] select-none pointer-events-none bg-[var(--color-gray-100)]/80 px-1.5 py-0.5 rounded-[var(--radius-xs)]">
         {Math.round(canvasZoom * 100)}% · 第{currentPageIndex + 1}页
       </div>
@@ -364,38 +310,116 @@ export function Canvas() {
   );
 }
 
-/* ── Cover-fit 裁剪计算 (object-fit: cover) ──
- * 等比例缩放照片填满槽位，超出部分隐藏。
- * 返回图片绘制参数（偏移 + 尺寸），配合 Group clip 实现裁剪。 */
-function calcCoverFit(
-  photoW: number,
-  photoH: number,
-  slotW: number,
-  slotH: number,
-): { x: number; y: number; width: number; height: number } {
+/* ═══════════════════════════════════
+   单独的照片渲染组件（处理滤镜/调整）
+   ═══════════════════════════════════ */
+
+function CanvasPhotoRenderer({
+  placement,
+  photo,
+  slotW,
+  slotH,
+}: {
+  placement?: PhotoPlacement;
+  photo: Photo;
+  slotW: number;
+  slotH: number;
+}) {
+  const imageRef = useRef<Konva.Image>(null);
+  const [loaded, setLoaded] = useState(false);
+  const adj = placement?.adjustments;
+  const filterName = placement?.filter;
+
+  const cover = calcCoverFit(photo.width, photo.height, slotW, slotH);
+
+  // On image load: cache and apply filters
+  const handleImageLoad = useCallback(() => {
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    const node = imageRef.current;
+    if (!node || !loaded) return;
+
+    const filters: any[] = [];
+
+    // Map adjustments to Konva filters
+    if (adj) {
+      // Brightness: Konva range 0-1 where 0=normal, 1=max
+      // Map from -100~100 to -1~1
+      const b = adj.brightness / 100;
+      if (Math.abs(b) > 0.01) {
+        node.brightness(b);
+        filters.push(Konva.Filters.Brighten);
+      }
+
+      // Contrast: use Enhance filter (enhance property: -1 to 1)
+      const c = adj.contrast / 100;
+      if (Math.abs(c) > 0.01) {
+        node.enhance(c);
+        filters.push(Konva.Filters.Enhance);
+      }
+
+      // Saturation not directly supported → simulate via Enhance (combines contrast)
+      // Will use Enhance for both contrast and saturation combined
+    }
+
+    // Preset filters
+    if (filterName === '黑白') {
+      filters.push(Konva.Filters.Grayscale);
+    }
+
+    if (filters.length > 0) {
+      node.cache();
+      node.filters(filters);
+      node.getLayer()?.batchDraw();
+    } else if (node.isCached()) {
+      // Clear cache if no filters needed
+      node.clearCache();
+      node.filters([]);
+      node.getLayer()?.batchDraw();
+    }
+  }, [loaded, adj, filterName]);
+
+  return (
+    <KonvaImage
+      ref={imageRef}
+      image={loadImage(photo.src, handleImageLoad)}
+      x={cover.x}
+      y={cover.y}
+      width={cover.width}
+      height={cover.height}
+      cornerRadius={2}
+    />
+  );
+}
+
+/* ── Cover-fit 裁剪计算 ── */
+function calcCoverFit(photoW: number, photoH: number, slotW: number, slotH: number) {
   const slotAspect = slotW / slotH;
   const photoAspect = photoW / photoH;
-
   if (photoAspect > slotAspect) {
-    // 照片比槽位更宽 → 高度匹配，裁剪左右两侧
     const h = slotH;
     const w = slotH * photoAspect;
     return { x: (slotW - w) / 2, y: 0, width: w, height: h };
   } else {
-    // 照片比槽位更高 → 宽度匹配，裁剪上下两侧
     const w = slotW;
     const h = slotW / photoAspect;
     return { x: 0, y: (slotH - h) / 2, width: w, height: h };
   }
 }
 
-/* Image cache for Konva */
+/* ── Image cache with load callback ── */
 const imageCache = new Map<string, HTMLImageElement>();
 
-function loadImage(src: string): HTMLImageElement {
+function loadImage(src: string, onLoad?: () => void): HTMLImageElement {
   if (imageCache.has(src)) return imageCache.get(src)!;
   const img = new window.Image();
   img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    imageCache.set(src, img);
+    onLoad?.();
+  };
   img.src = src;
   imageCache.set(src, img);
   return img;

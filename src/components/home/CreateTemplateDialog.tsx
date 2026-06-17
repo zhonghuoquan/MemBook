@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import type { SlotLayout } from '../../types';
@@ -100,6 +100,102 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // ── 拖拽交互 ──
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    mode: 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br' | 'resize-l' | 'resize-r' | 'resize-t' | 'resize-b' | null;
+    slotIdx: number;
+    startX: number;
+    startY: number;
+    startSlot: SlotLayout;
+  } | null>(null);
+
+  const getCanvasPct = useCallback((clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: ((clientX - rect.left) / rect.width) * 100,
+      y: ((clientY - rect.top) / rect.height) * 100,
+    };
+  }, []);
+
+  const handleSlotMouseDown = useCallback((e: React.MouseEvent, idx: number) => {
+    e.stopPropagation();
+    setSelectedIdx(idx);
+    const pos = getCanvasPct(e.clientX, e.clientY);
+    dragRef.current = {
+      mode: 'move',
+      slotIdx: idx,
+      startX: pos.x,
+      startY: pos.y,
+      startSlot: { ...slots[idx] },
+    };
+  }, [getCanvasPct, slots]);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent, idx: number, corner: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setSelectedIdx(idx);
+    const pos = getCanvasPct(e.clientX, e.clientY);
+    dragRef.current = {
+      mode: corner as any,
+      slotIdx: idx,
+      startX: pos.x,
+      startY: pos.y,
+      startSlot: { ...slots[idx] },
+    };
+  }, [getCanvasPct, slots]);
+
+  // 全局 mousemove / mouseup
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const dr = dragRef.current;
+      if (!dr) return;
+      const pos = getCanvasPct(e.clientX, e.clientY);
+      const dx = pos.x - dr.startX;
+      const dy = pos.y - dr.startY;
+      const s = dr.startSlot;
+
+      setSlots((prev) => {
+        const next = [...prev];
+        const slot = { ...next[dr.slotIdx] };
+        const snap = (v: number) => snapToGrid ? Math.round(v / GRID) * GRID : Math.round(v * 10) / 10;
+
+        if (dr.mode === 'move') {
+          slot.x = snap(Math.max(0, Math.min(100 - slot.width, s.x + dx)));
+          slot.y = snap(Math.max(0, Math.min(100 - slot.height, s.y + dy)));
+        } else {
+          // Resize
+          let { x, y, width, height } = s;
+          if (dr.mode?.includes('r')) { width = Math.max(5, s.width + dx); }
+          if (dr.mode?.includes('l')) { width = Math.max(5, s.width - dx); x = s.x + (s.width - Math.max(5, s.width - dx)); }
+          if (dr.mode?.includes('b')) { height = Math.max(5, s.height + dy); }
+          if (dr.mode?.includes('t')) { height = Math.max(5, s.height - dy); y = s.y + (s.height - Math.max(5, s.height - dy)); }
+          // Clamp
+          if (x < 0) { width += x; x = 0; }
+          if (y < 0) { height += y; y = 0; }
+          if (x + width > 100) { width = 100 - x; }
+          if (y + height > 100) { height = 100 - y; }
+          slot.x = snap(x);
+          slot.y = snap(y);
+          slot.width = snap(Math.max(5, width));
+          slot.height = snap(Math.max(5, height));
+        }
+        next[dr.slotIdx] = slot;
+        return next;
+      });
+    };
+
+    const onUp = () => { dragRef.current = null; };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [getCanvasPct, snapToGrid]);
 
   const isEditing = !!editTemplate;
   const isCustomRC = selectedPreset === 'custom-rc';
@@ -349,7 +445,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         {/* ── Right: Preview + Properties ── */}
         <div className="flex-1 min-w-0">
           {/* Interactive preview */}
-          <div className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden">
+          <div ref={canvasRef} className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden">
             {/* Grid overlay */}
             {snapToGrid && (
               <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -362,7 +458,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               </svg>
             )}
 
-            {/* Slots */}
+            {/* Slots — 支持拖拽移动 + 拖拽缩放 */}
             {slots.map((slot, i) => {
               const isText = slot.id.startsWith('text_');
               const isSelected = selectedIdx === i;
@@ -373,22 +469,38 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               return (
                 <div
                   key={slot.id}
-                  className={`absolute rounded-[var(--radius-sm)] flex items-center justify-center cursor-pointer transition-all duration-100
-                              ${isText ? 'border-dashed' : 'border-solid'}
-                              ${isSelected ? 'ring-2 ring-[var(--color-primary-500)] z-10' : 'ring-0 z-[1]'}
-                              hover:ring-1 hover:ring-[var(--color-primary-400)]`}
+                  className={`absolute rounded-[var(--radius-sm)] select-none ${
+                    isSelected ? 'z-10' : 'z-[1]'
+                  }`}
                   style={{
                     left: `${slot.x}%`, top: `${slot.y}%`,
                     width: `${slot.width}%`, height: `${slot.height}%`,
                     backgroundColor: `hsl(${hue}, ${sat}%, ${lig}%)`,
                     border: isText ? '1.5px dashed #d4a854' : '1px solid rgba(255,255,255,0.4)',
+                    outline: isSelected ? '2px solid var(--color-primary-500)' : 'none',
+                    outlineOffset: -1,
                   }}
-                  onClick={() => setSelectedIdx(i)}
+                  onMouseDown={(e) => handleSlotMouseDown(e, i)}
                 >
-                  <span className="text-[10px] font-[500] select-none"
+                  <span className="text-[10px] font-[500] pointer-events-none select-none"
                         style={{ color: isText ? '#a08040' : 'rgba(255,255,255,0.7)' }}>
                     {isText ? 'T' : i + 1}
                   </span>
+
+                  {/* 选中时显示缩放控制柄 */}
+                  {isSelected && (
+                    <>
+                      <Handle pos="tl" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-tl')} />
+                      <Handle pos="tr" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-tr')} />
+                      <Handle pos="bl" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-bl')} />
+                      <Handle pos="br" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-br')} />
+                      {/* 边缘缩放 */}
+                      <Handle pos="t" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-t')} />
+                      <Handle pos="b" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-b')} />
+                      <Handle pos="l" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-l')} />
+                      <Handle pos="r" onMouseDown={(e) => handleResizeMouseDown(e, i, 'resize-r')} />
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -475,7 +587,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       {/* Actions */}
       <div className="flex justify-between items-center mt-5 pt-4 border-t border-[var(--color-border-light)]">
         <span className="text-[10px] text-[var(--color-text-tertiary)]">
-          {slots.length} 个区域 · 点击预览中的槽位可编辑
+          {slots.length} 个区域 · 拖动移动 · 拖拽角/边缘缩放 · 选中后可在下方调参
         </span>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onClose}>取消</Button>
@@ -485,6 +597,31 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ── 缩放控制柄 ── */
+function Handle({ pos, onMouseDown }: { pos: string; onMouseDown: (e: React.MouseEvent) => void }) {
+  const positions: Record<string, React.CSSProperties> = {
+    tl: { top: -3, left: -3, cursor: 'nw-resize' },
+    tr: { top: -3, right: -3, cursor: 'ne-resize' },
+    bl: { bottom: -3, left: -3, cursor: 'sw-resize' },
+    br: { bottom: -3, right: -3, cursor: 'se-resize' },
+    t: { top: -3, left: '50%', cursor: 'n-resize', transform: 'translateX(-50%)' },
+    b: { bottom: -3, left: '50%', cursor: 's-resize', transform: 'translateX(-50%)' },
+    l: { top: '50%', left: -3, cursor: 'w-resize', transform: 'translateY(-50%)' },
+    r: { top: '50%', right: -3, cursor: 'e-resize', transform: 'translateY(-50%)' },
+  };
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="absolute bg-white border border-[var(--color-primary-500)] rounded-full z-20"
+      style={{
+        width: 12, height: 12,
+        ...positions[pos],
+        boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+      }}
+    />
   );
 }
 

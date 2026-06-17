@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type {
   ViewMode, PanelTab, EditTab, BottomNavState,
-  AlbumPage, Photo, Toast, HistoryEntry, StorageMode,
+  AlbumPage, Photo, Toast, HistoryEntry, StorageMode, PhotoAdjustments,
 } from '../types';
 import { TEMPLATES, STORAGE_MODE_KEY } from '../types';
 
@@ -83,6 +83,11 @@ interface EditorState {
   setPageTemplate: (pageIndex: number, templateId: string) => void;
   placePhoto: (pageIndex: number, slotId: string, photoId: string) => void;
   removePhotoFromSlot: (pageIndex: number, slotId: string) => void;
+  /* 照片编辑 */
+  updatePlacementRotation: (pageIndex: number, slotId: string, rotation: number) => void;
+  updatePlacementAdjustments: (pageIndex: number, slotId: string, adjustments: PhotoAdjustments) => void;
+  updatePlacementFilter: (pageIndex: number, slotId: string, filter: string | null) => void;
+  resetPlacementEdits: (pageIndex: number, slotId: string) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
@@ -191,6 +196,62 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...newPages[pageIndex],
         placements: newPages[pageIndex].placements.map((p) =>
           p.slotId === slotId ? { ...p, photoId: null } : p
+        ),
+      };
+      return { pages: newPages };
+    });
+  },
+  /* 照片编辑操作 */
+  updatePlacementRotation: (pageIndex, slotId, rotation) => {
+    pushSnapshot();
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        placements: newPages[pageIndex].placements.map((p) =>
+          p.slotId === slotId ? { ...p, rotation } : p
+        ),
+      };
+      return { pages: newPages };
+    });
+  },
+  updatePlacementAdjustments: (pageIndex, slotId, adjustments) => {
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        placements: newPages[pageIndex].placements.map((p) =>
+          p.slotId === slotId ? { ...p, adjustments } : p
+        ),
+      };
+      return { pages: newPages };
+    });
+  },
+  updatePlacementFilter: (pageIndex, slotId, filter) => {
+    pushSnapshot();
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        placements: newPages[pageIndex].placements.map((p) =>
+          p.slotId === slotId ? { ...p, filter } : p
+        ),
+      };
+      return { pages: newPages };
+    });
+  },
+  resetPlacementEdits: (pageIndex, slotId) => {
+    pushSnapshot();
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        placements: newPages[pageIndex].placements.map((p) =>
+          p.slotId === slotId ? { ...p, adjustments: undefined, filter: undefined, rotation: undefined } : p
         ),
       };
       return { pages: newPages };

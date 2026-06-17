@@ -56,6 +56,12 @@ export type Photo = {
 };
 
 /* ── 页面 ── */
+export type PhotoAdjustments = {
+  brightness: number;   // -100 ~ 100, 0 = normal
+  contrast: number;     // -100 ~ 100, 0 = normal
+  saturation: number;   // -100 ~ 100, 0 = normal
+};
+
 export type PhotoPlacement = {
   slotId: string;
   photoId: string | null;
@@ -63,6 +69,8 @@ export type PhotoPlacement = {
   rotation?: number;
   flipH?: boolean;
   flipV?: boolean;
+  adjustments?: PhotoAdjustments;
+  filter?: string | null;    // filter name, null = none
 };
 
 export type AlbumPage = {
