@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 import type {
   ViewMode, PanelTab, EditTab, BottomNavState,
-  AlbumPage, Photo, Toast, HistoryEntry,
+  AlbumPage, Photo, Toast, HistoryEntry, StorageMode,
 } from '../types';
-import { TEMPLATES } from '../types';
+import { TEMPLATES, STORAGE_MODE_KEY } from '../types';
 
-/* ── UI Store (视图切换、面板、toast、缩放) ── */
+/* ── UI Store (视图切换、面板、toast、缩放、存储模式) ── */
 interface UIState {
   viewMode: ViewMode;
   activePanel: PanelTab;
@@ -13,6 +13,7 @@ interface UIState {
   editFlyoutTab: EditTab;
   bottomNav: BottomNavState;
   canvasZoom: number;        // 0.3 ~ 3.0, 默认 1.0
+  storageMode: StorageMode | null;  // null = 尚未选择
   toasts: Toast[];
 
   /* Actions */
@@ -22,8 +23,18 @@ interface UIState {
   setEditFlyoutTab: (tab: EditTab) => void;
   toggleBottomNav: () => void;
   setCanvasZoom: (zoom: number) => void;
+  setStorageMode: (mode: StorageMode) => void;
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
+}
+
+/* 从 localStorage 恢复存储偏好 */
+function loadStorageMode(): StorageMode | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_MODE_KEY);
+    if (saved === 'direct' || saved === 'import') return saved;
+  } catch { /* ignore */ }
+  return null;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -33,6 +44,7 @@ export const useUIStore = create<UIState>((set) => ({
   editFlyoutTab: 'crop',
   bottomNav: 'expanded',
   canvasZoom: 1.0,
+  storageMode: loadStorageMode(),
   toasts: [],
 
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -42,6 +54,10 @@ export const useUIStore = create<UIState>((set) => ({
   toggleBottomNav: () =>
     set((s) => ({ bottomNav: s.bottomNav === 'expanded' ? 'collapsed' : 'expanded' })),
   setCanvasZoom: (zoom) => set({ canvasZoom: Math.max(0.3, Math.min(3, zoom)) }),
+  setStorageMode: (mode) => {
+    try { localStorage.setItem(STORAGE_MODE_KEY, mode); } catch { /* ignore */ }
+    set({ storageMode: mode });
+  },
   addToast: (toast) =>
     set((s) => ({ toasts: [...s.toasts, { ...toast, id: `toast-${Date.now()}` }] })),
   removeToast: (id) =>

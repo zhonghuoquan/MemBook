@@ -45,13 +45,14 @@ export type Template = {
 /* ── 照片 ── */
 export type Photo = {
   id: string;
-  src: string;        // 本地文件句柄或 blob URL
+  src: string;        // blob URL (import 模式) 或 文件相对路径 (direct 模式)
   name: string;
   date: string;       // ISO date string
   width: number;
   height: number;
   orientation: 'landscape' | 'portrait' | 'square';
   file?: File;
+  storageMode?: 'direct' | 'import';  // 此照片使用的存储方式
 };
 
 /* ── 页面 ── */
@@ -88,6 +89,11 @@ export type EditTab = 'crop' | 'adjust' | 'filter' | 'rotate';
 export type HomeTab = 'create' | 'projects' | 'templates';
 
 export type BottomNavState = 'expanded' | 'collapsed';
+
+/* ── 存储模式 (PRD 1.4 双轨策略) ── */
+export type StorageMode = 'direct' | 'import';
+export const STORAGE_MODE_KEY = 'membook-storage-mode';
+export const STORAGE_HANDLE_KEY = 'membook-direct-handle';
 
 /* ── 历史状态 ── */
 export type HistoryEntry = {

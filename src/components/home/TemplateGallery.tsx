@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react';
 import { TEMPLATES } from '../../types';
 import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
 import { CreateDialog } from './CreateDialog';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
-import { listCustomTemplates, deleteCustomTemplate } from '../../db';
+import { listCustomTemplates, deleteCustomTemplate, createCustomTemplate } from '../../db';
 
 interface TemplateGalleryProps {
   onCreateFromTemplate: (templateId: string, name: string, size: AlbumSize) => void;
@@ -36,7 +36,6 @@ interface FlatTemplate {
 
 export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) {
   const [countFilter, setCountFilter] = useState<CountFilter>('all');
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
   const [showTemplateMaker, setShowTemplateMaker] = useState(false);
 
@@ -138,6 +137,20 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
     loadCustomTemplates();
   };
 
+  const handleCopyTemplate = async (tmpl: FlatTemplate) => {
+    if (tmpl.isBuiltIn) {
+      // 系统模板 → 复制为自定义模板
+      const sysTemplate = TEMPLATES.find((t) => t.id === tmpl.id);
+      if (!sysTemplate) return;
+      await createCustomTemplate(sysTemplate.name + '(副本)', sysTemplate.slots);
+    } else {
+      const custom = customTemplates.find((c) => c.id === tmpl.id);
+      if (!custom) return;
+      await createCustomTemplate(custom.name + '(副本)', custom.slots);
+    }
+    loadCustomTemplates();
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       {/* Header */}
@@ -207,9 +220,8 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
             <TemplateCard
               key={tmpl.id}
               template={tmpl}
-              isHovered={hoveredId === tmpl.id}
-              onHover={setHoveredId}
               onCreate={() => handleTemplateClick(tmpl.id)}
+              onCopy={() => handleCopyTemplate(tmpl)}
               onEdit={tmpl.isBuiltIn ? undefined : () => handleEditTemplate(tmpl)}
               onDelete={tmpl.isBuiltIn ? undefined : () => setDeleteTargetId(tmpl.id)}
             />
@@ -279,16 +291,14 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
 /* ── Template Card ── */
 function TemplateCard({
   template,
-  isHovered,
-  onHover,
   onCreate,
+  onCopy,
   onEdit,
   onDelete,
 }: {
   template: FlatTemplate;
-  isHovered: boolean;
-  onHover: (id: string | null) => void;
   onCreate: () => void;
+  onCopy: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
@@ -299,10 +309,8 @@ function TemplateCard({
       className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-hidden
                  hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
                  transition-all duration-200 cursor-pointer"
-      onMouseEnter={() => onHover(template.id)}
-      onMouseLeave={() => onHover(null)}
     >
-      {/* Preview area — click to create */}
+      {/* Preview — click to create album */}
       <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center"
            onClick={onCreate}>
         <div className="w-full h-full max-w-[140px] max-h-[105px]">
@@ -310,97 +318,97 @@ function TemplateCard({
         </div>
       </div>
 
-      {/* Info + Action buttons */}
+      {/* Info */}
       <div className="p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
-                 onClick={onCreate}>
-              {template.name}
-            </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
-                {template.slots.length}位 · {template.category || '模板'}
+        <div className="min-w-0 flex-1">
+          <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
+               onClick={onCreate}>
+            {template.name}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
+              {template.slots.length}位 · {template.category || '模板'}
+            </span>
+            {isCustom && (
+              <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
+                自定义
               </span>
-              {isCustom && (
-                <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
-                  自定义
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Action buttons — always visible for custom templates */}
-        {isCustom && onEdit && onDelete && (
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-light)]">
-            <button
-              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
-                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
-                         text-[var(--color-gray-600)] hover:text-[var(--color-primary-600)]
-                         hover:border-[var(--color-primary-400)] cursor-pointer transition-all"
-              onClick={(e) => { e.stopPropagation(); onCreate(); }}
-            >
+        {/* Action bar — available on every template */}
+        <div className="flex items-center gap-1 mt-2.5 pt-2 border-t border-[var(--color-border-light)]">
+          <IconBtn
+            icon={
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
                 <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" />
                 <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
                 <path d="M1.5 9l3-2.5 2.5 2.5 1.5-1.5L12.5 11" />
               </svg>
-              创建相册
-            </button>
-            <button
-              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
-                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
-                         text-[var(--color-gray-600)] hover:text-[var(--color-primary-600)]
-                         hover:border-[var(--color-primary-400)] cursor-pointer transition-all"
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            >
+            }
+            label="创建"
+            onClick={onCreate}
+          />
+          <IconBtn
+            icon={
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <rect x="2" y="2.5" width="10" height="9" rx="1.5" />
+                <rect x="4.5" y="5" width="5" height="4" rx="0.5" />
+              </svg>
+            }
+            label="复制"
+            onClick={onCopy}
+          />
+          {/* 编辑/删除 仅自定义模板 */}
+          <IconBtn
+            icon={
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                 <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
               </svg>
-              编辑
-            </button>
-            <button
-              className="flex-1 h-8 flex items-center justify-center gap-1 rounded-[var(--radius-md)]
-                         bg-white border border-[var(--color-border)] text-[var(--text-caption)] font-[500]
-                         text-[var(--color-gray-400)] hover:text-[var(--color-error)]
-                         hover:border-[var(--color-error)]/40 cursor-pointer transition-all"
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            >
+            }
+            label="编辑"
+            onClick={onEdit || (() => {})}
+            disabled={!onEdit}
+          />
+          <IconBtn
+            icon={
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                 <polyline points="2 3.5 12 3.5" />
                 <path d="M4.5 3.5V2a1 1 0 011-1h3a1 1 0 011 1v1.5" />
                 <path d="M3 3.5l.7 8.4a1 1 0 001 .9h4.6a1 1 0 001-.9l.7-8.4" />
               </svg>
-              删除
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Hover overlay — create button for system templates */}
-      {!isCustom && (
-        <div
-          className={`absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent
-            flex items-end justify-center pb-5 pointer-events-none
-            transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
-        >
-          <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-white rounded-full
-                           text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-800)]
-                           shadow-[var(--shadow-md)]">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-              <circle cx="6" cy="6.5" r="1.5" />
-              <path d="M1.5 10l3.5-3 3 3 2-2 4.5 4.5" />
-            </svg>
-            使用此模板创建
-          </span>
+            }
+            label="删除"
+            onClick={onDelete || (() => {})}
+            disabled={!onDelete}
+          />
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
+/** Small icon action button */
+function IconBtn({ icon, label, onClick, disabled }: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      className={`flex-1 flex items-center justify-center gap-0.5 h-7 rounded-[var(--radius-sm)]
+        border border-[var(--color-border-light)] transition-all duration-100
+        ${disabled
+          ? 'opacity-30 cursor-not-allowed bg-transparent border-transparent'
+          : 'bg-white text-[var(--color-gray-500)] hover:text-[var(--color-primary-600)] hover:border-[var(--color-primary-300)] cursor-pointer'
+        }`}
+      onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+      title={label}
+    >
+      {icon}
+      <span className="text-[10px] font-[500]">{label}</span>
+    </button>
+  );
+}
+
+/** Empty state create-card */
 /* ── "+ 创建模板" card ── */
 function CreateTemplateCard({ onClick }: { onClick: () => void }) {
   return (
