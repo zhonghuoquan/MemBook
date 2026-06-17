@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { TEMPLATES } from '../../types';
 import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
 import { CreateDialog } from './CreateDialog';
@@ -302,16 +302,29 @@ function TemplateCard({
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
   const isCustom = !template.isBuiltIn;
 
   return (
-    <div
-      className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-hidden
-                 hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
-                 transition-all duration-200 cursor-pointer"
-    >
+    <div className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
+                    hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
+                    transition-all duration-150 group cursor-pointer">
       {/* Preview — click to create album */}
-      <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center"
+      <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center rounded-t-[var(--radius-xl)]"
            onClick={onCreate}>
         <div className="w-full h-full max-w-[140px] max-h-[105px]">
           <TemplateSlotPreview slots={template.slots} />
@@ -320,90 +333,91 @@ function TemplateCard({
 
       {/* Info */}
       <div className="p-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
-               onClick={onCreate}>
-            {template.name}
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
-              {template.slots.length}位 · {template.category || '模板'}
-            </span>
-            {isCustom && (
-              <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
-                自定义
-              </span>
-            )}
-          </div>
+        <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
+             onClick={onCreate}>
+          {template.name}
         </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
+            {template.slots.length}位 · {template.category || '模板'}
+          </span>
+          {isCustom && (
+            <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
+              自定义
+            </span>
+          )}
+        </div>
+      </div>
 
-        {/* Action bar — available on every template */}
-        <div className="flex items-center gap-1 mt-2.5 pt-2 border-t border-[var(--color-border-light)]">
-          <IconBtn
-            icon={
+      {/* "..." menu button — hover to reveal, same as project cards */}
+      <div className="absolute top-2 right-2" ref={menuRef}>
+        <button
+          className="w-7 h-7 flex items-center justify-center
+                     bg-white/80 border border-[var(--color-border)] rounded-full
+                     text-[var(--color-gray-500)] opacity-0 group-hover:opacity-100
+                     hover:bg-white hover:text-[var(--color-gray-700)]
+                     transition-all duration-150 cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          title="更多操作"
+        >
+          <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
+            <circle cx="7" cy="3" r="1.2" />
+            <circle cx="7" cy="7" r="1.2" />
+            <circle cx="7" cy="11" r="1.2" />
+          </svg>
+        </button>
+
+        {/* Dropdown menu */}
+        {menuOpen && (
+          <div className="absolute top-8 right-0 z-20 bg-white border border-[var(--color-border)]
+                          rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1 min-w-[130px]">
+            <MenuBtn label="创建相册" icon={
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
                 <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" />
                 <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
                 <path d="M1.5 9l3-2.5 2.5 2.5 1.5-1.5L12.5 11" />
               </svg>
-            }
-            label="创建"
-            onClick={onCreate}
-          />
-          <IconBtn
-            icon={
+            } onClick={() => { setMenuOpen(false); onCreate(); }} />
+            <MenuBtn label="复制" icon={
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                 <rect x="2" y="2.5" width="10" height="9" rx="1.5" />
                 <rect x="4.5" y="5" width="5" height="4" rx="0.5" />
               </svg>
-            }
-            label="复制"
-            onClick={onCopy}
-          />
-          {/* 编辑/删除 仅自定义模板 */}
-          <IconBtn
-            icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
-              </svg>
-            }
-            label="编辑"
-            onClick={onEdit || (() => {})}
-            disabled={!onEdit}
-          />
-          <IconBtn
-            icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <polyline points="2 3.5 12 3.5" />
-                <path d="M4.5 3.5V2a1 1 0 011-1h3a1 1 0 011 1v1.5" />
-                <path d="M3 3.5l.7 8.4a1 1 0 001 .9h4.6a1 1 0 001-.9l.7-8.4" />
-              </svg>
-            }
-            label="删除"
-            onClick={onDelete || (() => {})}
-            disabled={!onDelete}
-          />
-        </div>
+            } onClick={() => { setMenuOpen(false); onCopy(); }} />
+            {onEdit && (
+              <MenuBtn label="编辑模板" icon={
+                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
+                </svg>
+              } onClick={() => { setMenuOpen(false); onEdit(); }} />
+            )}
+            {onDelete && (
+              <div className="border-t border-[var(--color-border-light)] mt-1 pt-1">
+                <MenuBtn label="删除模板" danger icon={
+                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                    <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+                    <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
+                  </svg>
+                } onClick={() => { setMenuOpen(false); onDelete(); }} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/** Small icon action button */
-function IconBtn({ icon, label, onClick, disabled }: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+/** Dropdown menu button */
+function MenuBtn({ label, icon, danger, onClick }: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }) {
   return (
     <button
-      className={`flex-1 flex items-center justify-center gap-0.5 h-7 rounded-[var(--radius-sm)]
-        border border-[var(--color-border-light)] transition-all duration-100
-        ${disabled
-          ? 'opacity-30 cursor-not-allowed bg-transparent border-transparent'
-          : 'bg-white text-[var(--color-gray-500)] hover:text-[var(--color-primary-600)] hover:border-[var(--color-primary-300)] cursor-pointer'
-        }`}
-      onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
-      title={label}
+      className={`w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)] border-none bg-transparent cursor-pointer
+        transition-colors ${danger ? 'text-[var(--color-error)] hover:bg-[var(--color-error)]/5' : 'text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]'}`}
+      onClick={onClick}
     >
       {icon}
-      <span className="text-[10px] font-[500]">{label}</span>
+      {label}
     </button>
   );
 }
