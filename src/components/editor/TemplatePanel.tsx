@@ -20,8 +20,7 @@ export function TemplatePanel() {
   const creativeTemplates = TEMPLATES.filter((t) => t.category === 'creative');
 
   return (
-    <aside className="w-[var(--layout-panel-width)] bg-[var(--color-surface-panel)] border-r border-[var(--color-border)]
-                      flex flex-col shrink-0 overflow-hidden">
+    <aside className="flex-1 bg-[var(--color-surface)] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-light)]">
         <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">模板</span>

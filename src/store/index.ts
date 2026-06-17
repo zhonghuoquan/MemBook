@@ -76,6 +76,8 @@ interface EditorState {
   setSelectedSlot: (slotId: string | null) => void;
   setSelectedPhoto: (photoId: string | null) => void;
   addPage: (templateId?: string) => void;
+  insertPage: (index: number, templateId?: string) => void;
+  copyPage: (index: number) => void;
   removePage: (index: number) => void;
   reorderPages: (fromIndex: number, toIndex: number) => void;
   setPages: (pages: AlbumPage[]) => void;
@@ -124,6 +126,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
         },
       ],
     }));
+  },
+  insertPage: (index, templateId) => {
+    pushSnapshot();
+    set((s) => {
+      const newPages = [...s.pages];
+      newPages.splice(index, 0, {
+        id: `page-${Date.now()}`,
+        templateId: templateId || 'full',
+        placements: [],
+        background: '#FFFFFF',
+      });
+      return { pages: newPages };
+    });
+  },
+  copyPage: (index) => {
+    pushSnapshot();
+    set((s) => {
+      if (!s.pages[index]) return s;
+      const source = s.pages[index];
+      const newPage: AlbumPage = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: `page-${Date.now()}`,
+      };
+      const newPages = [...s.pages];
+      newPages.splice(index + 1, 0, newPage);
+      return { pages: newPages };
+    });
   },
   removePage: (index) => {
     pushSnapshot();

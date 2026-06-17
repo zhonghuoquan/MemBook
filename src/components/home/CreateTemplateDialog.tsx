@@ -114,11 +114,11 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     setSelectedIdx(null);
   }, [editTemplate?.id]); // eslint-disable-line
 
-  /* ── 预设/边距/行列变化 → 重新生成网格 ── */
+  /* ── 预设/行列变化 → 重新生成网格（边距变化不触发） ── */
   useEffect(() => {
     setSlots(genSlots(preset, margin, rows, cols));
     setSelectedIdx(null);
-  }, [preset, margin, rows, cols]);
+  }, [preset, rows, cols]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── 画布坐标 ── */
   const getPct = useCallback((clientX: number, clientY: number) => {

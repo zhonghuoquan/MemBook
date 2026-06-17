@@ -55,17 +55,18 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
   return (
     <header className="h-[var(--layout-toolbar-height)] bg-white border-b border-[var(--color-border)] flex items-center px-3 gap-2 shrink-0 z-[var(--z-flat)]">
-      {/* Left: Logo + Back */}
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-[var(--text-h3)] font-[700] text-[var(--color-brand)] select-none mr-1">MemBook</span>
+      {/* Left: MemBook brand — click to go home */}
+      <div className="flex items-center gap-1.5 shrink-0">
         <button
-          className="flex items-center gap-1 px-2 py-1 text-[var(--text-body-sm)] text-[var(--color-gray-600)] border-none rounded-[var(--radius-sm)] bg-transparent cursor-pointer hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-800)] transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] border-none bg-transparent cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors"
           onClick={onBack}
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 3L5 8l5 5" />
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-[var(--color-brand)]">
+            <rect x="3" y="3" width="14" height="14" rx="2" />
+            <circle cx="9" cy="9" r="2.5" />
+            <path d="M3 15l4-3 3 2 3-3 4 4" />
           </svg>
-          主页
+          <span className="text-[var(--text-body)] font-[700] text-[var(--color-brand)]">MemBook</span>
         </button>
       </div>
 
