@@ -155,15 +155,16 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           slot.x = dr.sx + dx;
           slot.y = dr.sy + dy;
         } else {
-          let { x: ox, y: oy, width: ow, height: oh } = prev[dr.idx];
-          let nw = ow, nh = oh, nx = ox, ny = oy;
-          if (dr.mode?.includes('r')) nw = Math.max(MIN_SLOT, dr.startX - ox + dx);
-          if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = ox + (ow - nw); }
-          if (dr.mode?.includes('b')) nh = Math.max(MIN_SLOT, dr.startY - oy + dy);
-          if (dr.mode?.includes('t')) { nh = Math.max(MIN_SLOT, oh - dy); ny = oy + (oh - nh); }
+          // 缩放：始终基于起始值计算，避免累积误差
+          const ow = dr.startX - dr.sx; // 原始宽度
+          const oh = dr.startY - dr.sy; // 原始高度
+          let nw = ow, nh = oh, nx = dr.sx, ny = dr.sy;
+          if (dr.mode?.includes('r')) nw = Math.max(MIN_SLOT, ow + dx);
+          if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = dr.sx + (ow - nw); }
+          if (dr.mode?.includes('b')) nh = Math.max(MIN_SLOT, oh + dy);
+          if (dr.mode?.includes('t')) { nh = Math.max(MIN_SLOT, oh - dy); ny = dr.sy + (oh - nh); }
           slot.x = nx; slot.y = ny;
-          slot.width = Math.max(MIN_SLOT, nw);
-          slot.height = Math.max(MIN_SLOT, nh);
+          slot.width = nw; slot.height = nh;
         }
         return next;
       });

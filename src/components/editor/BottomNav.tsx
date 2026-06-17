@@ -1,10 +1,10 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef, useEffect, forwardRef } from 'react';
 import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
 import { TEMPLATES } from '../../types';
 import type { AlbumPage, Template } from '../../types';
 
-const THUMB_W = 56;
-const THUMB_H = 74;
+const THUMB_W = 96;
+const THUMB_H = 128;
 
 export function BottomNav() {
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
@@ -22,10 +22,23 @@ export function BottomNav() {
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
   const addToast = useUIStore((s) => s.addToast);
 
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
+  const [menuOpenIndex, setMenuOpenIndex] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const collapsed = bottomNav === 'collapsed';
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (menuOpenIndex === null) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpenIndex(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpenIndex]);
 
   const handleAddPage = () => {
     addPage();
@@ -38,10 +51,11 @@ export function BottomNav() {
     setInsertIndex(null);
   }, [insertPage, addToast]);
 
+  // ── Page menu actions ──
   const handleCopyPage = useCallback((index: number) => {
     copyPage(index);
     addToast({ type: 'success', message: '页面已复制' });
-    setHoveredIndex(null);
+    setMenuOpenIndex(null);
   }, [copyPage, addToast]);
 
   const handleCopyStyle = useCallback((index: number) => {
@@ -49,18 +63,26 @@ export function BottomNav() {
       setPageTemplate(currentPageIndex, pages[index].templateId);
       addToast({ type: 'success', message: '页面样式已应用' });
     }
-    setHoveredIndex(null);
+    setMenuOpenIndex(null);
   }, [pages, currentPageIndex, setPageTemplate, addToast]);
 
-  const handleRemovePage = useCallback((index: number) => {
+  const handleDeletePage = useCallback((index: number) => {
     if (pages.length <= 1) {
       addToast({ type: 'warning', message: '至少保留一个页面' });
       return;
     }
+    // If deleting current page, navigate to a safe page first
+    if (index === currentPageIndex) {
+      const target = index > 0 ? index - 1 : 0;
+      setCurrentPage(target);
+    } else if (index < currentPageIndex) {
+      // Adjust currentPageIndex when deleting a page before it
+      setCurrentPage(currentPageIndex - 1);
+    }
     removePage(index);
     addToast({ type: 'info', message: '页面已删除' });
-    setHoveredIndex(null);
-  }, [pages, removePage, addToast]);
+    setMenuOpenIndex(null);
+  }, [pages, currentPageIndex, removePage, setCurrentPage, addToast]);
 
   const handleMoveLeft = () => {
     if (currentPageIndex > 0) {
@@ -84,7 +106,7 @@ export function BottomNav() {
         bg-white border-t border-[var(--color-border)]
         flex items-stretch shrink-0 relative
         transition-[height] duration-200 ease-in-out
-        ${collapsed ? 'h-[var(--layout-bottom-nav-collapsed)]' : 'h-[90px]'}
+        ${collapsed ? 'h-[var(--layout-bottom-nav-collapsed)]' : 'h-[150px]'}
       `}
     >
       {!collapsed && (
@@ -110,129 +132,92 @@ export function BottomNav() {
             </svg>
           </button>
 
-          {/* ── Thumbnails Row with Insert Zones ── */}
+          {/* ── Thumbnails Row with insert zones ── */}
           <div
             className="flex-1 flex items-center overflow-x-auto py-1 no-scrollbar"
-            onMouseLeave={() => { setHoveredIndex(null); setInsertIndex(null); }}
+            onMouseLeave={() => setInsertIndex(null)}
           >
             {pages.length === 0 ? (
               <div className="text-[var(--text-caption)] text-[var(--color-text-tertiary)] px-2">暂无页面</div>
             ) : (
               <div className="flex items-center">
-                {pages.map((page, i) => {
-                  const template = TEMPLATES.find((t) => t.id === page.templateId);
-                  const isHovered = hoveredIndex === i;
+                {pages.map((page, i) => (
+                  <div key={page.id} className="flex items-center">
+                    {/* Insert zone before this page */}
+                    <InsertZone
+                      index={i}
+                      isActive={insertIndex === i}
+                      onActivate={() => setInsertIndex(i)}
+                      onDeactivate={() => setInsertIndex(null)}
+                      onInsert={() => handleInsertPage(i)}
+                    />
 
-                  return (
-                    <div key={page.id} className="flex items-center">
-                      {/* Insert zone before this page */}
-                      <div
-                        className="flex items-center justify-center shrink-0"
-                        style={{ width: 10 }}
-                        onMouseEnter={() => setInsertIndex(i)}
-                        onMouseLeave={() => setInsertIndex(null)}
-                      >
-                        {insertIndex === i && (
-                          <button
-                            className="flex items-center justify-center gap-0.5 px-1 py-0.5 rounded-full bg-[var(--color-primary-600)] text-white text-[10px] border-none cursor-pointer whitespace-nowrap hover:bg-[var(--color-primary-700)] transition-colors z-10 shadow-sm"
-                            onClick={() => handleInsertPage(i)}
-                            title="在此处插入页面"
-                          >
-                            <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-2 h-2">
-                              <line x1="4" y1="1" x2="4" y2="7" /><line x1="1" y1="4" x2="7" y2="4" />
-                            </svg>
-                          </button>
+                    {/* Thumbnail with ⋮ menu */}
+                    <div className="flex flex-col items-center gap-1 flex-shrink-0 relative">
+                      <div className="relative group/thumb">
+                        <button
+                          className={`
+                            w-[${THUMB_W}px] h-[${THUMB_H}px] rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer
+                            transition-[border-color,transform] duration-150 p-0 relative block
+                            ${i === currentPageIndex
+                              ? 'border-[var(--color-brand)] scale-105 shadow-[0_2px_8px_rgba(108,99,255,0.2)]'
+                              : 'border-[var(--color-border)] hover:border-[var(--color-gray-400)]'
+                            }
+                          `}
+                          style={{ backgroundColor: page.background, width: THUMB_W, height: THUMB_H }}
+                          onClick={() => setCurrentPage(i)}
+                          title={`第${i + 1}页`}
+                        >
+                          <PageThumbnail page={page} template={TEMPLATES.find((t) => t.id === page.templateId)} photos={photos} />
+                        </button>
+
+                        {/* ⋮ More button (shows on hover) */}
+                        <button
+                          className="absolute top-1 right-1 w-[18px] h-[18px] flex items-center justify-center
+                                     bg-black/40 border border-white/20 rounded-full
+                                     text-white opacity-0 group-hover/thumb:opacity-100
+                                     hover:bg-black/60 hover:scale-110
+                                     transition-all duration-150 cursor-pointer z-10 backdrop-blur-sm"
+                          onClick={(e) => { e.stopPropagation(); setMenuOpenIndex(menuOpenIndex === i ? null : i); }}
+                          title="页面操作"
+                        >
+                          <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5">
+                            <circle cx="6" cy="2.5" r="1.2" />
+                            <circle cx="6" cy="6" r="1.2" />
+                            <circle cx="6" cy="9.5" r="1.2" />
+                          </svg>
+                        </button>
+
+                        {/* Dropdown menu */}
+                        {menuOpenIndex === i && (
+                          <PageMenu
+                            ref={menuRef}
+                            pageIndex={i}
+                            pageCount={pages.length}
+                            onCopy={() => handleCopyPage(i)}
+                            onCopyStyle={() => handleCopyStyle(i)}
+                            onDelete={() => handleDeletePage(i)}
+                            onClose={() => setMenuOpenIndex(null)}
+                          />
                         )}
                       </div>
 
-                      {/* Thumbnail */}
-                      <div
-                        className="flex flex-col items-center gap-1 flex-shrink-0 relative"
-                        onMouseEnter={() => setHoveredIndex(i)}
-                        onMouseLeave={() => setHoveredIndex(null)}
-                      >
-                        <div className="relative">
-                          <button
-                            className={`
-                              w-[${THUMB_W}px] h-[${THUMB_H}px] rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer
-                              transition-[border-color,transform] duration-150 p-0 relative block
-                              ${i === currentPageIndex
-                                ? 'border-[var(--color-brand)] scale-105 shadow-[0_2px_8px_rgba(108,99,255,0.2)]'
-                                : 'border-[var(--color-border)] hover:border-[var(--color-gray-400)]'
-                              }
-                            `}
-                            style={{ backgroundColor: page.background, width: THUMB_W, height: THUMB_H }}
-                            onClick={() => setCurrentPage(i)}
-                            title={`第${i + 1}页`}
-                          >
-                            <PageThumbnail page={page} template={template} photos={photos} />
-                          </button>
-
-                          {/* Hover overlay — edit buttons */}
-                          {isHovered && (
-                            <div className="absolute inset-0 z-10 flex items-center justify-center gap-0.5 bg-black/40 rounded-[var(--radius-xs)]">
-                              {/* Copy */}
-                              <button
-                                className="w-4 h-4 flex items-center justify-center rounded-full bg-white/90 text-[var(--color-gray-700)] border-none cursor-pointer hover:bg-white transition-colors text-[9px]"
-                                onClick={(e) => { e.stopPropagation(); handleCopyPage(i); }}
-                                title="复制页面"
-                              >
-                                <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-2.5 h-2.5">
-                                  <rect x="2" y="2" width="6" height="7" rx="0.5" /><path d="M3 2V1.5A.5.5 0 0 1 3.5 1h4a.5.5 0 0 1 .5.5V3" />
-                                </svg>
-                              </button>
-                              {/* Copy Style */}
-                              <button
-                                className="w-4 h-4 flex items-center justify-center rounded-full bg-white/90 text-[var(--color-gray-700)] border-none cursor-pointer hover:bg-white transition-colors text-[9px]"
-                                onClick={(e) => { e.stopPropagation(); handleCopyStyle(i); }}
-                                title="复制页面样式（模板）"
-                              >
-                                <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-2.5 h-2.5">
-                                  <rect x="1" y="1" width="3.5" height="3.5" rx="0.5" /><rect x="5.5" y="1" width="3.5" height="3.5" rx="0.5" />
-                                  <rect x="1" y="5.5" width="3.5" height="3.5" rx="0.5" />
-                                </svg>
-                              </button>
-                              {/* Delete */}
-                              <button
-                                className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500/90 text-white border-none cursor-pointer hover:bg-red-500 transition-colors text-[9px]"
-                                onClick={(e) => { e.stopPropagation(); handleRemovePage(i); }}
-                                title="删除页面"
-                              >
-                                <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-2 h-2">
-                                  <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
-                                </svg>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        <span className={`text-[10px] leading-tight ${i === currentPageIndex ? 'text-[var(--color-brand)] font-[600]' : 'text-[var(--color-gray-500)]'}`}>
-                          {i + 1}
-                        </span>
-                      </div>
+                      {/* Page number */}
+                      <span className={`text-[10px] leading-tight ${i === currentPageIndex ? 'text-[var(--color-brand)] font-[600]' : 'text-[var(--color-gray-500)]'}`}>
+                        {i + 1}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
 
                 {/* Insert zone after last page */}
-                <div
-                  className="flex items-center justify-center shrink-0"
-                  style={{ width: 14 }}
-                  onMouseEnter={() => setInsertIndex(pages.length)}
-                  onMouseLeave={() => setInsertIndex(null)}
-                >
-                  {insertIndex === pages.length && (
-                    <button
-                      className="flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-primary-600)] text-white border-none cursor-pointer hover:bg-[var(--color-primary-700)] transition-colors z-10 shadow-sm text-[9px]"
-                      onClick={() => handleInsertPage(pages.length)}
-                      title="在末尾添加页面"
-                    >
-                      <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-2 h-2">
-                        <line x1="4" y1="1" x2="4" y2="7" /><line x1="1" y1="4" x2="7" y2="4" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                <InsertZone
+                  index={pages.length}
+                  isActive={insertIndex === pages.length}
+                  onActivate={() => setInsertIndex(pages.length)}
+                  onDeactivate={() => setInsertIndex(null)}
+                  onInsert={() => handleInsertPage(pages.length)}
+                />
               </div>
             )}
           </div>
@@ -316,6 +301,139 @@ export function BottomNav() {
 }
 
 /* ═══════════════════════════════════════
+   插入区域 — 两个页面之间的「+」按钮
+   ═══════════════════════════════════════ */
+
+function InsertZone({
+  isActive,
+  onActivate,
+  onDeactivate,
+  onInsert,
+}: {
+  index: number;
+  isActive: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+  onInsert: () => void;
+}) {
+  return (
+    <div
+      className="flex items-center justify-center shrink-0 relative"
+      style={{ width: 14, height: THUMB_H }}
+      onMouseEnter={onActivate}
+      onMouseLeave={onDeactivate}
+    >
+      {/* Divider line */}
+      <div
+        className={`
+          absolute w-px h-full
+          transition-all duration-200
+          ${isActive
+            ? 'bg-[var(--color-primary-400)] scale-y-75'
+            : 'bg-[var(--color-border)] scale-y-50'
+          }
+        `}
+      />
+
+      {/* Insert button */}
+      <button
+        className={`
+          absolute flex items-center justify-center gap-0.5
+          rounded-full border-none cursor-pointer
+          transition-all duration-200 ease-out z-10 shadow-sm
+          ${isActive
+            ? 'w-5 h-5 bg-[var(--color-primary-600)] text-white opacity-100 scale-100'
+            : 'w-0 h-0 bg-transparent text-transparent opacity-0 scale-0'
+          }
+        `}
+        onClick={onInsert}
+        title="在此处插入页面"
+      >
+        <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-3 h-3">
+          <line x1="5" y1="2" x2="5" y2="8" /><line x1="2" y1="5" x2="8" y2="5" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════
+   页面操作菜单 — 仿项目卡片 ⋮ 下拉菜单
+   ═══════════════════════════════════════ */
+
+const PageMenu = forwardRef(function PageMenu(
+  {
+    onCopy,
+    onCopyStyle,
+    onDelete,
+    onClose,
+  }: {
+    pageIndex: number;
+    pageCount: number;
+    onCopy: () => void;
+    onCopyStyle: () => void;
+    onDelete: () => void;
+    onClose: () => void;
+  },
+  ref: React.Ref<HTMLDivElement>,
+) {
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-[var(--z-overlay)]" onClick={onClose} />
+      {/* Menu */}
+      <div
+        ref={ref}
+        className="absolute top-[-4px] right-[-8px] z-[calc(var(--z-overlay)+1)] bg-white
+                   border border-[var(--color-border)] rounded-[var(--radius-md)]
+                   shadow-[var(--shadow-md)] py-1 min-w-[140px] animate-in fade-in zoom-in-95
+                   duration-150 origin-top-right"
+      >
+        <button
+          className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                     text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
+                     border-none bg-transparent cursor-pointer transition-colors"
+          onClick={(e) => { e.stopPropagation(); onCopy(); }}
+        >
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+            <rect x="2" y="2" width="10" height="10" rx="1.5" />
+            <path d="M9.5 2.5v-1a1 1 0 0 0-1-1h-3a1 1 0 0 0-1 1v1" />
+            <path d="M6.5 6.5h-1a1 1 0 0 0-1 1v1" />
+            <path d="M7.5 6.5h1a1 1 0 0 1 1 1v1" />
+          </svg>
+          复制页面
+        </button>
+        <button
+          className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                     text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
+                     border-none bg-transparent cursor-pointer transition-colors"
+          onClick={(e) => { e.stopPropagation(); onCopyStyle(); }}
+        >
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5 shrink-0">
+            <rect x="1" y="1" width="5" height="5" rx="1" /><rect x="8" y="1" width="5" height="5" rx="1" />
+            <rect x="1" y="8" width="5" height="5" rx="1" />
+          </svg>
+          复制页面样式
+        </button>
+        <div className="h-px bg-[var(--color-border-light)] my-1" />
+        <button
+          className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                     text-[var(--color-error)] hover:bg-[var(--color-error-light)]
+                     border-none bg-transparent cursor-pointer transition-colors"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        >
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+            <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+            <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
+          </svg>
+          删除页面
+        </button>
+      </div>
+    </>
+  );
+});
+
+/* ═══════════════════════════════════════
    PageThumbnail — SVG 缩略图渲染
    ═══════════════════════════════════════ */
 
@@ -333,14 +451,8 @@ function PageThumbnail({
     const pad = 2;
     const w = THUMB_W - pad * 2;
     const h = THUMB_H - pad * 2;
-
     return (
-      <svg
-        width={THUMB_W}
-        height={THUMB_H}
-        viewBox={`0 0 ${THUMB_W} ${THUMB_H}`}
-        style={{ position: 'absolute', inset: 0 }}
-      >
+      <svg width={THUMB_W} height={THUMB_H} viewBox={`0 0 ${THUMB_W} ${THUMB_H}`} style={{ position: 'absolute', inset: 0 }}>
         <rect x={pad} y={pad} width={w} height={h} fill={page.background} rx={1} />
         {template.slots.map((slot) => {
           const sx = pad + (slot.x / 100) * w;
@@ -351,24 +463,16 @@ function PageThumbnail({
           const photo = placement?.photoId ? photos.find((p) => p.id === placement.photoId) : undefined;
           return (
             <g key={slot.id}>
-              <rect
-                x={sx} y={sy} width={Math.max(sw, 1)} height={Math.max(sh, 1)}
+              <rect x={sx} y={sy} width={Math.max(sw, 1)} height={Math.max(sh, 1)}
                 fill={photo ? 'transparent' : page.background === '#FFFFFF' ? '#E9ECEF' : 'rgba(255,255,255,0.12)'}
-                stroke={photo ? 'transparent' : '#CED4DA'}
-                strokeWidth={0.5} rx={1}
-              />
-              {photo && (
-                <image href={photo.src} x={sx} y={sy} width={sw} height={sh} preserveAspectRatio="xMidYMid slice" crossOrigin="anonymous" />
-              )}
-              {!photo && (
-                <text x={sx + sw / 2} y={sy + sh / 2} textAnchor="middle" dominantBaseline="central" fill="#ADB5BD" fontSize={6}>+</text>
-              )}
+                stroke={photo ? 'transparent' : '#CED4DA'} strokeWidth={0.5} rx={1} />
+              {photo && <image href={photo.src} x={sx} y={sy} width={sw} height={sh} preserveAspectRatio="xMidYMid slice" crossOrigin="anonymous" />}
+              {!photo && <text x={sx + sw / 2} y={sy + sh / 2} textAnchor="middle" dominantBaseline="central" fill="#ADB5BD" fontSize={6}>+</text>}
             </g>
           );
         })}
       </svg>
     );
   }, [page, template, photos]);
-
   return <>{svgContent}</>;
 }
