@@ -157,7 +157,7 @@ export function BottomNav() {
                       <div className="relative group/thumb">
                         <button
                           className={`
-                            w-[${THUMB_W}px] h-[${THUMB_H}px] rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer
+                            rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer
                             transition-[border-color,transform] duration-150 p-0 relative block
                             ${i === currentPageIndex
                               ? 'border-[var(--color-brand)] scale-105 shadow-[0_2px_8px_rgba(108,99,255,0.2)]'

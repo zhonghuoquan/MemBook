@@ -84,7 +84,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   const [cols, setCols] = useState(3);
   const [slots, setSlots] = useState<SlotLayout[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const [snapToGrid, setSnapToGrid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [preset, setPreset] = useState('2x2');
 
@@ -100,7 +99,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     startX: number; startY: number;
   } | null>(null);
 
-  const snap = (v: number) => snapToGrid ? Math.round(v / GRID) * GRID : Math.round(v * 10) / 10;
+  const snap = (v: number) => Math.round(v / GRID) * GRID;
 
   /* ── 初始化 ── */
   useEffect(() => {
@@ -141,36 +140,41 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   }, [getPct]);
 
   useEffect(() => {
-    /* 拖拽中：自由移动，无吸附、无边界限制（抬起时才处理） */
+    /* 拖拽中：实时网格吸附（基于起始值计算，无累积误差） */
     const onMove = (e: MouseEvent) => {
       const dr = dragRef.current;
       if (!dr) return;
       const p = getPct(e.clientX, e.clientY);
       const dx = p.x - dr.mx, dy = p.y - dr.my;
+
+      // 网格吸附函数
+      const gs = (v: number) => Math.round(v / GRID) * GRID;
+
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
         const slot = next[dr.idx];
         if (!slot) return prev;
         if (dr.mode === 'move') {
-          slot.x = dr.sx + dx;
-          slot.y = dr.sy + dy;
+          slot.x = gs(dr.sx + dx);
+          slot.y = gs(dr.sy + dy);
         } else {
-          // 缩放：始终基于起始值计算，避免累积误差
-          const ow = dr.startX - dr.sx; // 原始宽度
-          const oh = dr.startY - dr.sy; // 原始高度
+          const ow = dr.startX - dr.sx;
+          const oh = dr.startY - dr.sy;
           let nw = ow, nh = oh, nx = dr.sx, ny = dr.sy;
           if (dr.mode?.includes('r')) nw = Math.max(MIN_SLOT, ow + dx);
           if (dr.mode?.includes('l')) { nw = Math.max(MIN_SLOT, ow - dx); nx = dr.sx + (ow - nw); }
           if (dr.mode?.includes('b')) nh = Math.max(MIN_SLOT, oh + dy);
           if (dr.mode?.includes('t')) { nh = Math.max(MIN_SLOT, oh - dy); ny = dr.sy + (oh - nh); }
-          slot.x = nx; slot.y = ny;
-          slot.width = nw; slot.height = nh;
+          slot.x = gs(nx);
+          slot.y = gs(ny);
+          slot.width = gs(Math.max(MIN_SLOT, nw));
+          slot.height = gs(Math.max(MIN_SLOT, nh));
         }
         return next;
       });
     };
 
-    /* 抬起时：边界约束 + 网格吸附 + 边缘对齐 */
+    /* 抬起时：边界约束 + 边缘对齐 */
     const onUp = () => {
       const dr = dragRef.current;
       dragRef.current = null;
@@ -192,7 +196,18 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         width = Math.max(MIN_SLOT, width);
         height = Math.max(MIN_SLOT, height);
 
-        // 2. 收集所有可吸附的参考线
+        // 2. 网格重新对齐（拖拽中已吸附，但边界约束可能破坏对齐）
+        const reSnap = (v: number) => Math.round(v / GRID) * GRID;
+        const left = reSnap(x);
+        const right = reSnap(x + width);
+        width = Math.max(MIN_SLOT, right - left);
+        x = left;
+        const top = reSnap(y);
+        const bottom = reSnap(y + height);
+        height = Math.max(MIN_SLOT, bottom - top);
+        y = top;
+
+        // 3. 边缘对齐吸附
         const snapX: number[] = [M, 50, 100 - M];
         const snapY: number[] = [M, 50, 100 - M];
         for (let i = 0; i < prev.length; i++) {
@@ -202,40 +217,24 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           snapY.push(o.y, o.y + o.height);
         }
 
-        if (snapToGrid) {
-          // 网格吸附：四边分别吸附到最近的网格线
-          const gridSnap = (v: number) => Math.round(v / GRID) * GRID;
-          const left = gridSnap(x);
-          const right = gridSnap(x + width);
-          width = right - left;
-          x = left;
+        const snapL = smartSnap(x, snapX, SNAP_DIST);
+        const snapR = smartSnap(x + width, snapX, SNAP_DIST);
+        const snapT = smartSnap(y, snapY, SNAP_DIST);
+        const snapB = smartSnap(y + height, snapY, SNAP_DIST);
 
-          const top = gridSnap(y);
-          const bottom = gridSnap(y + height);
-          height = bottom - top;
-          y = top;
+        if (Math.abs(snapL - x) <= Math.abs(snapR - (x + width))) {
+          width += (x - snapL); x = snapL;
+        } else {
+          width = snapR - x;
+        }
+        if (Math.abs(snapT - y) <= Math.abs(snapB - (y + height))) {
+          height += (y - snapT); y = snapT;
+        } else {
+          height = snapB - y;
         }
 
-        // 3. 边缘对齐吸附（仅在启用吸附时）
-        if (snapToGrid) {
-          const left = smartSnap(x, snapX, SNAP_DIST);
-          const right = smartSnap(x + width, snapX, SNAP_DIST);
-          const top = smartSnap(y, snapY, SNAP_DIST);
-          const bottom = smartSnap(y + height, snapY, SNAP_DIST);
-
-          // 选择偏移更小的方向
-          const dxL = Math.abs(left - x), dxR = Math.abs(right - (x + width));
-          const dyT = Math.abs(top - y), dyB = Math.abs(bottom - (y + height));
-
-          if (dxL <= dxR) { x = left; width = (x + width) - left; }
-          else { width = right - x; }
-
-          if (dyT <= dyB) { y = top; height = (y + height) - top; }
-          else { height = bottom - y; }
-
-          width = Math.max(MIN_SLOT, width);
-          height = Math.max(MIN_SLOT, height);
-        }
+        width = Math.max(MIN_SLOT, width);
+        height = Math.max(MIN_SLOT, height);
 
         // 4. 最终边界保护
         x = Math.max(M, Math.min(100 - M - width, x));
@@ -243,8 +242,8 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
         slot.x = x;
         slot.y = y;
-        slot.width = width;
-        slot.height = height;
+        slot.width = Math.max(MIN_SLOT, width);
+        slot.height = Math.max(MIN_SLOT, height);
         return next;
       });
     };
@@ -252,7 +251,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [getPct, snapToGrid]);
+  }, [getPct]);
 
   /* ── 操作 ── */
   const addPhotoSlot = () => setSlots((prev) => [...prev, { id: `slot_${prev.length}`, x: snap(Math.max(marginRef.current, 3)), y: snap(Math.max(marginRef.current, 3)), width: 25, height: 25 }]);
@@ -312,7 +311,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
   return (
     <Modal open={open} onClose={onClose} title={isEditing ? '编辑模板' : '创建模板'} maxWidth="860px">
-      {/* 顶部：名称 + 吸附 */}
+      {/* 顶部：名称 */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-1">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)}
@@ -322,11 +321,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                        outline-none hover:border-[var(--color-border-hover)]
                        focus:border-[var(--color-primary-400)] focus:shadow-[0_0_0_3px_rgba(108,99,255,0.15)] transition-all" />
         </div>
-        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
-          <input type="checkbox" checked={snapToGrid} onChange={() => setSnapToGrid(!snapToGrid)}
-            className="w-3.5 h-3.5 accent-[var(--color-primary-600)] cursor-pointer" />
-          <span className="text-[var(--text-caption)] text-[var(--color-gray-600)]">吸附 {GRID}%</span>
-        </label>
+        <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">网格 {GRID}% · 自动吸附</span>
       </div>
 
       <div className="flex gap-5">
@@ -402,9 +397,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
           {/* 提示 */}
           <div className="text-[8px] text-[var(--color-text-tertiary)] leading-relaxed">
-            点击网格预设自动生成 ·<br />
-            拖拽移动/缩放微调 ·<br />
-            吸附件辅助对齐
+            点击预设自动生成 · 拖拽移动/缩放微调
           </div>
         </div>
 
@@ -413,12 +406,11 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           <div ref={canvasRef} className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden select-none">
             <div className="absolute pointer-events-none z-[2]"
               style={{ left: `${margin}%`, top: `${margin}%`, width: `${100 - margin * 2}%`, height: `${100 - margin * 2}%`, border: '1px dashed var(--color-primary-300)', opacity: 0.4 }} />
-            {snapToGrid && (
-              <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <defs><pattern id="g" width={GRID} height={GRID} patternUnits="userSpaceOnUse"><path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="var(--color-gray-200)" strokeWidth="0.3" /></pattern></defs>
-                <rect width="100" height="100" fill="url(#g)" />
-              </svg>
-            )}
+            {/* 网格（常驻显示） */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs><pattern id="g" width={GRID} height={GRID} patternUnits="userSpaceOnUse"><path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="var(--color-gray-200)" strokeWidth="0.3" /></pattern></defs>
+              <rect width="100" height="100" fill="url(#g)" />
+            </svg>
             {slots.map((slot, i) => {
               const isText = slot.id.startsWith('text_');
               const sel = selectedIdx === i;
