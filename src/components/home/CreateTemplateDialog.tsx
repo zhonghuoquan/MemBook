@@ -11,60 +11,60 @@ interface CreateTemplateDialogProps {
   editTemplate?: { id: string; name: string; slots: SlotLayout[] } | null;
 }
 
-/* ── 内置间距（已移除间距滑块，固定为 1.5%） ── */
-const G = 1.5;
+/* ── 固定参数（边距在创建相册时设置） ── */
+const G = 1.5;     // 槽位间距
+const M = 3;       // 模板内置边距
+const GRID = 3;
+const MIN_SLOT = 5;
+const SNAP_DIST = 2.5;
 
-/* ── Slot generators ── */
-function genGrid(rows: number, cols: number, m: number): SlotLayout[] {
-  const sw = (100 - 2 * m - (cols - 1) * G) / cols;
-  const sh = (100 - 2 * m - (rows - 1) * G) / rows;
+/* ── Slot generators（固定使用内置边距 M） ── */
+function genGrid(rows: number, cols: number): SlotLayout[] {
+  const sw = (100 - 2 * M - (cols - 1) * G) / cols;
+  const sh = (100 - 2 * M - (rows - 1) * G) / rows;
   return Array.from({ length: rows * cols }, (_, i) => {
     const r = Math.floor(i / cols), c = i % cols;
-    return { id: `slot_${i}`, x: +(m + c * (sw + G)).toFixed(1), y: +(m + r * (sh + G)).toFixed(1), width: +sw.toFixed(1), height: +sh.toFixed(1) };
+    return { id: `slot_${i}`, x: +(M + c * (sw + G)).toFixed(1), y: +(M + r * (sh + G)).toFixed(1), width: +sw.toFixed(1), height: +sh.toFixed(1) };
   });
 }
-function genPin2(m: number): SlotLayout[] {
-  const w = 100 - 2 * m, th = (100 - 2 * m - G) * 0.55, bh = (100 - 2 * m - G) * 0.45, sw = (w - G) / 2;
+function genPin2(): SlotLayout[] {
+  const w = 100 - 2 * M, th = (100 - 2 * M - G) * 0.55, bh = (100 - 2 * M - G) * 0.45, sw = (w - G) / 2;
   return [
-    { id: 'slot_0', x: m, y: m, width: +w.toFixed(1), height: +th.toFixed(1) },
-    { id: 'slot_1', x: m, y: +(m + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
-    { id: 'slot_2', x: +(m + sw + G).toFixed(1), y: +(m + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
+    { id: 'slot_0', x: M, y: M, width: +w.toFixed(1), height: +th.toFixed(1) },
+    { id: 'slot_1', x: M, y: +(M + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
+    { id: 'slot_2', x: +(M + sw + G).toFixed(1), y: +(M + th + G).toFixed(1), width: +sw.toFixed(1), height: +bh.toFixed(1) },
   ];
 }
-function genPin3(m: number): SlotLayout[] {
-  const lw = (100 - 2 * m - G) * 0.55, rw = (100 - 2 * m - G) * 0.45, h = (100 - 2 * m - G) / 2;
+function genPin3(): SlotLayout[] {
+  const lw = (100 - 2 * M - G) * 0.55, rw = (100 - 2 * M - G) * 0.45, h = (100 - 2 * M - G) / 2;
   return [
-    { id: 'slot_0', x: m, y: m, width: +lw.toFixed(1), height: +(100 - 2 * m).toFixed(1) },
-    { id: 'slot_1', x: +(m + lw + G).toFixed(1), y: m, width: +rw.toFixed(1), height: +h.toFixed(1) },
-    { id: 'slot_2', x: +(m + lw + G).toFixed(1), y: +(m + h + G).toFixed(1), width: +rw.toFixed(1), height: +h.toFixed(1) },
+    { id: 'slot_0', x: M, y: M, width: +lw.toFixed(1), height: +(100 - 2 * M).toFixed(1) },
+    { id: 'slot_1', x: +(M + lw + G).toFixed(1), y: M, width: +rw.toFixed(1), height: +h.toFixed(1) },
+    { id: 'slot_2', x: +(M + lw + G).toFixed(1), y: +(M + h + G).toFixed(1), width: +rw.toFixed(1), height: +h.toFixed(1) },
   ];
 }
-function genStagger(m: number): SlotLayout[] {
-  const bw = (100 - 2 * m - G) * 0.55, sw = (100 - 2 * m - G) * 0.45, srh = (100 - 2 * m - G * 2) / 3, bh = srh * 2 + G;
+function genStagger(): SlotLayout[] {
+  const bw = (100 - 2 * M - G) * 0.55, sw = (100 - 2 * M - G) * 0.45, srh = (100 - 2 * M - G * 2) / 3, bh = srh * 2 + G;
   return [
-    { id: 'slot_0', x: m, y: m, width: +bw.toFixed(1), height: +bh.toFixed(1) },
-    { id: 'slot_1', x: +(m + bw + G).toFixed(1), y: m, width: +sw.toFixed(1), height: +srh.toFixed(1) },
-    { id: 'slot_2', x: +(m + bw + G).toFixed(1), y: +(m + srh + G).toFixed(1), width: +sw.toFixed(1), height: +srh.toFixed(1) },
-    { id: 'slot_3', x: m, y: +(m + bh + G).toFixed(1), width: +(bw + G + sw).toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_0', x: M, y: M, width: +bw.toFixed(1), height: +bh.toFixed(1) },
+    { id: 'slot_1', x: +(M + bw + G).toFixed(1), y: M, width: +sw.toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_2', x: +(M + bw + G).toFixed(1), y: +(M + srh + G).toFixed(1), width: +sw.toFixed(1), height: +srh.toFixed(1) },
+    { id: 'slot_3', x: M, y: +(M + bh + G).toFixed(1), width: +(bw + G + sw).toFixed(1), height: +srh.toFixed(1) },
   ];
 }
-function genSlots(preset: string, m: number, r: number, c: number): SlotLayout[] {
+function genSlots(preset: string, r: number, c: number): SlotLayout[] {
   switch (preset) {
-    case '2x2': return genGrid(2, 2, m);
-    case '2x3': return genGrid(2, 3, m);
-    case '3x3': return genGrid(3, 3, m);
-    case '4x4': return genGrid(4, 4, m);
-    case '5x5': return genGrid(5, 5, m);
-    case 'pin-2': return genPin2(m);
-    case 'pin-3': return genPin3(m);
-    case 'stagger-4': return genStagger(m);
-    default: return genGrid(Math.max(1, r), Math.max(1, c), m);
+    case '2x2': return genGrid(2, 2);
+    case '2x3': return genGrid(2, 3);
+    case '3x3': return genGrid(3, 3);
+    case '4x4': return genGrid(4, 4);
+    case '5x5': return genGrid(5, 5);
+    case 'pin-2': return genPin2();
+    case 'pin-3': return genPin3();
+    case 'stagger-4': return genStagger();
+    default: return genGrid(Math.max(1, r), Math.max(1, c));
   }
 }
-
-const GRID = 3;         // 网格步进(%) — 更精细
-const MIN_SLOT = 5;     // 最小槽位尺寸(%)
-const SNAP_DIST = 2.5;  // 边缘吸附最大距离(%)
 
 /* ── 智能吸附：在多条候选线中找到最近一条 ── */
 function smartSnap(val: number, targets: number[], maxDist: number): number {
@@ -79,7 +79,6 @@ function smartSnap(val: number, targets: number[], maxDist: number): number {
 export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const isEditing = !!editTemplate;
   const [name, setName] = useState('');
-  const [margin, setMargin] = useState(10);
   const [rows, setRows] = useState(3);
   const [cols, setCols] = useState(3);
   const [slots, setSlots] = useState<SlotLayout[]>([]);
@@ -88,8 +87,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   const [snapOn, setSnapOn] = useState(true);
   const [preset, setPreset] = useState('2x2');
 
-  const marginRef = useRef(margin);
-  marginRef.current = margin;
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
 
@@ -109,14 +106,14 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       setSlots(editTemplate.slots.map((s) => ({ ...s })));
     } else {
       setName('');
-      setSlots(genSlots('2x2', margin, 3, 3));
+      setSlots(genSlots('2x2', 3, 3));
     }
     setSelectedIdx(null);
   }, [editTemplate?.id]); // eslint-disable-line
 
   /* ── 预设/行列变化 → 重新生成网格（边距变化不触发） ── */
   useEffect(() => {
-    setSlots(genSlots(preset, margin, rows, cols));
+    setSlots(genSlots(preset, rows, cols));
     setSelectedIdx(null);
   }, [preset, rows, cols]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -180,7 +177,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       const dr = dragRef.current;
       dragRef.current = null;
       if (!dr) return;
-      const M = marginRef.current;
 
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
@@ -255,7 +251,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   }, [getPct, snapOn]);
 
   /* ── 操作 ── */
-  const addPhotoSlot = () => setSlots((prev) => [...prev, { id: `slot_${prev.length}`, x: snap(Math.max(marginRef.current, 3)), y: snap(Math.max(marginRef.current, 3)), width: 25, height: 25 }]);
+  const addPhotoSlot = () => setSlots((prev) => [...prev, { id: `slot_${prev.length}`, x: snap(3), y: snap(3), width: 25, height: 25 }]);
   const addTextZone = () => setSlots((prev) => [...prev, { id: `text_${prev.length}`, x: snap(10), y: snap(80), width: snap(80), height: snap(12) }]);
   const removeSelectedSlot = () => {
     if (selectedIdx === null) return;
@@ -368,18 +364,9 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
             <span className="text-[9px] text-[var(--color-text-tertiary)] ml-auto">{rows * cols}</span>
           </div>
 
-          {/* 边距 */}
-          <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[9px] font-[500] text-[var(--color-gray-500)]">边距</span>
-              <span className="text-[8px] text-[var(--color-text-tertiary)]">{margin}%</span>
-            </div>
-            <input type="range" min={2} max={20} value={margin}
-              onChange={(e) => setMargin(Number(e.target.value))}
-              className="w-full h-1 rounded-full appearance-none bg-[var(--color-gray-200)] cursor-pointer
-                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-                         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-primary-600)]
-                         [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white" />
+          {/* 边距在创建相册时设置 */}
+          <div className="text-[8px] text-[var(--color-text-tertiary)] bg-[var(--color-gray-50)] rounded-[var(--radius-sm)] p-2 leading-relaxed">
+            边距在创建相册时设置，模板内固定 3% 内置边距
           </div>
 
           {/* 操作 */}
@@ -409,8 +396,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         {/* ── 右栏：画布 + 属性 ── */}
         <div className="flex-1 min-w-0">
           <div ref={canvasRef} className="aspect-[4/3] bg-white rounded-[var(--radius-lg)] border border-[var(--color-border)] relative overflow-hidden select-none">
-            <div className="absolute pointer-events-none z-[2]"
-              style={{ left: `${margin}%`, top: `${margin}%`, width: `${100 - margin * 2}%`, height: `${100 - margin * 2}%`, border: '1px dashed var(--color-primary-300)', opacity: 0.4 }} />
             {/* 网格（常驻显示） */}
             <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs><pattern id="g" width={GRID} height={GRID} patternUnits="userSpaceOnUse"><path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="var(--color-gray-200)" strokeWidth="0.3" /></pattern></defs>
