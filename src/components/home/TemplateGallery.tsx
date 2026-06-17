@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { TEMPLATES, ALBUM_SIZES } from '../../types';
+import { TEMPLATES } from '../../types';
 import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
 import { CreateDialog } from './CreateDialog';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
@@ -36,7 +36,6 @@ interface FlatTemplate {
 
 export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) {
   const [countFilter, setCountFilter] = useState<CountFilter>('all');
-  const [sizeFilter, setSizeFilter] = useState<string>('all');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
   const [showTemplateMaker, setShowTemplateMaker] = useState(false);
@@ -59,18 +58,6 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
   const handleTemplateCreated = () => {
     loadCustomTemplates();
   };
-
-  // 从 PRD 规格列表中提取显示用的尺寸筛选（排除「自定义」）
-  const sizeFilters = useMemo(
-    () => [
-      { label: '全部', value: 'all' },
-      ...ALBUM_SIZES.filter((s) => s.id !== 'custom').map((s) => ({
-        label: s.name,
-        value: s.id,
-      })),
-    ],
-    [],
-  );
 
   // 合并系统模板 + 自定义模板为 FlatTemplate[]
   const allTemplates: FlatTemplate[] = useMemo(() => {
@@ -156,9 +143,8 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         </button>
       </div>
 
-      {/* ── Filters ── */}
+      {/* ── Photo Count Filter ── */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        {/* Photo count filter */}
         <div className="flex items-center gap-1 p-1 bg-[var(--color-gray-50)] rounded-[var(--radius-lg)] border border-[var(--color-border-light)]">
           {COUNT_FILTERS.map((f) => (
             <button
@@ -172,26 +158,6 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
                 }
               `}
               onClick={() => setCountFilter(f.value)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Size filter */}
-        <div className="flex items-center gap-1 p-1 bg-[var(--color-gray-50)] rounded-[var(--radius-lg)] border border-[var(--color-border-light)]">
-          {sizeFilters.map((f) => (
-            <button
-              key={f.value}
-              className={`
-                px-3 py-1.5 rounded-[var(--radius-md)] text-[var(--text-caption)] font-[500]
-                border-none cursor-pointer transition-all duration-150
-                ${sizeFilter === f.value
-                  ? 'bg-white text-[var(--color-brand)] shadow-[var(--shadow-xs)]'
-                  : 'bg-transparent text-[var(--color-gray-500)] hover:text-[var(--color-gray-700)]'
-                }
-              `}
-              onClick={() => setSizeFilter(f.value)}
             >
               {f.label}
             </button>
