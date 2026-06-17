@@ -96,6 +96,16 @@ export type HistoryEntry = {
   selectedSlotId: string | null;
 };
 
+/* ── 自定义模板 ── */
+export type CustomTemplate = {
+  id: string;
+  name: string;
+  slots: SlotLayout[];
+  isBuiltIn?: false;       // false = 用户自定义
+  createdAt: string;
+  updatedAt: string;
+};
+
 /* ── 内置模板预设 ── */
 export const TEMPLATES: Template[] = [
   {

@@ -3,17 +3,19 @@
  * 基于 Dexie.js 实现项目保存/加载/列表
  */
 import Dexie, { type Table } from 'dexie';
-import type { AlbumProject, Photo } from '../types';
+import type { AlbumProject, Photo, CustomTemplate, SlotLayout } from '../types';
 
 class MemBookDB extends Dexie {
   projects!: Table<AlbumProject, string>;
   photos!: Table<Photo, string>;
+  customTemplates!: Table<CustomTemplate, string>;
 
   constructor() {
     super('MemBookDB');
-    this.version(1).stores({
+    this.version(2).stores({
       projects: 'id, name, createdAt, updatedAt',
       photos: 'id, albumId, date',
+      customTemplates: 'id, name, createdAt',
     });
   }
 }
@@ -90,6 +92,49 @@ export async function createAndSaveProject(
   };
   await saveProject(project);
   localStorage.setItem('membook_current_project_id', id);
+  return id;
+}
+
+/* ── Custom Template CRUD ── */
+
+export async function saveCustomTemplate(template: CustomTemplate): Promise<void> {
+  const db = getDB();
+  await db.customTemplates.put({
+    ...template,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function loadCustomTemplate(id: string): Promise<CustomTemplate | undefined> {
+  const db = getDB();
+  return db.customTemplates.get(id);
+}
+
+export async function deleteCustomTemplate(id: string): Promise<void> {
+  const db = getDB();
+  await db.customTemplates.delete(id);
+}
+
+export async function listCustomTemplates(): Promise<CustomTemplate[]> {
+  const db = getDB();
+  return db.customTemplates.orderBy('createdAt').reverse().toArray();
+}
+
+export async function createCustomTemplate(
+  name: string,
+  slots: SlotLayout[],
+): Promise<string> {
+  const id = `custom-template-${Date.now()}`;
+  const now = new Date().toISOString();
+  const template: CustomTemplate = {
+    id,
+    name: name || '未命名模板',
+    slots,
+    isBuiltIn: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await saveCustomTemplate(template);
   return id;
 }
 
