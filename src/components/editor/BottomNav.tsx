@@ -24,7 +24,9 @@ export function BottomNav() {
 
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [menuOpenIndex, setMenuOpenIndex] = useState<number | null>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const menuRef = useRef<HTMLDivElement>(null);
+  const moreBtnRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const collapsed = bottomNav === 'collapsed';
 
@@ -41,15 +43,18 @@ export function BottomNav() {
   }, [menuOpenIndex]);
 
   const handleAddPage = () => {
-    addPage();
+    const lastTemplate = pages.length > 0 ? pages[pages.length - 1].templateId : undefined;
+    addPage(lastTemplate);
     addToast({ type: 'success', message: '已添加新页面' });
   };
 
   const handleInsertPage = useCallback((index: number) => {
-    insertPage(index);
+    // Insert at position `index` → copy previous page's template (not photos)
+    const prevPage = index > 0 ? pages[index - 1] : undefined;
+    insertPage(index, prevPage?.templateId);
     addToast({ type: 'success', message: '已插入新页面' });
     setInsertIndex(null);
-  }, [insertPage, addToast]);
+  }, [pages, insertPage, addToast]);
 
   // ── Page menu actions ──
   const handleCopyPage = useCallback((index: number) => {
@@ -141,7 +146,14 @@ export function BottomNav() {
               <div className="text-[var(--text-caption)] text-[var(--color-text-tertiary)] px-2">暂无页面</div>
             ) : (
               <div className="flex items-center">
-                {pages.map((page, i) => (
+                {pages.map((page, i) => {
+                  // Determine if this thumbnail should shift (when adjacent gap is active)
+                  let shiftX = 0;
+                  if (insertIndex !== null) {
+                    if (insertIndex === i) shiftX = 8; // right thumbnail moves right
+                    if (insertIndex === i + 1) shiftX = -8; // left thumbnail moves left
+                  }
+                  return (
                   <div key={page.id} className="flex items-center">
                     {/* Insert zone before this page */}
                     <InsertZone
@@ -153,7 +165,10 @@ export function BottomNav() {
                     />
 
                     {/* Thumbnail with ⋮ menu */}
-                    <div className="flex flex-col items-center gap-1 flex-shrink-0 relative">
+                    <div
+                      className="flex flex-col items-center gap-1 flex-shrink-0 relative transition-transform duration-200 ease-out"
+                      style={{ transform: shiftX !== 0 ? `translateX(${shiftX}px)` : undefined }}
+                    >
                       <div className="relative group/thumb">
                         <button
                           className={`
@@ -171,14 +186,26 @@ export function BottomNav() {
                           <PageThumbnail page={page} template={TEMPLATES.find((t) => t.id === page.templateId)} photos={photos} />
                         </button>
 
-                        {/* ⋮ More button (shows on hover) */}
+                          {/* ⋮ More button (shows on hover) */}
                         <button
+                          ref={(el) => { if (el) moreBtnRefs.current.set(i, el); }}
                           className="absolute top-1 right-1 w-[18px] h-[18px] flex items-center justify-center
                                      bg-black/40 border border-white/20 rounded-full
                                      text-white opacity-0 group-hover/thumb:opacity-100
                                      hover:bg-black/60 hover:scale-110
                                      transition-all duration-150 cursor-pointer z-10 backdrop-blur-sm"
-                          onClick={(e) => { e.stopPropagation(); setMenuOpenIndex(menuOpenIndex === i ? null : i); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (menuOpenIndex === i) { setMenuOpenIndex(null); return; }
+                            // Calculate fixed position from button's bounding rect
+                            const rect = (e.target as HTMLElement).getBoundingClientRect();
+                            setMenuStyle({
+                              right: window.innerWidth - rect.right + 8,
+                              top: rect.top - 4,
+                              transform: 'translateY(-100%)',
+                            });
+                            setMenuOpenIndex(i);
+                          }}
                           title="页面操作"
                         >
                           <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5">
@@ -192,6 +219,7 @@ export function BottomNav() {
                         {menuOpenIndex === i && (
                           <PageMenu
                             ref={menuRef}
+                            style={menuStyle}
                             pageIndex={i}
                             pageCount={pages.length}
                             onCopy={() => handleCopyPage(i)}
@@ -208,7 +236,8 @@ export function BottomNav() {
                       </span>
                     </div>
                   </div>
-                ))}
+                );
+              })}
 
                 {/* Insert zone after last page */}
                 <InsertZone
@@ -363,11 +392,13 @@ function InsertZone({
 
 const PageMenu = forwardRef(function PageMenu(
   {
+    style,
     onCopy,
     onCopyStyle,
     onDelete,
     onClose,
   }: {
+    style?: React.CSSProperties;
     pageIndex: number;
     pageCount: number;
     onCopy: () => void;
@@ -380,14 +411,15 @@ const PageMenu = forwardRef(function PageMenu(
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[var(--z-overlay)]" onClick={onClose} />
-      {/* Menu */}
+      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
+      {/* Menu - fixed to screen, positioned via style */}
       <div
         ref={ref}
-        className="absolute top-[-4px] right-[-8px] z-[calc(var(--z-overlay)+1)] bg-white
+        style={style}
+        className="fixed z-[9999] bg-white
                    border border-[var(--color-border)] rounded-[var(--radius-md)]
                    shadow-[var(--shadow-md)] py-1 min-w-[140px] animate-in fade-in zoom-in-95
-                   duration-150 origin-top-right"
+                   duration-150 origin-bottom-right"
       >
         <button
           className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]

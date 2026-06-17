@@ -85,6 +85,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   const [slots, setSlots] = useState<SlotLayout[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [snapOn, setSnapOn] = useState(true);
   const [preset, setPreset] = useState('2x2');
 
   const marginRef = useRef(margin);
@@ -99,7 +100,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     startX: number; startY: number;
   } | null>(null);
 
-  const snap = (v: number) => Math.round(v / GRID) * GRID;
+  const snap = (v: number) => snapOn ? Math.round(v / GRID) * GRID : Math.round(v * 10) / 10;
 
   /* ── 初始化 ── */
   useEffect(() => {
@@ -147,8 +148,8 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       const p = getPct(e.clientX, e.clientY);
       const dx = p.x - dr.mx, dy = p.y - dr.my;
 
-      // 网格吸附函数
-      const gs = (v: number) => Math.round(v / GRID) * GRID;
+      // 网格吸附函数（受开关控制）
+      const gs = (v: number) => snapOn ? Math.round(v / GRID) * GRID : Math.round(v * 10) / 10;
 
       setSlots((prev) => {
         const next = prev.map((s) => ({ ...s }));
@@ -197,7 +198,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         height = Math.max(MIN_SLOT, height);
 
         // 2. 网格重新对齐（拖拽中已吸附，但边界约束可能破坏对齐）
-        const reSnap = (v: number) => Math.round(v / GRID) * GRID;
+        const reSnap = (v: number) => snapOn ? Math.round(v / GRID) * GRID : v;
         const left = reSnap(x);
         const right = reSnap(x + width);
         width = Math.max(MIN_SLOT, right - left);
@@ -251,7 +252,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [getPct]);
+  }, [getPct, snapOn]);
 
   /* ── 操作 ── */
   const addPhotoSlot = () => setSlots((prev) => [...prev, { id: `slot_${prev.length}`, x: snap(Math.max(marginRef.current, 3)), y: snap(Math.max(marginRef.current, 3)), width: 25, height: 25 }]);
@@ -311,7 +312,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
   return (
     <Modal open={open} onClose={onClose} title={isEditing ? '编辑模板' : '创建模板'} maxWidth="860px">
-      {/* 顶部：名称 */}
+      {/* 顶部：名称 + 吸附开关 */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-1">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)}
@@ -321,7 +322,11 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                        outline-none hover:border-[var(--color-border-hover)]
                        focus:border-[var(--color-primary-400)] focus:shadow-[0_0_0_3px_rgba(108,99,255,0.15)] transition-all" />
         </div>
-        <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">网格 {GRID}% · 自动吸附</span>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
+          <input type="checkbox" checked={snapOn} onChange={() => setSnapOn(!snapOn)}
+            className="w-3.5 h-3.5 accent-[var(--color-primary-600)] cursor-pointer" />
+          <span className="text-[var(--text-caption)] text-[var(--color-gray-600)]">吸附 {GRID}%</span>
+        </label>
       </div>
 
       <div className="flex gap-5">
