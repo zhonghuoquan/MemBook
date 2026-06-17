@@ -23,7 +23,6 @@ export function Modal({ open, onClose, title, children, maxWidth = '640px' }: Mo
   return (
     <div
       className="fixed inset-0 flex items-center justify-center z-[var(--z-overlay)]"
-      onClick={onClose}
     >
       {/* Overlay */}
       <div className="absolute inset-0 bg-[var(--color-surface-overlay)]" />

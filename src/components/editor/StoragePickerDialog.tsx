@@ -23,7 +23,6 @@ export function StoragePickerDialog({ onSelect, onCancel }: StoragePickerDialogP
   return (
     <div
       className="fixed inset-0 z-[var(--z-modal)] bg-[var(--color-surface-overlay)] flex items-center justify-center p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div
         className="bg-white rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)] w-full max-w-lg overflow-hidden"
