@@ -5,13 +5,14 @@ import type {
 } from '../types';
 import { TEMPLATES } from '../types';
 
-/* ── UI Store (视图切换、面板、toast) ── */
+/* ── UI Store (视图切换、面板、toast、缩放) ── */
 interface UIState {
   viewMode: ViewMode;
   activePanel: PanelTab;
   editFlyoutOpen: boolean;
   editFlyoutTab: EditTab;
   bottomNav: BottomNavState;
+  canvasZoom: number;        // 0.3 ~ 3.0, 默认 1.0
   toasts: Toast[];
 
   /* Actions */
@@ -20,6 +21,7 @@ interface UIState {
   setEditFlyoutOpen: (open: boolean) => void;
   setEditFlyoutTab: (tab: EditTab) => void;
   toggleBottomNav: () => void;
+  setCanvasZoom: (zoom: number) => void;
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
 }
@@ -30,6 +32,7 @@ export const useUIStore = create<UIState>((set) => ({
   editFlyoutOpen: false,
   editFlyoutTab: 'crop',
   bottomNav: 'expanded',
+  canvasZoom: 1.0,
   toasts: [],
 
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -38,6 +41,7 @@ export const useUIStore = create<UIState>((set) => ({
   setEditFlyoutTab: (tab) => set({ editFlyoutTab: tab }),
   toggleBottomNav: () =>
     set((s) => ({ bottomNav: s.bottomNav === 'expanded' ? 'collapsed' : 'expanded' })),
+  setCanvasZoom: (zoom) => set({ canvasZoom: Math.max(0.3, Math.min(3, zoom)) }),
   addToast: (toast) =>
     set((s) => ({ toasts: [...s.toasts, { ...toast, id: `toast-${Date.now()}` }] })),
   removeToast: (id) =>
@@ -80,7 +84,7 @@ export const useEditorStore = create<EditorState>((set) => ({
         ...s.pages,
         {
           id: `page-${Date.now()}`,
-          templateId: templateId || 'single',
+          templateId: templateId || 'full',
           placements: [],
           background: '#FFFFFF',
         },

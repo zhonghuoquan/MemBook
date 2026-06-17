@@ -98,75 +98,27 @@ function TemplateGroup({
   );
 }
 
-/** Minimal template slot preview inside each template card */
+/** Minimal template slot preview — dynamically renders from actual slot positions */
 function TemplateMiniPreview({ templateId }: { templateId: string }) {
-  const colors: Record<string, string[]> = {
-    single: ['#6C63FF'],
-    dual: ['#6C63FF', '#A8A2FF'],
-    triple: ['#6C63FF', '#A8A2FF', '#C4C0FF'],
-    quad: ['#6C63FF', '#A8A2FF', '#C4C0FF', '#E0DEFF'],
-    full: ['#6C63FF'],
-    'top-bottom': ['#6C63FF', '#A8A2FF'],
-    collage: ['#6C63FF', '#A8A2FF', '#C4C0FF'],
-    circle: ['#6C63FF'],
-    overlap: ['#6C63FF', '#A8A2FF'],
-  };
-
-  const palettes = colors[templateId] || ['#6C63FF'];
-
-  const previews: Record<string, React.ReactNode> = {
-    single: <div className="w-full h-full rounded-[1px]" style={{ background: palettes[0] }} />,
-    dual: (
-      <div className="flex gap-0.5 w-full h-full">
-        <div className="flex-1 rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="flex-1 rounded-[1px]" style={{ background: palettes[1] }} />
-      </div>
-    ),
-    triple: (
-      <div className="flex flex-col gap-0.5 w-full h-full">
-        <div className="flex-1 rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="flex gap-0.5 flex-1">
-          <div className="flex-1 rounded-[1px]" style={{ background: palettes[1] }} />
-          <div className="flex-1 rounded-[1px]" style={{ background: palettes[2] }} />
-        </div>
-      </div>
-    ),
-    quad: (
-      <div className="grid grid-cols-2 gap-0.5 w-full h-full">
-        <div className="rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="rounded-[1px]" style={{ background: palettes[1] }} />
-        <div className="rounded-[1px]" style={{ background: palettes[2] }} />
-        <div className="rounded-[1px]" style={{ background: palettes[3] }} />
-      </div>
-    ),
-    full: <div className="w-full h-full rounded-[1px]" style={{ background: palettes[0] }} />,
-    'top-bottom': (
-      <div className="flex flex-col gap-0.5 w-full h-full">
-        <div className="flex-1 rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="flex-1 rounded-[1px]" style={{ background: palettes[1] }} />
-      </div>
-    ),
-    collage: (
-      <div className="flex gap-0.5 w-full h-full">
-        <div className="flex-[3] rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="flex-[2] flex flex-col gap-0.5">
-          <div className="flex-1 rounded-[1px]" style={{ background: palettes[1] }} />
-          <div className="flex-1 rounded-[1px]" style={{ background: palettes[2] }} />
-        </div>
-      </div>
-    ),
-    circle: (
-      <div className="w-full h-full flex items-center justify-center">
-        <div className="w-3/4 h-3/4 rounded-full" style={{ background: palettes[0] }} />
-      </div>
-    ),
-    overlap: (
-      <div className="w-full h-full relative">
-        <div className="absolute inset-0 w-[65%] h-full rounded-[1px]" style={{ background: palettes[0] }} />
-        <div className="absolute right-0 top-[20%] w-[55%] h-[70%] rounded-[1px]" style={{ background: palettes[1] }} />
-      </div>
-    ),
-  };
-
-  return <>{previews[templateId] || previews.single}</>;
+  const template = TEMPLATES.find((t) => t.id === templateId);
+  if (!template || template.slots.length === 0) {
+    return <div className="w-full h-full rounded-[1px] bg-[var(--color-gray-200)]" />;
+  }
+  return (
+    <div className="w-full h-full relative">
+      {template.slots.map((slot, i) => (
+        <div
+          key={slot.id}
+          className="absolute rounded-[1px]"
+          style={{
+            left: `${slot.x}%`,
+            top: `${slot.y}%`,
+            width: `${slot.width}%`,
+            height: `${slot.height}%`,
+            backgroundColor: `hsl(250, ${50 + (i * 8) % 30}%, ${60 + (i * 5) % 25}%)`,
+          }}
+        />
+      ))}
+    </div>
+  );
 }

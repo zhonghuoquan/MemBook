@@ -71,13 +71,13 @@ export function getDemoProject() {
       desc: '210×280 mm · 标准竖版',
     },
     pages: [
-      createDemoPage('single', '#FFF8E7', 0),
-      createDemoPage('dual', '#FFFFFF', 1),
+      createDemoPage('full', '#FFF8E7', 0),
+      createDemoPage('dual-half', '#FFFFFF', 1),
       createDemoPage('full', '#1A1A1A', 2),
-      createDemoPage('triple', '#FFFFFF', 3),
-      createDemoPage('quad', '#FFF0F0', 4),
-      createDemoPage('collage', '#FFFFFF', 5),
-      createDemoPage('top-bottom', '#F8F9FA', 0),
+      createDemoPage('pin-shape', '#FFFFFF', 3),
+      createDemoPage('quad-grid', '#FFF0F0', 4),
+      createDemoPage('five-left3-right2', '#FFFFFF', 5),
+      createDemoPage('dual-half', '#F8F9FA', 0),
     ],
   };
 }

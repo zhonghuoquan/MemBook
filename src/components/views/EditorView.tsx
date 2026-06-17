@@ -1,11 +1,6 @@
 import { useEffect } from 'react';
 import { Toolbar } from '../editor/Toolbar';
-import { PhotoPanel } from '../editor/PhotoPanel';
-import { TemplatePanel } from '../editor/TemplatePanel';
-import { ThemePanel } from '../editor/ThemePanel';
-import { ToolsPanel } from '../editor/ToolsPanel';
-import { MarketPanel } from '../editor/MarketPanel';
-import { BottomTabs } from '../editor/BottomTabs';
+import { LeftPanel } from '../editor/LeftPanel';
 import { Canvas } from '../editor/Canvas';
 import { EditFlyout } from '../editor/EditFlyout';
 import { BottomNav } from '../editor/BottomNav';
@@ -18,13 +13,11 @@ interface EditorViewProps {
 }
 
 export function EditorView({ onBack }: EditorViewProps) {
-  const activePanel = useUIStore((s) => s.activePanel);
-  const setPages = useEditorStore((s) => s.setPages);
   const pages = useEditorStore((s) => s.pages);
+  const setPages = useEditorStore((s) => s.setPages);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
   const addToast = useUIStore((s) => s.addToast);
 
-  // 首次进入编辑器时加载 Demo 数据（兜底：如果前面没保存过）
   useEffect(() => {
     if (pages.length === 0) {
       const demo = getDemoProject();
@@ -35,28 +28,24 @@ export function EditorView({ onBack }: EditorViewProps) {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const renderPanel = () => {
-    switch (activePanel) {
-      case 'photos':     return <PhotoPanel />;
-      case 'templates':  return <TemplatePanel />;
-      case 'theme':      return <ThemePanel />;
-      case 'tools':      return <ToolsPanel />;
-      case 'market':     return <MarketPanel />;
-      default:           return <PhotoPanel />;
-    }
-  };
-
   return (
     <div className="flex flex-col h-full">
+      {/* 顶部工具栏：简化版 — 去掉 +页、删除页、预览 */}
       <Toolbar onBack={onBack} />
 
+      {/* 主体区域：左侧面板(Tab导航+内容) + 中央画布 */}
       <div className="flex flex-1 overflow-hidden relative">
-        {renderPanel()}
+        {/* 左侧面板：垂直Tab导航 + 面板内容 */}
+        <LeftPanel />
+
+        {/* 中央画布 */}
         <Canvas />
+
+        {/* 编辑浮层（双击照片时覆盖左侧区域） */}
         <EditFlyout />
       </div>
 
-      <BottomTabs />
+      {/* 底部页面导航栏：缩略图 + 控制栏（页码+缩放滑块+页面按钮） */}
       <BottomNav />
     </div>
   );

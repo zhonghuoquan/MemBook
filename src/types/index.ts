@@ -108,72 +108,158 @@ export type CustomTemplate = {
 
 /* ── 内置模板预设 ── */
 export const TEMPLATES: Template[] = [
+  /* ========= 1图 ========= */
   {
-    id: 'single', name: '单图', category: 'classic',
-    slots: [{ id: 'main', x: 5, y: 5, width: 90, height: 90 }],
-    preview: 'single',
+    id: 'full',
+    name: '全幅单张',
+    category: 'classic',
+    slots: [{ id: 'main', x: 0, y: 0, width: 100, height: 100 }],
+    preview: 'full',
   },
+
+  /* ========= 2图 ========= */
   {
-    id: 'dual', name: '双图', category: 'classic',
+    id: 'dual-half',
+    name: '双图并排',
+    category: 'classic',
     slots: [
-      { id: 'left', x: 5, y: 5, width: 44, height: 90 },
-      { id: 'right', x: 51, y: 5, width: 44, height: 90 },
+      { id: 'left', x: 3, y: 5, width: 45.5, height: 90 },
+      { id: 'right', x: 51.5, y: 5, width: 45.5, height: 90 },
     ],
     preview: 'dual',
   },
+
+  /* ========= 3图 ========= */
   {
-    id: 'triple', name: '三图', category: 'classic',
+    id: 'pin-shape',
+    name: '品字形',
+    category: 'classic',
     slots: [
-      { id: 'top', x: 5, y: 5, width: 90, height: 43 },
-      { id: 'bottom-l', x: 5, y: 52, width: 44, height: 43 },
-      { id: 'bottom-r', x: 51, y: 52, width: 44, height: 43 },
+      { id: 'top', x: 3, y: 5, width: 94, height: 43 },
+      { id: 'bottom-l', x: 3, y: 52, width: 45.5, height: 43 },
+      { id: 'bottom-r', x: 51.5, y: 52, width: 45.5, height: 43 },
     ],
     preview: 'triple',
   },
   {
-    id: 'quad', name: '四图', category: 'classic',
+    id: 'triple-col',
+    name: '三图并排',
+    category: 'classic',
     slots: [
-      { id: 'tl', x: 5, y: 5, width: 44, height: 43 },
-      { id: 'tr', x: 51, y: 5, width: 44, height: 43 },
-      { id: 'bl', x: 5, y: 52, width: 44, height: 43 },
-      { id: 'br', x: 51, y: 52, width: 44, height: 43 },
+      { id: 'col1', x: 3, y: 5, width: 29.3, height: 90 },
+      { id: 'col2', x: 35.3, y: 5, width: 29.3, height: 90 },
+      { id: 'col3', x: 67.7, y: 5, width: 29.3, height: 90 },
+    ],
+    preview: 'triple',
+  },
+
+  /* ========= 4图 ========= */
+  {
+    id: 'quad-col',
+    name: '四图并排',
+    category: 'classic',
+    slots: [
+      { id: 'col1', x: 3, y: 5, width: 21.5, height: 90 },
+      { id: 'col2', x: 27.5, y: 5, width: 21.5, height: 90 },
+      { id: 'col3', x: 52, y: 5, width: 21.5, height: 90 },
+      { id: 'col4', x: 76.5, y: 5, width: 21.5, height: 90 },
     ],
     preview: 'quad',
   },
   {
-    id: 'full', name: '全幅', category: 'classic',
-    slots: [{ id: 'full', x: 0, y: 0, width: 100, height: 100 }],
-    preview: 'full',
-  },
-  {
-    id: 'top-bottom', name: '上下', category: 'classic',
+    id: 'quad-grid',
+    name: '四宫格',
+    category: 'classic',
     slots: [
-      { id: 'top', x: 5, y: 5, width: 90, height: 43 },
-      { id: 'bottom', x: 5, y: 52, width: 90, height: 43 },
+      { id: 'tl', x: 3, y: 5, width: 45.5, height: 43 },
+      { id: 'tr', x: 51.5, y: 5, width: 45.5, height: 43 },
+      { id: 'bl', x: 3, y: 52, width: 45.5, height: 43 },
+      { id: 'br', x: 51.5, y: 52, width: 45.5, height: 43 },
     ],
-    preview: 'top-bottom',
+    preview: 'quad',
+  },
+
+  /* ========= 5图 ========= */
+  {
+    id: 'five-top2-bot3',
+    name: '五图-上二下三',
+    category: 'classic',
+    slots: [
+      { id: 't1', x: 3, y: 5, width: 45.5, height: 43 },
+      { id: 't2', x: 51.5, y: 5, width: 45.5, height: 43 },
+      { id: 'b1', x: 3, y: 52, width: 29.3, height: 43 },
+      { id: 'b2', x: 35.3, y: 52, width: 29.3, height: 43 },
+      { id: 'b3', x: 67.7, y: 52, width: 29.3, height: 43 },
+    ],
+    preview: 'quad',
   },
   {
-    id: 'collage', name: '拼贴', category: 'creative',
+    id: 'five-top3-bot2',
+    name: '五图-上三下二',
+    category: 'classic',
     slots: [
-      { id: 'big', x: 5, y: 5, width: 55, height: 90 },
-      { id: 'sm1', x: 62, y: 5, width: 33, height: 43 },
-      { id: 'sm2', x: 62, y: 52, width: 33, height: 43 },
+      { id: 't1', x: 3, y: 5, width: 29.3, height: 43 },
+      { id: 't2', x: 35.3, y: 5, width: 29.3, height: 43 },
+      { id: 't3', x: 67.7, y: 5, width: 29.3, height: 43 },
+      { id: 'b1', x: 3, y: 52, width: 45.5, height: 43 },
+      { id: 'b2', x: 51.5, y: 52, width: 45.5, height: 43 },
+    ],
+    preview: 'triple',
+  },
+  {
+    id: 'five-left3-right2',
+    name: '五图-左三右二',
+    category: 'classic',
+    slots: [
+      { id: 'l1', x: 3, y: 5, width: 55.5, height: 28.3 },
+      { id: 'l2', x: 3, y: 36.3, width: 55.5, height: 28.3 },
+      { id: 'l3', x: 3, y: 67.7, width: 55.5, height: 28.3 },
+      { id: 'r1', x: 61.5, y: 5, width: 35.5, height: 43 },
+      { id: 'r2', x: 61.5, y: 52, width: 35.5, height: 43 },
     ],
     preview: 'collage',
   },
   {
-    id: 'circle', name: '圆形', category: 'creative',
-    slots: [{ id: 'circle', x: 5, y: 5, width: 90, height: 90 }],
-    preview: 'circle',
+    id: 'five-left2-right3',
+    name: '五图-左二右三',
+    category: 'classic',
+    slots: [
+      { id: 'l1', x: 3, y: 5, width: 35.5, height: 43 },
+      { id: 'l2', x: 3, y: 52, width: 35.5, height: 43 },
+      { id: 'r1', x: 41.5, y: 5, width: 55.5, height: 28.3 },
+      { id: 'r2', x: 41.5, y: 36.3, width: 55.5, height: 28.3 },
+      { id: 'r3', x: 41.5, y: 67.7, width: 55.5, height: 28.3 },
+    ],
+    preview: 'collage',
   },
   {
-    id: 'overlap', name: '重叠', category: 'creative',
+    id: 'five-left3-right2-big',
+    name: '五图-左三右二大',
+    category: 'creative',
     slots: [
-      { id: 'back', x: 5, y: 5, width: 65, height: 90 },
-      { id: 'front', x: 40, y: 15, width: 55, height: 70 },
+      { id: 'l1', x: 3, y: 5, width: 40.5, height: 28.3 },
+      { id: 'l2', x: 3, y: 36.3, width: 40.5, height: 28.3 },
+      { id: 'l3', x: 3, y: 67.7, width: 40.5, height: 28.3 },
+      { id: 'r1', x: 46.5, y: 5, width: 50.5, height: 43 },
+      { id: 'r2', x: 46.5, y: 52, width: 50.5, height: 43 },
     ],
-    preview: 'overlap',
+    preview: 'collage',
+  },
+
+  /* ========= 6图 ========= */
+  {
+    id: 'six-grid',
+    name: '六图并排',
+    category: 'classic',
+    slots: [
+      { id: 'r1c1', x: 3, y: 5, width: 29.3, height: 43 },
+      { id: 'r1c2', x: 35.3, y: 5, width: 29.3, height: 43 },
+      { id: 'r1c3', x: 67.7, y: 5, width: 29.3, height: 43 },
+      { id: 'r2c1', x: 3, y: 52, width: 29.3, height: 43 },
+      { id: 'r2c2', x: 35.3, y: 52, width: 29.3, height: 43 },
+      { id: 'r2c3', x: 67.7, y: 52, width: 29.3, height: 43 },
+    ],
+    preview: 'quad',
   },
 ];
 
