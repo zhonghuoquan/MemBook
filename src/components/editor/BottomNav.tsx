@@ -5,6 +5,20 @@ import type { AlbumPage, Template } from '../../types';
 
 const THUMB_W = 96;
 const THUMB_H = 128;
+const MIN_NAV_HEIGHT = 90;
+const MAX_NAV_HEIGHT = 280;
+const NAV_STORAGE_KEY = 'membook-bottom-nav-height';
+
+function loadSavedHeight(): number {
+  try {
+    const saved = localStorage.getItem(NAV_STORAGE_KEY);
+    if (saved) {
+      const h = parseInt(saved, 10);
+      if (!isNaN(h) && h >= MIN_NAV_HEIGHT && h <= MAX_NAV_HEIGHT) return h;
+    }
+  } catch { /* ignore */ }
+  return 150;
+}
 
 export function BottomNav() {
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
@@ -18,6 +32,8 @@ export function BottomNav() {
   const photos = usePhotoStore((s) => s.photos);
   const bottomNav = useUIStore((s) => s.bottomNav);
   const toggleBottomNav = useUIStore((s) => s.toggleBottomNav);
+  const navHeight = useUIStore((s) => s.bottomNavHeight);
+  const setBottomNavHeight = useUIStore((s) => s.setBottomNavHeight);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
   const addToast = useUIStore((s) => s.addToast);
@@ -25,12 +41,48 @@ export function BottomNav() {
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [menuOpenIndex, setMenuOpenIndex] = useState<number | null>(null);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const [showThumbnails, setShowThumbnails] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
   const moreBtnRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const collapsed = bottomNav === 'collapsed';
 
-  // Close menu on outside click
+  // ── 初始化时从 localStorage 读入 store ──
+  const initDone = useRef(false);
+  useEffect(() => {
+    if (initDone.current) return;
+    initDone.current = true;
+    setBottomNavHeight(loadSavedHeight());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 垂直拖拽调整高度（同步到 store）──
+  const isDragging = useRef(false);
+  const startY = useRef(0);
+  const startH = useRef(0);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging.current = true;
+    startY.current = e.clientY;
+    startH.current = useUIStore.getState().bottomNavHeight;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientY - startY.current;
+      setBottomNavHeight(Math.min(MAX_NAV_HEIGHT, Math.max(MIN_NAV_HEIGHT, startH.current - delta)));
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      try { localStorage.setItem(NAV_STORAGE_KEY, String(useUIStore.getState().bottomNavHeight)); } catch { /* */ }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [setBottomNavHeight]);
   useEffect(() => {
     if (menuOpenIndex === null) return;
     const handler = (e: MouseEvent) => {
@@ -105,19 +157,39 @@ export function BottomNav() {
 
   const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 
+  // ── 切换缩略图显示时同步调整高度 ──
+  const handleToggleThumbnails = useCallback(() => {
+    const next = !showThumbnails;
+    setShowThumbnails(next);
+    if (next) {
+      // 显示缩略图 → 恢复到之前保存的高度
+      setBottomNavHeight(loadSavedHeight());
+    } else {
+      // 隐藏缩略图 → 折叠到仅控制栏高度
+      setBottomNavHeight(48);
+    }
+  }, [showThumbnails, setBottomNavHeight]);
+
   return (
     <nav
-      className={`
-        bg-white border-t border-[var(--color-border)]
-        flex items-stretch shrink-0 relative
-        transition-[height] duration-200 ease-in-out
-        ${collapsed ? 'h-[var(--layout-bottom-nav-collapsed)]' : 'h-[150px]'}
-      `}
+      className="bg-white border-t border-[var(--color-border)] flex flex-col shrink-0 relative transition-[height] duration-200 ease-out"
+      style={{ height: collapsed ? 'var(--layout-bottom-nav-collapsed)' : navHeight }}
     >
-      {!collapsed && (
-        <div className="flex items-center w-full h-full px-2 gap-2">
+      {/* Drag handle (top edge) */}
+      {!collapsed && showThumbnails && (
+        <div
+          className="absolute top-0 left-0 right-0 h-1.5 cursor-row-resize z-10 group"
+          onMouseDown={handleResizeMouseDown}
+        >
+          <div className="w-8 h-0.5 mx-auto mt-0.5 rounded-full bg-[var(--color-border)] opacity-0 group-hover:opacity-60 group-active:opacity-100 transition-opacity" />
+        </div>
+      )}
+
+      {/* ══════════ Row 1: Thumbnails ══════════ */}
+      {showThumbnails && !collapsed && (
+        <div className="flex items-center px-2 py-1 min-h-0 flex-1 border-b border-[var(--color-border)]">
           <button
-            className="flex items-center justify-center w-7 h-7 border-none rounded-[var(--radius-xs)] bg-[var(--color-surface-panel)] text-[var(--color-gray-500)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+            className="flex items-center justify-center w-7 h-7 border-none rounded-[var(--radius-xs)] bg-[var(--color-surface-panel)] text-[var(--color-gray-500)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors shrink-0 mr-1"
             onClick={toggleBottomNav}
             title="收起页面导航"
           >
@@ -127,7 +199,7 @@ export function BottomNav() {
           </button>
 
           <button
-            className="flex items-center justify-center w-6 h-6 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-400)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-600)] disabled:text-[var(--color-gray-200)] disabled:cursor-not-allowed"
+            className="flex items-center justify-center w-6 h-6 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-400)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-600)] disabled:text-[var(--color-gray-200)] disabled:cursor-not-allowed mr-1"
             onClick={handleMoveLeft}
             disabled={currentPageIndex === 0}
             title="左移页面"
@@ -137,122 +209,73 @@ export function BottomNav() {
             </svg>
           </button>
 
-          {/* ── Thumbnails Row with insert zones ── */}
-          <div
-            className="flex-1 flex items-center overflow-x-auto py-1 no-scrollbar"
-            onMouseLeave={() => setInsertIndex(null)}
-          >
+          {/* Thumbnails scroll area */}
+          <div className="flex-1 flex items-center overflow-x-auto no-scrollbar py-1" onMouseLeave={() => setInsertIndex(null)}>
             {pages.length === 0 ? (
               <div className="text-[var(--text-caption)] text-[var(--color-text-tertiary)] px-2">暂无页面</div>
             ) : (
               <div className="flex items-center">
                 {pages.map((page, i) => {
-                  // Determine if this thumbnail should shift (when adjacent gap is active)
                   let shiftX = 0;
                   if (insertIndex !== null) {
-                    if (insertIndex === i) shiftX = 8; // right thumbnail moves right
-                    if (insertIndex === i + 1) shiftX = -8; // left thumbnail moves left
+                    if (insertIndex === i) shiftX = 8;
+                    if (insertIndex === i + 1) shiftX = -8;
                   }
                   return (
                   <div key={page.id} className="flex items-center">
-                    {/* Insert zone before this page */}
-                    <InsertZone
-                      index={i}
-                      isActive={insertIndex === i}
-                      onActivate={() => setInsertIndex(i)}
-                      onDeactivate={() => setInsertIndex(null)}
-                      onInsert={() => handleInsertPage(i)}
-                    />
-
-                    {/* Thumbnail with ⋮ menu */}
-                    <div
-                      className="flex flex-col items-center gap-1 flex-shrink-0 relative transition-transform duration-200 ease-out"
-                      style={{ transform: shiftX !== 0 ? `translateX(${shiftX}px)` : undefined }}
-                    >
+                    <InsertZone index={i} isActive={insertIndex === i}
+                      onActivate={() => setInsertIndex(i)} onDeactivate={() => setInsertIndex(null)}
+                      onInsert={() => handleInsertPage(i)} />
+                    <div className="flex flex-col items-center gap-0.5 flex-shrink-0 relative transition-transform duration-200 ease-out"
+                      style={{ transform: shiftX !== 0 ? `translateX(${shiftX}px)` : undefined }}>
                       <div className="relative group/thumb">
                         <button
-                          className={`
-                            rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer
-                            transition-[border-color,transform] duration-150 p-0 relative block
-                            ${i === currentPageIndex
+                          className={`rounded-[var(--radius-xs)] overflow-hidden border-2 cursor-pointer transition-[border-color,transform] duration-150 p-0 relative block ${
+                            i === currentPageIndex
                               ? 'border-[var(--color-brand)] scale-105 shadow-[0_2px_8px_rgba(108,99,255,0.2)]'
                               : 'border-[var(--color-border)] hover:border-[var(--color-gray-400)]'
-                            }
-                          `}
+                          }`}
                           style={{ backgroundColor: page.background, width: THUMB_W, height: THUMB_H }}
                           onClick={() => setCurrentPage(i)}
                           title={`第${i + 1}页`}
                         >
                           <PageThumbnail page={page} template={TEMPLATES.find((t) => t.id === page.templateId)} photos={photos} />
                         </button>
-
-                          {/* ⋮ More button (shows on hover) */}
                         <button
                           ref={(el) => { if (el) moreBtnRefs.current.set(i, el); }}
-                          className="absolute top-1 right-1 w-[18px] h-[18px] flex items-center justify-center
-                                     bg-black/40 border border-white/20 rounded-full
-                                     text-white opacity-0 group-hover/thumb:opacity-100
-                                     hover:bg-black/60 hover:scale-110
-                                     transition-all duration-150 cursor-pointer z-10 backdrop-blur-sm"
+                          className="absolute top-1 right-1 w-[18px] h-[18px] flex items-center justify-center bg-black/40 border border-white/20 rounded-full text-white opacity-0 group-hover/thumb:opacity-100 hover:bg-black/60 hover:scale-110 transition-all duration-150 cursor-pointer z-10 backdrop-blur-sm"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (menuOpenIndex === i) { setMenuOpenIndex(null); return; }
-                            // Calculate fixed position from button's bounding rect
                             const rect = (e.target as HTMLElement).getBoundingClientRect();
-                            setMenuStyle({
-                              right: window.innerWidth - rect.right + 8,
-                              top: rect.top - 4,
-                              transform: 'translateY(-100%)',
-                            });
+                            setMenuStyle({ right: window.innerWidth - rect.right + 8, top: rect.top - 4, transform: 'translateY(-100%)' });
                             setMenuOpenIndex(i);
                           }}
                           title="页面操作"
                         >
                           <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5">
-                            <circle cx="6" cy="2.5" r="1.2" />
-                            <circle cx="6" cy="6" r="1.2" />
-                            <circle cx="6" cy="9.5" r="1.2" />
+                            <circle cx="6" cy="2.5" r="1.2" /><circle cx="6" cy="6" r="1.2" /><circle cx="6" cy="9.5" r="1.2" />
                           </svg>
                         </button>
-
-                        {/* Dropdown menu */}
                         {menuOpenIndex === i && (
-                          <PageMenu
-                            ref={menuRef}
-                            style={menuStyle}
-                            pageIndex={i}
-                            pageCount={pages.length}
-                            onCopy={() => handleCopyPage(i)}
-                            onCopyStyle={() => handleCopyStyle(i)}
-                            onDelete={() => handleDeletePage(i)}
-                            onClose={() => setMenuOpenIndex(null)}
-                          />
+                          <PageMenu ref={menuRef} style={menuStyle} pageIndex={i} pageCount={pages.length}
+                            onCopy={() => handleCopyPage(i)} onCopyStyle={() => handleCopyStyle(i)}
+                            onDelete={() => handleDeletePage(i)} onClose={() => setMenuOpenIndex(null)} />
                         )}
                       </div>
-
-                      {/* Page number */}
-                      <span className={`text-[10px] leading-tight ${i === currentPageIndex ? 'text-[var(--color-brand)] font-[600]' : 'text-[var(--color-gray-500)]'}`}>
-                        {i + 1}
-                      </span>
+                      <span className={`text-[10px] leading-tight ${i === currentPageIndex ? 'text-[var(--color-brand)] font-[600]' : 'text-[var(--color-gray-500)]'}`}>{i + 1}</span>
                     </div>
                   </div>
-                );
-              })}
-
-                {/* Insert zone after last page */}
-                <InsertZone
-                  index={pages.length}
-                  isActive={insertIndex === pages.length}
-                  onActivate={() => setInsertIndex(pages.length)}
-                  onDeactivate={() => setInsertIndex(null)}
-                  onInsert={() => handleInsertPage(pages.length)}
-                />
+                );})}
+                <InsertZone index={pages.length} isActive={insertIndex === pages.length}
+                  onActivate={() => setInsertIndex(pages.length)} onDeactivate={() => setInsertIndex(null)}
+                  onInsert={() => handleInsertPage(pages.length)} />
               </div>
             )}
           </div>
 
           <button
-            className="flex items-center justify-center w-6 h-6 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-400)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-600)] disabled:text-[var(--color-gray-200)] disabled:cursor-not-allowed"
+            className="flex items-center justify-center w-6 h-6 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-400)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-600)] disabled:text-[var(--color-gray-200)] disabled:cursor-not-allowed ml-1"
             onClick={handleMoveRight}
             disabled={currentPageIndex >= pages.length - 1}
             title="右移页面"
@@ -263,47 +286,90 @@ export function BottomNav() {
           </button>
 
           <button
-            className="flex items-center justify-center w-7 h-7 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-500)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-brand)] transition-colors"
-            title="添加页面"
-            onClick={handleAddPage}
+            className="flex items-center justify-center w-7 h-7 border-none rounded-[var(--radius-xs)] bg-transparent text-[var(--color-gray-500)] cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-brand)] transition-colors ml-1"
+            title="添加页面" onClick={handleAddPage}
           >
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
               <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="14" y2="7" />
             </svg>
           </button>
+        </div>
+      )}
 
-          <div className="w-px h-8 bg-[var(--color-border)] shrink-0 mx-1" />
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[var(--text-body-sm)] text-[var(--color-gray-600)] font-[500] whitespace-nowrap">
-              {currentPageIndex + 1}/{pages.length}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[var(--text-caption)] text-[var(--color-gray-500)] min-w-[2.5em] text-right select-none">
-              {formatPercent(canvasZoom)}
-            </span>
+      {/* ══════════ Row 2: Control Bar ══════════ */}
+      {!collapsed && (
+        <div className="flex items-center justify-center gap-4 px-3 py-2 shrink-0">
+          {/* Zoom slider */}
+          <div className="flex items-center gap-2">
             <input
-              type="range"
-              min="0.3"
-              max="3"
-              step="0.05"
-              value={canvasZoom}
+              type="range" min="0.3" max="3" step="0.05" value={canvasZoom}
               onChange={(e) => setCanvasZoom(parseFloat(e.target.value))}
-              className="w-20 h-1.5 cursor-pointer accent-[var(--color-brand)]"
+              className="w-32 h-1.5 cursor-pointer accent-[var(--color-brand)]"
               title="缩放"
             />
+            <span className="text-[var(--text-caption)] text-[var(--color-gray-600)] min-w-[2.5em] tabular-nums select-none">
+              {formatPercent(canvasZoom)}
+            </span>
+            <button
+              className="flex items-center justify-center w-5 h-5 border-none rounded-[var(--radius-xs)] bg-transparent text-[10px] text-[var(--color-gray-400)] cursor-pointer hover:text-[var(--color-brand)] hover:bg-[var(--color-primary-50)] transition-colors shrink-0 font-[600]"
+              title="重置缩放为 100%"
+              onClick={() => setCanvasZoom(1)}
+            >
+              ⟳
+            </button>
           </div>
 
+          {/* Page / Thumbnails toggle */}
           <button
-            className="flex items-center justify-center w-7 h-7 border border-[var(--color-border)] rounded-[var(--radius-xs)] bg-[var(--color-surface-panel)] text-[var(--color-gray-500)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-xs)] border cursor-pointer transition-colors ${
+              showThumbnails
+                ? 'border-[var(--color-brand)] bg-[var(--color-primary-50)] text-[var(--color-brand)]'
+                : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)]'
+            }`}
+            onClick={handleToggleThumbnails}
+            title={showThumbnails ? '隐藏页面缩略图' : '显示页面缩略图'}
+          >
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+              <rect x="1" y="1" width="12" height="12" rx="1.5" />
+              <rect x="3" y="3" width="3.5" height="3.5" rx="0.5" />
+              <rect x="7.5" y="3" width="3.5" height="3.5" rx="0.5" />
+              <rect x="3" y="7.5" width="3.5" height="3.5" rx="0.5" />
+            </svg>
+            <span className="text-[var(--text-caption)] font-[500]">页面</span>
+          </button>
+
+          {/* Page counter */}
+          <span className="text-[var(--text-body-sm)] text-[var(--color-gray-700)] font-[500] whitespace-nowrap tabular-nums">
+            {currentPageIndex + 1}/{pages.length}
+          </span>
+
+          {/* Grid view */}
+          <button
+            className="flex items-center justify-center w-7 h-7 border border-[var(--color-border)] rounded-[var(--radius-xs)] bg-white text-[var(--color-gray-500)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors"
             title="网格视图"
             onClick={() => addToast({ type: 'info', message: '网格视图即将上线' })}
           >
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
               <rect x="1" y="1" width="5" height="5" rx="1" /><rect x="8" y="1" width="5" height="5" rx="1" />
               <rect x="1" y="8" width="5" height="5" rx="1" /><rect x="8" y="8" width="5" height="5" rx="1" />
+            </svg>
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            className="flex items-center justify-center w-7 h-7 border border-[var(--color-border)] rounded-[var(--radius-xs)] bg-white text-[var(--color-gray-500)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors"
+            title="全屏"
+            onClick={() => {
+              if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen?.();
+              } else {
+                document.exitFullscreen?.();
+              }
+            }}
+          >
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+              <path d="M2 6V3a1 1 0 0 1 1-1h3" /><path d="M8 2h3a1 1 0 0 1 1 1v3" />
+              <path d="M2 8v3a1 1 0 0 0 1 1h3" /><path d="M12 8v3a1 1 0 0 1-1 1H8" />
             </svg>
           </button>
         </div>

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type {
   ViewMode, PanelTab, EditTab, BottomNavState,
-  AlbumPage, Photo, Toast, HistoryEntry, StorageMode, PhotoAdjustments,
+  AlbumPage, Photo, Toast, HistoryEntry, StorageMode, PhotoAdjustments, AlbumSize,
 } from '../types';
 import { TEMPLATES, STORAGE_MODE_KEY } from '../types';
 
@@ -12,6 +12,7 @@ interface UIState {
   editFlyoutOpen: boolean;
   editFlyoutTab: EditTab;
   bottomNav: BottomNavState;
+  bottomNavHeight: number;   // 底部导航栏高度 (90-280px)
   canvasZoom: number;        // 0.3 ~ 3.0, 默认 1.0
   storageMode: StorageMode | null;  // null = 尚未选择
   toasts: Toast[];
@@ -22,6 +23,7 @@ interface UIState {
   setEditFlyoutOpen: (open: boolean) => void;
   setEditFlyoutTab: (tab: EditTab) => void;
   toggleBottomNav: () => void;
+  setBottomNavHeight: (h: number) => void;
   setCanvasZoom: (zoom: number) => void;
   setStorageMode: (mode: StorageMode) => void;
   addToast: (toast: Omit<Toast, 'id'>) => void;
@@ -43,6 +45,7 @@ export const useUIStore = create<UIState>((set) => ({
   editFlyoutOpen: false,
   editFlyoutTab: 'crop',
   bottomNav: 'expanded',
+  bottomNavHeight: 150,
   canvasZoom: 1.0,
   storageMode: loadStorageMode(),
   toasts: [],
@@ -53,6 +56,7 @@ export const useUIStore = create<UIState>((set) => ({
   setEditFlyoutTab: (tab) => set({ editFlyoutTab: tab }),
   toggleBottomNav: () =>
     set((s) => ({ bottomNav: s.bottomNav === 'expanded' ? 'collapsed' : 'expanded' })),
+  setBottomNavHeight: (h) => set({ bottomNavHeight: h }),
   setCanvasZoom: (zoom) => set({ canvasZoom: Math.max(0.3, Math.min(3, zoom)) }),
   setStorageMode: (mode) => {
     try { localStorage.setItem(STORAGE_MODE_KEY, mode); } catch { /* ignore */ }
@@ -70,6 +74,7 @@ interface EditorState {
   selectedSlotId: string | null;
   selectedPhotoId: string | null;
   pages: AlbumPage[];
+  albumSize: AlbumSize | null;
 
   /* Actions */
   setCurrentPage: (index: number) => void;
@@ -81,6 +86,7 @@ interface EditorState {
   removePage: (index: number) => void;
   reorderPages: (fromIndex: number, toIndex: number) => void;
   setPages: (pages: AlbumPage[]) => void;
+  setAlbumSize: (size: AlbumSize) => void;
   updatePageBackground: (index: number, color: string) => void;
   setPageTemplate: (pageIndex: number, templateId: string) => void;
   placePhoto: (pageIndex: number, slotId: string, photoId: string) => void;
@@ -109,6 +115,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   selectedSlotId: null,
   selectedPhotoId: null,
   pages: [],
+  albumSize: null,
 
   setCurrentPage: (index) => set({ currentPageIndex: index }),
   setSelectedSlot: (slotId) => set({ selectedSlotId: slotId }),
@@ -174,6 +181,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   },
   setPages: (pages) => set({ pages }),
+  setAlbumSize: (size) => set({ albumSize: size }),
   updatePageBackground: (index, color) => {
     pushSnapshot();
     set((s) => {

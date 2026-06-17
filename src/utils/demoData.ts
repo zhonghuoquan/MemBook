@@ -3,7 +3,7 @@
  * 内置占位照片 + 示例项目，让用户打开编辑器就能看到内容
  */
 import type { AlbumPage, Photo } from '../types';
-import { TEMPLATES } from '../types';
+import { TEMPLATES, PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../types';
 
 /**
  * 生成彩色 SVG 占位照片（带字母标识）
@@ -63,6 +63,7 @@ export function getDemoProject() {
   return {
     id: 'demo-project-1',
     name: '我的旅行回忆',
+    margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT },
     size: {
       id: 'v-210',
       name: '竖版',

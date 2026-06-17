@@ -25,6 +25,16 @@ export const CUSTOM_SIZE_MAX = 600;   // 最大 600mm
 export const CUSTOM_SIZE_STEP = 5;    // 步进 5mm
 export const CUSTOM_SIZE_DEFAULT = 210; // 默认值
 
+/* ── 页面边距/间距 ── */
+export const PAGE_MARGIN_DEFAULT = 15;   // 默认边距 15mm
+export const PAGE_GAP_DEFAULT = 5;       // 默认间距 5mm
+export const PAGE_MARGIN_MIN = 0;
+export const PAGE_MARGIN_MAX = 40;
+export const PAGE_GAP_MIN = 0;
+export const PAGE_GAP_MAX = 20;
+export const PAGE_MARGIN_STEP = 1;
+export const PAGE_GAP_STEP = 1;
+
 /* ── 页面模板 ── */
 export type SlotLayout = {
   id: string;
@@ -80,11 +90,18 @@ export type AlbumPage = {
   background: string; // color hex
 };
 
+/* ── 页面边距配置 ── */
+export type PageMargin = {
+  margin: number;  // mm，外边缘距
+  gap: number;     // mm，槽位间距
+};
+
 /* ── 相册项目 ── */
 export type AlbumProject = {
   id: string;
   name: string;
   size: AlbumSize;
+  margin: PageMargin;
   pages: AlbumPage[];
   createdAt: string;
   updatedAt: string;

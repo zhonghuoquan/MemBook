@@ -3,10 +3,9 @@ import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
 import { CreateDialog } from './../home/CreateDialog';
 import { useEditorStore, usePhotoStore } from '../../store';
-import { getDemoPhotos, getDemoProject } from '../../utils/demoData';
 import { createAndSaveProject } from '../../db';
-import { TEMPLATES } from '../../types';
-import type { AlbumSize, AlbumPage, AlbumProject } from '../../types';
+import { TEMPLATES, PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
+import type { AlbumSize, AlbumPage, AlbumProject, PageMargin } from '../../types';
 import type { HomeTab } from '../../types';
 
 const NAV_SESSION_KEY = 'membook-home-nav';
@@ -30,22 +29,31 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     try { sessionStorage.setItem(NAV_SESSION_KEY, activeNav); } catch { /* ignore */ }
   }, [activeNav]);
   const setPages = useEditorStore((s) => s.setPages);
+  const setAlbumSize = useEditorStore((s) => s.setAlbumSize);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
 
   const loadDemoAndNavigate = async () => {
     const demo = getDemoProject();
     setPages(demo.pages);
+    setAlbumSize(demo.size);
     setPhotos(getDemoPhotos());
     // 保存到 IndexedDB，刷新不丢失
-    await createAndSaveProject('我的旅行回忆', demo.size, demo.pages);
+    await createAndSaveProject('我的旅行回忆', demo.size, demo.pages, demo.margin);
     onNavigateToEditor();
   };
 
-  const handleCreateAlbum = async (_name: string, _size: AlbumSize) => {
-    const demo = getDemoProject();
-    setPages(demo.pages);
-    setPhotos(getDemoPhotos());
-    await createAndSaveProject(_name || '未命名相册', _size, demo.pages);
+  const handleCreateAlbum = async (_name: string, _size: AlbumSize, _margin: PageMargin) => {
+    // 创建一页空白页，不加载任何演示数据
+    const blankPage: AlbumPage = {
+      id: `page-${Date.now()}`,
+      templateId: 'full',
+      placements: [{ slotId: 'main', photoId: null }],
+      background: '#FFFFFF',
+    };
+    setPages([blankPage]);
+    setAlbumSize(_size);
+    setPhotos([]);
+    await createAndSaveProject(_name || '未命名相册', _size, [blankPage], _margin);
     onNavigateToEditor();
   };
 
@@ -64,14 +72,16 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     };
 
     setPages([page]);
-    setPhotos(getDemoPhotos());
-    await createAndSaveProject(name || '未命名相册', size, [page]);
+    setAlbumSize(size);
+    setPhotos([]);
+    await createAndSaveProject(name || '未命名相册', size, [page], { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT });
     onNavigateToEditor();
   };
 
   const handleOpenProject = (project: AlbumProject) => {
     if (project.pages && project.pages.length > 0) {
       setPages(project.pages);
+      setAlbumSize(project.size);
       localStorage.setItem('membook_current_project_id', project.id);
     } else {
       loadDemoAndNavigate();

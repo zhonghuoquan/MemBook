@@ -5,8 +5,10 @@ import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../.
 import { TEMPLATES } from '../../types';
 import type { Template, SlotLayout, PhotoPlacement, Photo } from '../../types';
 
-const CANVAS_W = 420;
-const CANVAS_H = 560;
+const DEFAULT_W = 420;
+const DEFAULT_H = 560;
+// mm → px 缩放因子
+const MM_TO_PX = 2;
 
 /* ── 缺失的工具函数 ── */
 function calcCoverFit(iw: number, ih: number, cw: number, ch: number) {
@@ -37,6 +39,7 @@ export function Canvas() {
   const selectedSlotId = useEditorStore((s) => s.selectedSlotId);
   const setSelectedSlot = useEditorStore((s) => s.setSelectedSlot);
   const placePhoto = useEditorStore((s) => s.placePhoto);
+  const albumSize = useEditorStore((s) => s.albumSize);
   const photos = usePhotoStore((s) => s.photos);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
@@ -44,6 +47,10 @@ export function Canvas() {
   const setEditFlyoutOpen = useUIStore((s) => s.setEditFlyoutOpen);
   const setEditFlyoutTab = useUIStore((s) => s.setEditFlyoutTab);
   const addToast = useUIStore((s) => s.addToast);
+
+  // 画布尺寸：根据用户选择的相册尺寸（mm）换算为像素
+  const CANVAS_W = albumSize ? albumSize.width * MM_TO_PX : DEFAULT_W;
+  const CANVAS_H = albumSize ? albumSize.height * MM_TO_PX : DEFAULT_H;
 
   const currentPage = pages[currentPageIndex];
   const template: Template | undefined = currentPage
@@ -57,7 +64,7 @@ export function Canvas() {
     y: (slot.y / 100) * CANVAS_H,
     w: (slot.width / 100) * CANVAS_W,
     h: (slot.height / 100) * CANVAS_H,
-  }), []);
+  }), [CANVAS_W, CANVAS_H]);
 
   const clientToStage = useCallback((clientX: number, clientY: number) => {
     const stage = stageRef.current;
@@ -115,20 +122,121 @@ export function Canvas() {
     }
   }, [selectedSlotId, currentPageIndex, currentPage?.placements, isEditing]);
 
-  // ── Ctrl + wheel zoom ──
+  // ── Wheel: Ctrl+wheel = zoom, plain wheel = page navigation ──
+  // 使用 React onWheel prop 而非 addEventListener，确保页面刷新/HMR 后正常工作
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    // Ctrl+wheel → 缩放
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY > 0 ? -0.08 : 0.08;
+      const current = useUIStore.getState().canvasZoom;
+      setCanvasZoom(Math.max(0.3, Math.min(3, current + delta)));
+      return;
+    }
+    // 普通滚轮 → 切换页面
+    e.preventDefault();
+    e.stopPropagation();
+    const st = useEditorStore.getState();
+    const { pages, currentPageIndex, setCurrentPage } = st;
+    if (e.deltaY > 0) {
+      if (currentPageIndex < pages.length - 1) setCurrentPage(currentPageIndex + 1);
+    } else {
+      if (currentPageIndex > 0) setCurrentPage(currentPageIndex - 1);
+    }
+  }, [setCanvasZoom]);
+
+  // ── 全局拦截浏览器 Ctrl+wheel 缩放（必须 passive:false + window 级）──
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
     const handler = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        setCanvasZoom(useUIStore.getState().canvasZoom + delta);
       }
     };
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, [setCanvasZoom]);
+    window.addEventListener('wheel', handler, { passive: false, capture: true });
+    return () => window.removeEventListener('wheel', handler, { capture: true });
+  }, []);
+
+  // ── Space+鼠标拖拽移动画布（类似 PS）──
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const scrollStart = useRef({ x: 0, y: 0 });
+  const spaceHeldRef = useRef(false); // 给原生事件用的同步 ref
+
+  // 跟踪空格键状态
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        spaceHeldRef.current = true;
+        setSpaceHeld(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceHeldRef.current = false;
+        setSpaceHeld(false);
+        setIsPanning(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  // 用原生事件在 capture 阶段拦截 mousedown（在 event 到达 Konva Stage 前）
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (spaceHeldRef.current && e.button === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        panStart.current = { x: e.clientX, y: e.clientY };
+        scrollStart.current = { x: el.scrollLeft, y: el.scrollTop };
+        setIsPanning(true);
+      }
+    };
+    el.addEventListener('mousedown', onMouseDown, { capture: true });
+    return () => el.removeEventListener('mousedown', onMouseDown, { capture: true });
+  }, []);
+
+  // 平移中：window 级 mousemove/mouseup
+  useEffect(() => {
+    if (!isPanning || !spaceHeldRef.current) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - panStart.current.x;
+      const dy = ev.clientY - panStart.current.y;
+      el.scrollLeft = scrollStart.current.x - dx;
+      el.scrollTop = scrollStart.current.y - dy;
+    };
+    const onUp = () => setIsPanning(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isPanning]);
+
+  // 光标样式：space→grab, space+drag→grabbing
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (isPanning) {
+      el.style.cursor = 'grabbing';
+    } else if (spaceHeld) {
+      el.style.cursor = 'grab';
+    } else {
+      el.style.cursor = '';
+    }
+  }, [spaceHeld, isPanning]);
 
   // ── Keyboard ──
   useEffect(() => {
@@ -233,11 +341,10 @@ export function Canvas() {
     return <CanvasEmptyState />;
   }
 
-  const scaledW = CANVAS_W * canvasZoom;
-  const scaledH = CANVAS_H * canvasZoom;
   const padding = 48;
-  const scrollW = Math.max(containerSize.w, scaledW + padding);
-  const scrollH = Math.max(containerSize.h, scaledH + padding);
+  // 缩放后的实际可视尺寸（用于溢出滚动条计算）
+  const scaledW = CANVAS_W * canvasZoom + padding * 2;
+  const scaledH = CANVAS_H * canvasZoom + padding * 2;
 
   const slotWidth = (s: SlotLayout) => (s.width / 100) * CANVAS_W;
   const slotHeight = (s: SlotLayout) => (s.height / 100) * CANVAS_H;
@@ -245,13 +352,14 @@ export function Canvas() {
   const slotY = (s: SlotLayout) => (s.y / 100) * CANVAS_H;
 
   return (
-    <div
-      ref={containerRef}
-      className={`flex-1 overflow-auto bg-[var(--color-gray-100)] relative transition-colors duration-150 ${isDraggingFile ? 'bg-[var(--color-primary-50)]' : ''}`}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onDragLeave={handleDragLeave}
-    >
+      <div
+        className="w-full h-full overflow-auto relative bg-[var(--color-gray-100)] transition-colors duration-150"
+        ref={containerRef}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragLeave={handleDragLeave}
+        onWheel={handleWheel}
+      >
       {isDraggingFile && (
         <div className="absolute inset-0 z-[var(--z-overlay)] pointer-events-none flex items-center justify-center">
           <div className="px-6 py-3 bg-[var(--color-primary-600)]/90 text-white rounded-[var(--radius-lg)] shadow-lg text-[var(--text-body-sm)] font-[500]">
@@ -260,8 +368,12 @@ export function Canvas() {
         </div>
       )}
 
-      <div className="flex items-center justify-center" style={{ width: scrollW, height: scrollH, padding }}>
-        <div style={{ transform: `scale(${canvasZoom})`, transformOrigin: 'center center', width: CANVAS_W, height: CANVAS_H, flexShrink: 0 }}>
+      <div style={{
+        width: Math.max(containerSize.w, scaledW),
+        height: Math.max(containerSize.h, scaledH),
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding
+      }}>
+        <div style={{ transform: `scale(${canvasZoom})`, transformOrigin: 'center center', width: CANVAS_W, height: CANVAS_H, flexShrink: 0, overflow: 'visible' }}>
           <Stage
             ref={stageRef}
             width={CANVAS_W}
@@ -409,7 +521,7 @@ export function Canvas() {
       </div>
 
       <div className="absolute bottom-2 right-3 text-[var(--text-nano)] text-[var(--color-gray-500)] select-none pointer-events-none bg-[var(--color-gray-100)]/80 px-1.5 py-0.5 rounded-[var(--radius-xs)]">
-        {Math.round(canvasZoom * 100)}% · 第{currentPageIndex + 1}页
+        {Math.round(canvasZoom * 100)}%
       </div>
     </div>
   );

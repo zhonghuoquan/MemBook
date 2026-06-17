@@ -17,8 +17,10 @@ const SAVED_PROJECT_KEY = 'membook_current_project_id';
 export function EditorView({ onBack }: EditorViewProps) {
   const pages = useEditorStore((s) => s.pages);
   const setPages = useEditorStore((s) => s.setPages);
+  const setAlbumSize = useEditorStore((s) => s.setAlbumSize);
   const setPhotos = usePhotoStore((s) => s.setPhotos);
   const addToast = useUIStore((s) => s.addToast);
+  const bottomNavHeight = useUIStore((s) => s.bottomNavHeight);
   const initialized = useRef(false);
 
   // ── 加载已保存项目 ──
@@ -34,13 +36,10 @@ export function EditorView({ onBack }: EditorViewProps) {
           const project = await loadProject(savedId);
           if (project && project.pages.length > 0) {
             setPages(project.pages);
-            // 恢复照片
+            setAlbumSize(project.size);
+            // 恢复照片（没有就空，不要回退到演示照片）
             const savedPhotos = await loadPhotos();
-            if (savedPhotos.length > 0) {
-              setPhotos(savedPhotos);
-            } else {
-              setPhotos(getDemoPhotos());
-            }
+            setPhotos(savedPhotos || []);
             addToast({ type: 'info', message: `已恢复项目「${project.name}」` });
             return;
           }
@@ -52,6 +51,7 @@ export function EditorView({ onBack }: EditorViewProps) {
       // 没有已保存项目 → 创建新项目（用 demo 数据）
       const demo = getDemoProject();
       setPages(demo.pages);
+      setAlbumSize(demo.size);
       setPhotos(getDemoPhotos());
       await createAndSaveProject('未命名相册', demo.size, demo.pages);
       addToast({ type: 'info', message: '已创建新相册，开始制作吧 ✨' });
@@ -89,7 +89,7 @@ export function EditorView({ onBack }: EditorViewProps) {
         <LeftPanel />
         {/* 右侧：画布 + 底部导航 */}
         <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 overflow-auto relative" style={{ minHeight: 0 }}>
             <Canvas />
             <EditFlyout />
           </div>

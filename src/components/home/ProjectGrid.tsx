@@ -10,6 +10,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { listProjects, saveProject, deleteProject } from '../../db';
 import type { AlbumProject } from '../../types';
+import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 
 interface ProjectGridProps {
   onOpenProject?: (project: AlbumProject) => void;
@@ -376,10 +377,10 @@ function SortableCard({
 
 /* ── Demo fallback projects ── */
 const demoProjects: AlbumProject[] = [
-  { id: 'demo-1', name: '我的家庭相册', size: { id: 'sq-210', name: '正方形', width: 210, height: 210, desc: '210×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 3 * 86400000 + 2 * 3600000).toISOString() },
-  { id: 'demo-2', name: '宝宝成长记录', size: { id: 'v-210', name: '竖版', width: 210, height: 280, desc: '210×280 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 7 * 86400000 + 5 * 3600000 + 30 * 60000).toISOString() },
-  { id: 'demo-3', name: '2025 年度旅行', size: { id: 'h-297', name: '横版', width: 297, height: 210, desc: '297×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 14 * 86400000 + 8 * 3600000).toISOString() },
-  { id: 'demo-4', name: '婚礼纪念册', size: { id: 'sq-210', name: '正方形', width: 210, height: 210, desc: '210×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 30 * 86400000 + 12 * 3600000).toISOString() },
+  { id: 'demo-1', name: '我的家庭相册', margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT }, size: { id: 'sq-210', name: '正方形', width: 210, height: 210, desc: '210×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 3 * 86400000 + 2 * 3600000).toISOString() },
+  { id: 'demo-2', name: '宝宝成长记录', margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT }, size: { id: 'v-210', name: '竖版', width: 210, height: 280, desc: '210×280 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 7 * 86400000 + 5 * 3600000 + 30 * 60000).toISOString() },
+  { id: 'demo-3', name: '2025 年度旅行', margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT }, size: { id: 'h-297', name: '横版', width: 297, height: 210, desc: '297×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 14 * 86400000 + 8 * 3600000).toISOString() },
+  { id: 'demo-4', name: '婚礼纪念册', margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT }, size: { id: 'sq-210', name: '正方形', width: 210, height: 210, desc: '210×210 mm' }, pages: [], createdAt: '', updatedAt: new Date(Date.now() - 30 * 86400000 + 12 * 3600000).toISOString() },
 ];
 
 function timeAgo(iso: string): string {

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { TEMPLATES } from '../../types';
-import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
+import type { AlbumSize, CustomTemplate, SlotLayout, PageMargin } from '../../types';
 import { CreateDialog } from './CreateDialog';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
 import { listCustomTemplates, deleteCustomTemplate, createCustomTemplate } from '../../db';
@@ -103,7 +103,7 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
     setShowCreateAlbum(true);
   };
 
-  const handleCreateFromDialog = (name: string, size: AlbumSize) => {
+  const handleCreateFromDialog = (name: string, size: AlbumSize, margin: PageMargin) => {
     if (pendingTemplateId) {
       onCreateFromTemplate(pendingTemplateId, name, size);
     }

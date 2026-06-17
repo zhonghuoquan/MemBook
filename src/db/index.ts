@@ -3,7 +3,8 @@
  * 基于 Dexie.js 实现项目保存/加载/列表
  */
 import Dexie, { type Table } from 'dexie';
-import type { AlbumProject, Photo, CustomTemplate, SlotLayout } from '../types';
+import type { AlbumProject, Photo, CustomTemplate, SlotLayout, PageMargin } from '../types';
+import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../types';
 
 class MemBookDB extends Dexie {
   projects!: Table<AlbumProject, string>;
@@ -62,6 +63,7 @@ export async function saveCurrentProject(): Promise<string> {
     id,
     name: '我的相册',
     size: { id: 'v-210', name: '竖版', width: 210, height: 280, desc: '210×280 mm · 标准竖版' },
+    margin: { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT },
     pages,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -79,6 +81,7 @@ export async function createAndSaveProject(
   name: string,
   size: AlbumProject['size'],
   pages: AlbumProject['pages'],
+  margin?: PageMargin,
 ): Promise<string> {
   const id = `project-${Date.now()}`;
   const now = new Date().toISOString();
@@ -86,6 +89,7 @@ export async function createAndSaveProject(
     id,
     name: name || '未命名相册',
     size,
+    margin: margin || { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT },
     pages,
     createdAt: now,
     updatedAt: now,
