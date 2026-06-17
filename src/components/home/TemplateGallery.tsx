@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { TEMPLATES } from '../../types';
 import type { AlbumSize, CustomTemplate, SlotLayout } from '../../types';
 import { CreateDialog } from './CreateDialog';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
-import { listCustomTemplates } from '../../db';
+import { listCustomTemplates, deleteCustomTemplate } from '../../db';
 
 interface TemplateGalleryProps {
   onCreateFromTemplate: (templateId: string, name: string, size: AlbumSize) => void;
@@ -96,6 +96,13 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
   const [showCreateAlbum, setShowCreateAlbum] = useState(false);
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
+  // 编辑模板
+  const [editTemplateData, setEditTemplateData] = useState<{ id: string; name: string; slots: SlotLayout[] } | null>(null);
+  const [showEditMaker, setShowEditMaker] = useState(false);
+
+  // 删除确认
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
   const handleTemplateClick = (templateId: string) => {
     setPendingTemplateId(templateId);
     setShowCreateAlbum(true);
@@ -111,6 +118,24 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
   const handleCloseAlbumDialog = () => {
     setShowCreateAlbum(false);
     setPendingTemplateId(null);
+  };
+
+  const handleEditTemplate = async (tmpl: FlatTemplate) => {
+    if (tmpl.isBuiltIn) return;
+    const custom = customTemplates.find((c) => c.id === tmpl.id);
+    if (!custom) return;
+    setEditTemplateData({ id: custom.id, name: custom.name, slots: custom.slots });
+    setShowEditMaker(true);
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    await deleteCustomTemplate(id);
+    loadCustomTemplates();
+    setDeleteTargetId(null);
+  };
+
+  const handleEditSaved = () => {
+    loadCustomTemplates();
   };
 
   return (
@@ -184,7 +209,9 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
               template={tmpl}
               isHovered={hoveredId === tmpl.id}
               onHover={setHoveredId}
-              onClick={() => handleTemplateClick(tmpl.id)}
+              onCreate={() => handleTemplateClick(tmpl.id)}
+              onEdit={tmpl.isBuiltIn ? undefined : () => handleEditTemplate(tmpl)}
+              onDelete={tmpl.isBuiltIn ? undefined : () => setDeleteTargetId(tmpl.id)}
             />
           ))}
           {/* Create template entry */}
@@ -208,6 +235,42 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         onClose={() => setShowTemplateMaker(false)}
         onCreated={handleTemplateCreated}
       />
+
+      {/* Edit Template Dialog */}
+      <CreateTemplateDialog
+        open={showEditMaker}
+        editTemplate={editTemplateData}
+        onClose={() => { setShowEditMaker(false); setEditTemplateData(null); }}
+        onCreated={handleEditSaved}
+      />
+
+      {/* Delete Confirmation */}
+      {deleteTargetId && (
+        <div className="fixed inset-0 flex items-center justify-center z-[var(--z-overlay)]" onClick={() => setDeleteTargetId(null)}>
+          <div className="absolute inset-0 bg-[var(--color-surface-overlay)]" />
+          <div className="relative bg-white rounded-[var(--radius-2xl)] shadow-[var(--shadow-md)] p-6 w-[360px] animate-[modalFadeIn_0.15s_ease-out]"
+               onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[var(--text-h3)] font-[600] text-[var(--color-gray-800)] mb-2">删除模板</h3>
+            <p className="text-[var(--text-body)] text-[var(--color-text-secondary)] mb-5">
+              确定要删除此模板吗？此操作不可撤销。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="px-4 py-2 bg-white border border-[var(--color-border)] rounded-[var(--radius-md)]
+                                 text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-700)]
+                                 hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
+                      onClick={() => setDeleteTargetId(null)}>
+                取消
+              </button>
+              <button className="px-4 py-2 bg-[var(--color-error)] text-white rounded-[var(--radius-md)]
+                                 text-[var(--text-body-sm)] font-[500] border-none
+                                 hover:bg-[var(--color-error-dark)] cursor-pointer transition-colors"
+                      onClick={() => handleDeleteTemplate(deleteTargetId)}>
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -217,38 +280,102 @@ function TemplateCard({
   template,
   isHovered,
   onHover,
-  onClick,
+  onCreate,
+  onEdit,
+  onDelete,
 }: {
   template: FlatTemplate;
   isHovered: boolean;
   onHover: (id: string | null) => void;
-  onClick: () => void;
+  onCreate: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const hasActions = !!onEdit || !!onDelete;
+
   return (
     <div
-      className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-hidden
+      className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
                  hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
                  transition-all duration-200 group cursor-pointer"
       onMouseEnter={() => onHover(template.id)}
       onMouseLeave={() => onHover(null)}
-      onClick={onClick}
     >
-      {/* Preview area */}
-      <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center">
+      {/* Preview area — click to create */}
+      <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center"
+           onClick={onCreate}>
         <div className="w-full h-full max-w-[140px] max-h-[105px]">
           <TemplateSlotPreview slots={template.slots} />
         </div>
       </div>
 
-      {/* Info */}
+      {/* Info + Action button */}
       <div className="p-3 space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate pr-1">
+          <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate pr-1"
+                onClick={onCreate}>
             {template.name}
           </span>
-          <span className="text-[var(--text-nano)] text-[var(--color-gray-400)] bg-[var(--color-gray-50)] px-1.5 py-0.5 rounded-full shrink-0">
-            {template.slots.length}位
-          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[var(--text-nano)] text-[var(--color-gray-400)] bg-[var(--color-gray-50)] px-1.5 py-0.5 rounded-full">
+              {template.slots.length}位
+            </span>
+            {hasActions && (
+              <div className="relative" ref={menuRef}>
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded-[var(--radius-sm)]
+                             text-[var(--color-gray-400)] hover:text-[var(--color-gray-700)]
+                             hover:bg-[var(--color-gray-50)] border-none cursor-pointer transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+                    <circle cx="8" cy="3.5" r="1.5" />
+                    <circle cx="8" cy="8" r="1.5" />
+                    <circle cx="8" cy="12.5" r="1.5" />
+                  </svg>
+                </button>
+
+                {/* Dropdown menu */}
+                {menuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-[140px] bg-white rounded-[var(--radius-lg)]
+                                  border border-[var(--color-border)] shadow-[var(--shadow-md)]
+                                  py-1 z-20 animate-[fadeIn_0.1s_ease-out]">
+                    <MenuItem
+                      label="创建相册"
+                      onClick={() => { setMenuOpen(false); onCreate(); }}
+                    />
+                    {onEdit && (
+                      <MenuItem label="编辑模板" onClick={() => { setMenuOpen(false); onEdit(); }} />
+                    )}
+                    {onDelete && (
+                      <div className="border-t border-[var(--color-border-light)] pt-1 mt-1">
+                        <MenuItem
+                          label="删除模板"
+                          danger
+                          onClick={() => { setMenuOpen(false); onDelete(); }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
@@ -262,19 +389,18 @@ function TemplateCard({
         </div>
       </div>
 
-      {/* Hover overlay */}
+      {/* Hover overlay — create button */}
       <div
         className={`
           absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent
-          flex items-end justify-center pb-5
+          flex items-end justify-center pb-5 pointer-events-none
           transition-opacity duration-200
-          ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+          ${isHovered ? 'opacity-100' : 'opacity-0'}
         `}
       >
         <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-white rounded-full
                          text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-800)]
-                         shadow-[var(--shadow-md)] hover:shadow-[var(--shadow-lg)]
-                         transition-shadow duration-150 active:scale-[0.97]">
+                         shadow-[var(--shadow-md)]">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
             <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
             <circle cx="6" cy="6.5" r="1.5" />
@@ -284,6 +410,20 @@ function TemplateCard({
         </span>
       </div>
     </div>
+  );
+}
+
+function MenuItem({ label, danger, onClick }: { label: string; danger?: boolean; onClick: () => void }) {
+  return (
+    <button
+      className={`w-full px-3 py-1.5 text-left text-[var(--text-caption)] font-[500] border-none cursor-pointer
+        transition-colors duration-100
+        ${danger ? 'text-[var(--color-error)] hover:bg-[var(--color-error)]/5' : 'text-[var(--color-gray-700)] hover:bg-[var(--color-gray-50)]'}
+      `}
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }
 

@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import type { SlotLayout } from '../../types';
-import { createCustomTemplate } from '../../db';
+import { createCustomTemplate, saveCustomTemplate, loadCustomTemplate } from '../../db';
 
 interface CreateTemplateDialogProps {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** 编辑模式：传入已有模板数据 */
+  editTemplate?: { id: string; name: string; slots: SlotLayout[] } | null;
 }
 
 /* ── Layout presets ── */
@@ -87,7 +89,7 @@ function generateSlots(preset: LayoutPresetId, m: number, g: number, r: number, 
 
 const GRID = 5; // snap grid in percent
 
-export function CreateTemplateDialog({ open, onClose, onCreated }: CreateTemplateDialogProps) {
+export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const [name, setName] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<LayoutPresetId>('2x2');
   const [margin, setMargin] = useState(10);
@@ -99,13 +101,24 @@ export function CreateTemplateDialog({ open, onClose, onCreated }: CreateTemplat
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const isEditing = !!editTemplate;
   const isCustomRC = selectedPreset === 'custom-rc';
 
-  // Reset slots when preset / params change
+  // 编辑模式：初始化数据
   useEffect(() => {
+    if (editTemplate) {
+      setName(editTemplate.name);
+      setSlots(editTemplate.slots.map((s) => ({ ...s })));
+      setSelectedPreset('custom-rc');
+    }
+  }, [editTemplate]);
+
+  // Reset slots when preset / params change (only in create mode)
+  useEffect(() => {
+    if (isEditing) return;
     setSlots(generateSlots(selectedPreset, margin, gap, customRows, customCols));
     setSelectedIdx(null);
-  }, [selectedPreset, margin, gap, customRows, customCols]);
+  }, [selectedPreset, margin, gap, customRows, customCols, isEditing]);
 
   const snapVal = (v: number) => snapToGrid ? Math.round(v / GRID) * GRID : v;
 
@@ -176,7 +189,20 @@ export function CreateTemplateDialog({ open, onClose, onCreated }: CreateTemplat
     if (slotCount === 0) return;
     setSaving(true);
     try {
-      await createCustomTemplate(name || '未命名模板', slots);
+      if (isEditing && editTemplate) {
+        // 保留原始 createdAt
+        const existing = await loadCustomTemplate(editTemplate.id);
+        await saveCustomTemplate({
+          id: editTemplate.id,
+          name: name || '未命名模板',
+          slots,
+          isBuiltIn: false,
+          createdAt: existing?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await createCustomTemplate(name || '未命名模板', slots);
+      }
       onCreated();
       resetState();
       onClose();
