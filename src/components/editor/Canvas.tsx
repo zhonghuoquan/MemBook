@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { Stage, Layer, Rect, Image as KonvaImage, Transformer, Group, Text } from 'react-konva';
 import Konva from 'konva';
-import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
+import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
 import { TEMPLATES } from '../../types';
 import type { Template, SlotLayout } from '../../types';
 
@@ -104,6 +104,28 @@ export function Canvas() {
   // ── Keyboard shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+Z undo
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        const entry = useHistoryStore.getState().undo();
+        if (entry) {
+          useEditorStore.getState().setPages(entry.pages);
+          if (entry.selectedSlotId) useEditorStore.getState().setSelectedSlot(entry.selectedSlotId);
+          addToast({ type: 'info', message: '已撤销' });
+        }
+        return;
+      }
+      // Ctrl+Shift+Z or Ctrl+Y redo
+      if ((e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey)))) {
+        e.preventDefault();
+        const entry = useHistoryStore.getState().redo();
+        if (entry) {
+          useEditorStore.getState().setPages(entry.pages);
+          if (entry.selectedSlotId) useEditorStore.getState().setSelectedSlot(entry.selectedSlotId);
+          addToast({ type: 'info', message: '已重做' });
+        }
+        return;
+      }
       if (e.ctrlKey && e.key === '=') { e.preventDefault(); setCanvasZoom(canvasZoom + 0.1); }
       if (e.ctrlKey && e.key === '-') { e.preventDefault(); setCanvasZoom(canvasZoom - 0.1); }
       if (e.ctrlKey && e.key === '0') { e.preventDefault(); setCanvasZoom(1); }
@@ -117,7 +139,7 @@ export function Canvas() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canvasZoom, selectedSlotId, currentPageIndex, setSelectedSlot, setCanvasZoom]);
+  }, [canvasZoom, selectedSlotId, currentPageIndex, setSelectedSlot, setCanvasZoom, addToast]);
 
   // ── Drop handler — receive photo from PhotoPanel drag ──
   const handleDrop = useCallback((e: React.DragEvent) => {

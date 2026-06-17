@@ -85,7 +85,19 @@ interface EditorState {
   removePhotoFromSlot: (pageIndex: number, slotId: string) => void;
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => {
+  /* ════════════════════════════════════════
+     辅助：操作前自动记录历史快照
+     ════════════════════════════════════════ */
+  function pushSnapshot() {
+    const { pages, selectedSlotId } = get();
+    // 只在有页面时才推快照（避免初始空状态也被记录）
+    if (pages.length > 0) {
+      useHistoryStore.getState().pushSnapshot(pages, selectedSlotId);
+    }
+  }
+
+  return {
   currentPageIndex: 0,
   selectedSlotId: null,
   selectedPhotoId: null,
@@ -94,7 +106,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setCurrentPage: (index) => set({ currentPageIndex: index }),
   setSelectedSlot: (slotId) => set({ selectedSlotId: slotId }),
   setSelectedPhoto: (photoId) => set({ selectedPhotoId: photoId }),
-  addPage: (templateId) =>
+  addPage: (templateId) => {
+    pushSnapshot();
     set((s) => ({
       pages: [
         ...s.pages,
@@ -105,32 +118,40 @@ export const useEditorStore = create<EditorState>((set) => ({
           background: '#FFFFFF',
         },
       ],
-    })),
-  removePage: (index) =>
+    }));
+  },
+  removePage: (index) => {
+    pushSnapshot();
     set((s) => ({
       pages: s.pages.filter((_, i) => i !== index),
       currentPageIndex:
         s.currentPageIndex >= s.pages.length - 1
           ? Math.max(0, s.pages.length - 2)
           : s.currentPageIndex,
-    })),
-  reorderPages: (from, to) =>
+    }));
+  },
+  reorderPages: (from, to) => {
+    pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       const [moved] = newPages.splice(from, 1);
       newPages.splice(to, 0, moved);
       return { pages: newPages };
-    }),
+    });
+  },
   setPages: (pages) => set({ pages }),
-  updatePageBackground: (index, color) =>
+  updatePageBackground: (index, color) => {
+    pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       if (newPages[index]) {
         newPages[index] = { ...newPages[index], background: color };
       }
       return { pages: newPages };
-    }),
-  setPageTemplate: (pageIndex, templateId) =>
+    });
+  },
+  setPageTemplate: (pageIndex, templateId) => {
+    pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
@@ -145,8 +166,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         })),
       };
       return { pages: newPages };
-    }),
-  placePhoto: (pageIndex, slotId, photoId) =>
+    });
+  },
+  placePhoto: (pageIndex, slotId, photoId) => {
+    pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
@@ -157,8 +180,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         ),
       };
       return { pages: newPages };
-    }),
-  removePhotoFromSlot: (pageIndex, slotId) =>
+    });
+  },
+  removePhotoFromSlot: (pageIndex, slotId) => {
+    pushSnapshot();
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
@@ -169,8 +194,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         ),
       };
       return { pages: newPages };
-    }),
-}));
+    });
+  },
+  };
+});
 
 /* ── Photo Store (照片库) ── */
 interface PhotoState {

@@ -95,11 +95,7 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
   const [showCreateAlbum, setShowCreateAlbum] = useState(false);
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
-  // 编辑模板
-  const [editTemplateData, setEditTemplateData] = useState<{ id: string; name: string; slots: SlotLayout[] } | null>(null);
-  const [showEditMaker, setShowEditMaker] = useState(false);
-
-  // 删除确认
+  // 编辑模板 — 改为每个 TemplateCard 自己管理，这里移除父级状态
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const handleTemplateClick = (templateId: string) => {
@@ -119,22 +115,10 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
     setPendingTemplateId(null);
   };
 
-  const handleEditTemplate = async (tmpl: FlatTemplate) => {
-    if (tmpl.isBuiltIn) return;
-    const custom = customTemplates.find((c) => c.id === tmpl.id);
-    if (!custom) return;
-    setEditTemplateData({ id: custom.id, name: custom.name, slots: custom.slots });
-    setShowEditMaker(true);
-  };
-
   const handleDeleteTemplate = async (id: string) => {
     await deleteCustomTemplate(id);
     loadCustomTemplates();
     setDeleteTargetId(null);
-  };
-
-  const handleEditSaved = () => {
-    loadCustomTemplates();
   };
 
   const handleCopyTemplate = async (tmpl: FlatTemplate) => {
@@ -216,16 +200,21 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-          {displayTemplates.map((tmpl) => (
-            <TemplateCard
-              key={tmpl.id}
-              template={tmpl}
-              onCreate={() => handleTemplateClick(tmpl.id)}
-              onCopy={() => handleCopyTemplate(tmpl)}
-              onEdit={tmpl.isBuiltIn ? undefined : () => handleEditTemplate(tmpl)}
-              onDelete={tmpl.isBuiltIn ? undefined : () => setDeleteTargetId(tmpl.id)}
-            />
-          ))}
+          {displayTemplates.map((tmpl) => {
+            // 找到对应的自定义模板原始数据（用于编辑）
+            const customData = tmpl.isBuiltIn ? undefined : customTemplates.find((c) => c.id === tmpl.id);
+            return (
+              <TemplateCard
+                key={tmpl.id}
+                template={tmpl}
+                customData={customData}
+                onCreate={() => handleTemplateClick(tmpl.id)}
+                onCopy={() => handleCopyTemplate(tmpl)}
+                onDelete={tmpl.isBuiltIn ? undefined : () => setDeleteTargetId(tmpl.id)}
+                onModified={loadCustomTemplates}
+              />
+            );
+          })}
           {/* Create template entry */}
           <CreateTemplateCard onClick={() => setShowTemplateMaker(true)} />
         </div>
@@ -246,15 +235,6 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
         open={showTemplateMaker}
         onClose={() => setShowTemplateMaker(false)}
         onCreated={handleTemplateCreated}
-      />
-
-      {/* Edit Template Dialog — 用 key 强制重建 */}
-      <CreateTemplateDialog
-        key={editTemplateData?.id || 'edit-dialog'}
-        open={showEditMaker}
-        editTemplate={editTemplateData}
-        onClose={() => { setShowEditMaker(false); setEditTemplateData(null); }}
-        onCreated={handleEditSaved}
       />
 
       {/* Delete Confirmation */}
@@ -291,18 +271,21 @@ export function TemplateGallery({ onCreateFromTemplate }: TemplateGalleryProps) 
 /* ── Template Card ── */
 function TemplateCard({
   template,
+  customData,
   onCreate,
   onCopy,
-  onEdit,
   onDelete,
+  onModified,
 }: {
   template: FlatTemplate;
+  customData?: CustomTemplate;
   onCreate: () => void;
   onCopy: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
+  onModified: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭菜单
@@ -317,94 +300,107 @@ function TemplateCard({
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  const isCustom = !template.isBuiltIn;
+  const canEdit = !!customData;
 
   return (
-    <div className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
-                    hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
-                    transition-all duration-150 group cursor-pointer">
-      {/* Preview — click to create album */}
-      <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center rounded-t-[var(--radius-xl)]"
-           onClick={onCreate}>
-        <div className="w-full h-full max-w-[140px] max-h-[105px]">
-          <TemplateSlotPreview slots={template.slots} />
-        </div>
-      </div>
-
-      {/* Info */}
-      <div className="p-3">
-        <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
+    <>
+      <div className="relative bg-white border border-[var(--color-border)] rounded-[var(--radius-xl)] overflow-visible
+                      hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-border-hover)]
+                      transition-all duration-150 group cursor-pointer">
+        {/* Preview — click to create album */}
+        <div className="aspect-[4/3] bg-[var(--color-gray-50)] p-4 flex items-center justify-center rounded-t-[var(--radius-xl)]"
              onClick={onCreate}>
-          {template.name}
+          <div className="w-full h-full max-w-[140px] max-h-[105px]">
+            <TemplateSlotPreview slots={template.slots} />
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
-            {template.slots.length}位 · {template.category || '模板'}
-          </span>
-          {isCustom && (
-            <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
-              自定义
+
+        {/* Info */}
+        <div className="p-3">
+          <div className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)] truncate"
+               onClick={onCreate}>
+            {template.name}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[var(--text-caption)] text-[var(--color-text-tertiary)]">
+              {template.slots.length}位 · {template.category || '模板'}
             </span>
+            {canEdit && (
+              <span className="text-[var(--text-nano)] px-1 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)] font-[500]">
+                自定义
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* "..." menu button — hover to reveal */}
+        <div className="absolute top-2 right-2" ref={menuRef}>
+          <button
+            className="w-7 h-7 flex items-center justify-center
+                       bg-white/80 border border-[var(--color-border)] rounded-full
+                       text-[var(--color-gray-500)] opacity-0 group-hover:opacity-100
+                       hover:bg-white hover:text-[var(--color-gray-700)]
+                       transition-all duration-150 cursor-pointer"
+            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            title="更多操作"
+          >
+            <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
+              <circle cx="7" cy="3" r="1.2" />
+              <circle cx="7" cy="7" r="1.2" />
+              <circle cx="7" cy="11" r="1.2" />
+            </svg>
+          </button>
+
+          {/* Dropdown menu */}
+          {menuOpen && (
+            <div className="absolute top-8 right-0 z-20 bg-white border border-[var(--color-border)]
+                            rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1 min-w-[130px]">
+              <MenuBtn label="创建相册" icon={
+                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
+                  <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" />
+                  <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                  <path d="M1.5 9l3-2.5 2.5 2.5 1.5-1.5L12.5 11" />
+                </svg>
+              } onClick={() => { setMenuOpen(false); onCreate(); }} />
+              <MenuBtn label="复制" icon={
+                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <rect x="2" y="2.5" width="10" height="9" rx="1.5" />
+                  <rect x="4.5" y="5" width="5" height="4" rx="0.5" />
+                </svg>
+              } onClick={() => { setMenuOpen(false); onCopy(); }} />
+              {canEdit && (
+                <MenuBtn label="编辑模板" icon={
+                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                    <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
+                  </svg>
+                } onClick={() => { setMenuOpen(false); setShowEdit(true); }} />
+              )}
+              {onDelete && (
+                <div className="border-t border-[var(--color-border-light)] mt-1 pt-1">
+                  <MenuBtn label="删除模板" danger icon={
+                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                      <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+                      <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
+                    </svg>
+                  } onClick={() => { setMenuOpen(false); onDelete(); }} />
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {/* "..." menu button — hover to reveal, same as project cards */}
-      <div className="absolute top-2 right-2" ref={menuRef}>
-        <button
-          className="w-7 h-7 flex items-center justify-center
-                     bg-white/80 border border-[var(--color-border)] rounded-full
-                     text-[var(--color-gray-500)] opacity-0 group-hover:opacity-100
-                     hover:bg-white hover:text-[var(--color-gray-700)]
-                     transition-all duration-150 cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-          title="更多操作"
-        >
-          <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
-            <circle cx="7" cy="3" r="1.2" />
-            <circle cx="7" cy="7" r="1.2" />
-            <circle cx="7" cy="11" r="1.2" />
-          </svg>
-        </button>
-
-        {/* Dropdown menu */}
-        {menuOpen && (
-          <div className="absolute top-8 right-0 z-20 bg-white border border-[var(--color-border)]
-                          rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1 min-w-[130px]">
-            <MenuBtn label="创建相册" icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
-                <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" />
-                <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
-                <path d="M1.5 9l3-2.5 2.5 2.5 1.5-1.5L12.5 11" />
-              </svg>
-            } onClick={() => { setMenuOpen(false); onCreate(); }} />
-            <MenuBtn label="复制" icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <rect x="2" y="2.5" width="10" height="9" rx="1.5" />
-                <rect x="4.5" y="5" width="5" height="4" rx="0.5" />
-              </svg>
-            } onClick={() => { setMenuOpen(false); onCopy(); }} />
-            {onEdit && (
-              <MenuBtn label="编辑模板" icon={
-                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                  <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
-                </svg>
-              } onClick={() => { setMenuOpen(false); onEdit(); }} />
-            )}
-            {onDelete && (
-              <div className="border-t border-[var(--color-border-light)] mt-1 pt-1">
-                <MenuBtn label="删除模板" danger icon={
-                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                    <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
-                    <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
-                  </svg>
-                } onClick={() => { setMenuOpen(false); onDelete(); }} />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+      {/* 编辑弹窗 — 每个卡片独立管理，避免父级状态传递问题 */}
+      {canEdit && (
+        <CreateTemplateDialog
+          key={customData.id}
+          open={showEdit}
+          editTemplate={{ id: customData.id, name: customData.name, slots: customData.slots }}
+          onClose={() => setShowEdit(false)}
+          onCreated={() => { setShowEdit(false); onModified(); }}
+        />
+      )}
+    </>
   );
 }
 
