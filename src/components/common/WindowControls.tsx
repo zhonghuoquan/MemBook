@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { safeUnlisten } from '../../utils/tauri';
+import { isMacOS } from '../../utils/platform';
 
 let windowApi: Awaited<typeof import('@tauri-apps/api/window')> | null = null;
 
@@ -54,7 +55,8 @@ export function WindowControls() {
     };
   }, []);
 
-  if (!hasTauri) return null;
+  // macOS 用原生交通灯按钮，隐藏自定义控件
+  if (!hasTauri || isMacOS()) return null;
 
   const handleMinimize = async () => {
     const api = await getWindowApi();

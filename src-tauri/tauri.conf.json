@@ -24,7 +24,8 @@
         "transparent": true,
         "shadow": false,
         "devtools": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
@@ -46,7 +47,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "icon": [
       "icons/icon.ico",
       "icons/icon.icns",
@@ -59,9 +60,6 @@
     "longDescription": "MemBook 是一款本地优先的电子相册制作工具，支持自定义尺寸、一键成册、模板套用、滤镜调色等。所有数据保存在你的设备上，不上传服务器。",
     "publisher": "MemBook",
     "copyright": "© 2026 MemBook",
-    "resources": {
-      "resources/sm.exe": "resources/sm.exe"
-    },
     "windows": {
       "wix": {
         "language": "zh-CN"
@@ -73,7 +71,10 @@
       }
     },
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "frameworks": [],
+      "signingIdentity": null,
+      "providerShortName": "MemBook"
     }
   },
   "plugins": {

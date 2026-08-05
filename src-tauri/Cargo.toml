@@ -24,13 +24,18 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
-winreg = "0.52"
 sha2 = "0.10"
+# 跨平台回收站：macOS 用 NSWorkspace，Windows 用 SHFileOperation
+trash = "5"
 # heif-rs 会在构建时从 GitHub 下载预编译的静态 libheif/libde265/x265 二进制。
 # 如果构建环境无法访问 GitHub，请提前下载对应平台的 release zip
 # (https://github.com/vegidio/binaries-heif/releases) 并设置 HEIF_BINARIES_DIR 环境变量。
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"], optional = true }
 heif-rs = { version = "26.7", optional = true }
+
+# Windows 专用依赖：必须在 cfg(windows) 下隔离，否则 macOS 编译失败
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_Graphics_Printing", "Win32_Security", "Win32_UI_Shell"] }
 
 [features]

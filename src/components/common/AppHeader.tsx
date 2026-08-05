@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { WindowControls } from './WindowControls';
 import { logger } from '../../utils/logger';
 import { safeUnlisten } from '../../utils/tauri';
+import { isMacOS, MAC_TRAFFIC_LIGHTS_WIDTH } from '../../utils/platform';
 
 let windowApi: Awaited<typeof import('@tauri-apps/api/window')> | null = null;
 
@@ -113,6 +114,8 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
       data-toolbar={height === 'toolbar' ? '' : undefined}
       onDoubleClick={handleDoubleClick}
       className={`${heightClass} bg-[image:var(--gradient-header)] flex items-center px-4 gap-1 shrink-0 z-[var(--z-toolbar)] select-none ${className}`}
+      // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）
+      style={isMacOS() ? { paddingLeft: `${MAC_TRAFFIC_LIGHTS_WIDTH}px` } : undefined}
     >
       {children}
       <WindowControls />

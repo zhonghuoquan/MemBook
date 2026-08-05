@@ -118,8 +118,28 @@ mod commands {
         }
         #[cfg(not(windows))]
         {
-            let _ = file_path;
-            Err("Rust 端 HEIC 转换仅在 Windows 可用".to_string())
+            // macOS: 用系统自带的 sips 命令解码 HEIC → JPEG
+            // sips 是 macOS 内置的图像处理工具，原生支持 HEIC
+            let temp_name = format!("membook_heic_{}.jpg", std::process::id());
+            let temp_path = std::env::temp_dir().join(&temp_name);
+
+            let output = std::process::Command::new("sips")
+                .args(["-s", "format", "jpeg", "-s", "formatOptions", "92"])
+                .arg(&file_path)
+                .arg("--out")
+                .arg(&temp_path)
+                .output()
+                .map_err(|e| format!("启动 sips 失败: {}", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("sips 解码 HEIC 失败: {}", stderr));
+            }
+
+            let bytes = std::fs::read(&temp_path)
+                .map_err(|e| format!("读取转换后 JPEG 失败: {}", e))?;
+            let _ = std::fs::remove_file(&temp_path);
+            Ok(bytes)
         }
     }
 
@@ -428,7 +448,41 @@ mod commands {
         }
         #[cfg(not(windows))]
         {
-            Err("获取打印机列表仅在 Windows 可用".to_string())
+            // macOS/Linux: 用 CUPS 的 lpstat 命令获取打印机列表
+            // lpstat -p -d 输出示例：
+            //   printer Canon_PIXMA is idle. enabled since ...
+            //   printer HP_LaserJet is idle. enabled since ...
+            //   system default destination: Canon_PIXMA
+            let output = std::process::Command::new("lpstat")
+                .args(["-p", "-d"])
+                .output()
+                .map_err(|e| format!("执行 lpstat 失败: {}", e))?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut default_name: Option<String> = None;
+            let mut result: Vec<PrinterInfo> = Vec::new();
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("system default destination:") {
+                    default_name = Some(rest.trim().to_string());
+                } else if let Some(rest) = trimmed.strip_prefix("printer ") {
+                    // "printer <name> is idle..." → 取 <name>
+                    if let Some(name) = rest.split_whitespace().next() {
+                        result.push(PrinterInfo {
+                            name: name.to_string(),
+                            is_default: false,
+                        });
+                    }
+                }
+            }
+            // 标记默认打印机
+            if let Some(dn) = default_name {
+                for p in result.iter_mut() {
+                    if p.name == dn {
+                        p.is_default = true;
+                    }
+                }
+            }
+            Ok(result)
         }
     }
 
@@ -443,15 +497,16 @@ mod commands {
     /// 获取机器指纹。
     /// 基于 Windows MachineGuid + 计算机名 + 用户名做 SHA-256 哈希，
     /// 普通卸载应用不会清除注册表中的 MachineGuid，因此能识别同一台设备。
+    /// macOS: 基于 IOPlatformUUID + hostname + 用户名做 SHA-256 哈希
     #[tauri::command]
     pub fn get_machine_fingerprint() -> Result<String, String> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+
         #[cfg(windows)]
         {
-            use sha2::{Digest, Sha256};
             use winreg::enums::HKEY_LOCAL_MACHINE;
             use winreg::RegKey;
-
-            let mut hasher = Sha256::new();
 
             // Windows 安装时生成的稳定 GUID，普通卸载不会清除
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -470,14 +525,45 @@ mod commands {
             if let Ok(name) = std::env::var("USERNAME") {
                 hasher.update(name.as_bytes());
             }
+        }
 
-            let result = hasher.finalize();
-            Ok(format!("{:x}", result))
-        }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
         {
-            Err("机器指纹仅在 Windows 可用".to_string())
+            // macOS: 用 ioreg 获取 IOPlatformUUID（硬件级 UUID，重装系统才会变）
+            let output = std::process::Command::new("ioreg")
+                .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+                .output()
+                .map_err(|e| format!("执行 ioreg 失败: {}", e))?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // 从输出中提取 "IOPlatformUUID" = "XXXX-XXXX-XXXX"
+            for line in stdout.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(uuid) = line.split('=').nth(1) {
+                        let uuid = uuid.trim().trim_matches('"');
+                        hasher.update(uuid.as_bytes());
+                        break;
+                    }
+                }
+            }
+
+            // hostname
+            if let Ok(name) = std::env::var("HOSTNAME") {
+                hasher.update(name.as_bytes());
+            }
+            // 用户名
+            if let Ok(name) = std::env::var("USER") {
+                hasher.update(name.as_bytes());
+            }
         }
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            let _ = hasher;
+            return Err("机器指纹仅支持 Windows 和 macOS".to_string());
+        }
+
+        let result = hasher.finalize();
+        Ok(format!("{:x}", result))
     }
 
     /// 从 appDataDir 读取试用期记录。
@@ -504,9 +590,10 @@ mod commands {
         Ok(())
     }
 
-    /// 试用期锚点：写入注册表 HKCU\Software\MemBook。
+    /// 试用期锚点：写入注册表 HKCU\Software\MemBook（Windows）或
+    /// ~/Library/Preferences/app.membook.desktop.plist（macOS）。
     /// 与 appDataDir 的 trial.json 互为冗余，即使卸载时勾选「删除应用数据」或手动清除
-    /// AppData 目录，注册表锚点仍可识别本机已试用过，防止卸载重装无限白嫖。
+    /// AppData 目录，锚点仍可识别本机已试用过，防止卸载重装无限白嫖。
     #[tauri::command]
     pub fn save_trial_anchor(start: String) -> Result<(), String> {
         #[cfg(windows)]
@@ -518,14 +605,24 @@ mod commands {
             key.set_value("TrialStart", &start).map_err(|e| e.to_string())?;
             Ok(())
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: 写入 ~/Library/Preferences/app.membook.desktop.plist
+            // 用 defaults write 命令（macOS 原生 plist 操作）
+            std::process::Command::new("defaults")
+                .args(["write", "app.membook.desktop", "TrialStart", &start])
+                .status()
+                .map_err(|e| format!("写入 plist 失败: {}", e))?;
+            Ok(())
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         {
             let _ = start;
             Ok(())
         }
     }
 
-    /// 读取注册表中的试用期锚点（HKCU\Software\MemBook\TrialStart）。
+    /// 读取试用期锚点（Windows: 注册表 / macOS: plist）。
     #[tauri::command]
     pub fn load_trial_anchor() -> Option<String> {
         #[cfg(windows)]
@@ -540,7 +637,23 @@ mod commands {
             }
             None
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: 读取 ~/Library/Preferences/app.membook.desktop.plist
+            let output = std::process::Command::new("defaults")
+                .args(["read", "app.membook.desktop", "TrialStart"])
+                .output();
+            if let Ok(out) = output {
+                if out.status.success() {
+                    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !s.is_empty() {
+                        return Some(s);
+                    }
+                }
+            }
+            None
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         {
             None
         }
@@ -620,13 +733,49 @@ mod commands {
         }
         #[cfg(not(windows))]
         {
-            let _ = (app, pdf_path, printer_name, duplex, copies);
-            Err("PDF 打印仅在 Windows 可用".to_string())
+            // macOS/Linux: 用 CUPS 的 lpr 命令打印 PDF
+            // lpr -P <printer> -# <copies> -o sides=<duplex> <pdf>
+            let mut args: Vec<String> = vec!["-P".to_string(), printer_name];
+            if let Some(c) = copies {
+                if c > 1 {
+                    args.push(format!("-#{}", c));
+                }
+            }
+            if let Some(d) = duplex {
+                match d.as_str() {
+                    "longEdge" => {
+                        args.push("-o".to_string());
+                        args.push("sides=two-sided-long-edge".to_string());
+                    }
+                    "shortEdge" => {
+                        args.push("-o".to_string());
+                        args.push("sides=two-sided-short-edge".to_string());
+                    }
+                    _ => {}
+                }
+            }
+            args.push(pdf_path.clone());
+
+            let output = std::process::Command::new("lpr")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("启动 lpr 失败: {}", e))?;
+
+            // 清理临时 PDF
+            let _ = std::fs::remove_file(&pdf_path);
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("lpr 打印失败: {}", stderr))
+            } else {
+                Ok(())
+            }
         }
     }
 
     /// 使用系统默认程序打开文件（替代已弃用的 shell:allow-open）。
     /// Windows 上用 cmd /c start 避免额外依赖和权限问题。
+    /// macOS 用 /usr/bin/open，Linux 用 xdg-open
     #[tauri::command]
     pub fn open_file(path: String) -> Result<(), String> {
         #[cfg(windows)]
@@ -639,29 +788,38 @@ mod commands {
                 .spawn()
                 .map_err(|e| format!("打开文件失败: {}", e))?;
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
         {
-            let _ = path;
-            return Err("仅在 Windows 可用".to_string());
+            std::process::Command::new("open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件失败: {}", e))?;
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件失败: {}", e))?;
         }
         Ok(())
     }
 
     /// 将文件移入系统回收站（而非永久删除），防止用户误删后无法找回。
-    /// 使用 Windows Shell API 的 SHFileOperationW + FOF_ALLOWUNDO 实现，
-    /// 在回收站中保留文件，用户可从回收站还原。
+    /// Windows: 使用 Shell API 的 SHFileOperationW + FOF_ALLOWUNDO
+    /// macOS/Linux: 使用跨平台 trash crate（macOS 内部用 NSWorkspace.recycleURLs）
     #[tauri::command]
     pub fn trash_files(paths: Vec<String>) -> Result<(), String> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+
         #[cfg(windows)]
         {
             use windows::Win32::UI::Shell::{
                 SHFileOperationW, SHFILEOPSTRUCTW, FO_DELETE, FOF_ALLOWUNDO, FOF_NOERRORUI, FOF_SILENT,
             };
             use windows::core::PCWSTR;
-
-            if paths.is_empty() {
-                return Ok(());
-            }
 
             // SHFileOperationW 要求 pFrom 中多个路径以单 \0 分隔，且整体以双 \0 结尾。
             let mut from = String::new();
@@ -697,8 +855,9 @@ mod commands {
         }
         #[cfg(not(windows))]
         {
-            let _ = paths;
-            Err("移入回收站仅支持 Windows 平台".to_string())
+            // macOS/Linux: 使用跨平台 trash crate
+            let path_refs: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
+            trash::delete_all(path_refs).map_err(|e| format!("移入回收站失败: {}", e))
         }
     }
 }
