@@ -369,7 +369,7 @@ mod commands {
         }
         #[cfg(not(windows))]
         {
-            let _ = (window, x, y, width, height, maximized);
+            let _ = (x, y, width, height, maximized);
         }
         if maximized {
             window.maximize().map_err(|e| e.to_string())?;
@@ -735,6 +735,7 @@ mod commands {
         {
             // macOS/Linux: 用 CUPS 的 lpr 命令打印 PDF
             // lpr -P <printer> -# <copies> -o sides=<duplex> <pdf>
+            let _ = &app;
             let mut args: Vec<String> = vec!["-P".to_string(), printer_name];
             if let Some(c) = copies {
                 if c > 1 {
