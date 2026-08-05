@@ -47,3 +47,10 @@ exe-icon-extracted.png
 
 # 更新签名私钥，禁止上传
 .tauri/membook-updater.key
+
+# ===== 开发文档与临时产物（不上传）=====
+开发日志.md
+MemBook 代码开发规范.md
+membook-iteration-plan/
+.trae-html-share-packages/
+cargo-meta.json
