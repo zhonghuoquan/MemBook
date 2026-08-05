@@ -1,0 +1,14 @@
+# 限制 cargo 并行编译任务数，降低 `tauri dev` / `tauri build` 启动阶段的内存峰值
+# （默认会占满所有 CPU 核并行编译，内存峰值可达 11G 且非常慢）
+# 配置会从 src-tauri 目录向上查找到此文件，对任意启动方式都生效。
+[build]
+jobs = 2
+
+# 在沙箱环境中使用 rust-lld 替代 MSVC link.exe
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+# 开发阶段减少 debug 信息生成，加速增量编译
+# 仅影响 `tauri dev`，release profile 已在 Cargo.toml 单独配置
+[profile.dev]
+debug = 1

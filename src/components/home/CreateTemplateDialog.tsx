@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import type { SlotLayout } from '../../types';
@@ -78,17 +79,22 @@ function smartSnap(val: number, targets: number[], maxDist: number): number {
 
 export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }: CreateTemplateDialogProps) {
   const isEditing = !!editTemplate;
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [rows, setRows] = useState(3);
   const [cols, setCols] = useState(3);
   const [slots, setSlots] = useState<SlotLayout[]>([]);
+  const safeSlots = Array.isArray(slots) ? slots : [];
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [snapOn, setSnapOn] = useState(true);
   const [preset, setPreset] = useState('2x2');
 
-  const slotsRef = useRef(slots);
-  slotsRef.current = slots;
+  const slotsRef = useRef(safeSlots);
+  slotsRef.current = safeSlots;
+
+  // 标记是否已完成初始槽位加载，避免编辑模式下预设 effect 覆盖 editTemplate.slots
+  const initialLoadedRef = useRef(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -101,18 +107,21 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
   /* ── 初始化 ── */
   useEffect(() => {
+    initialLoadedRef.current = false;
     if (editTemplate) {
-      setName(editTemplate.name);
-      setSlots(editTemplate.slots.map((s) => ({ ...s })));
+      setName(editTemplate.name ?? '');
+      setSlots((Array.isArray(editTemplate.slots) ? editTemplate.slots : []).map((s) => ({ ...s })));
     } else {
       setName('');
       setSlots(genSlots('2x2', 3, 3));
     }
     setSelectedIdx(null);
+    initialLoadedRef.current = true;
   }, [editTemplate?.id]); // eslint-disable-line
 
   /* ── 预设/行列变化 → 重新生成网格（边距变化不触发） ── */
   useEffect(() => {
+    if (!initialLoadedRef.current) return;
     setSlots(genSlots(preset, rows, cols));
     setSelectedIdx(null);
   }, [preset, rows, cols]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -264,7 +273,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     setSelectedIdx(selectedIdx - 1);
   };
   const moveDown = () => {
-    if (selectedIdx === null || selectedIdx >= slots.length - 1) return;
+    if (selectedIdx === null || selectedIdx >= safeSlots.length - 1) return;
     setSlots((prev) => { const n = [...prev]; [n[selectedIdx], n[selectedIdx + 1]] = [n[selectedIdx + 1], n[selectedIdx]]; return n; });
     setSelectedIdx(selectedIdx + 1);
   };
@@ -272,8 +281,8 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
     setSlots((prev) => { const n = [...prev]; n[idx] = { ...n[idx], ...patch }; return n; });
   }, []);
 
-  const photoCount = slots.filter((s) => s.id.startsWith('slot_')).length;
-  const textCount = slots.filter((s) => s.id.startsWith('text_')).length;
+  const photoCount = safeSlots.filter((s) => s.id.startsWith('slot_')).length;
+  const textCount = safeSlots.filter((s) => s.id.startsWith('text_')).length;
 
   const handleSave = async () => {
     if (photoCount === 0) return;
@@ -282,12 +291,12 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
       if (isEditing && editTemplate) {
         const existing = await loadCustomTemplate(editTemplate.id);
         await saveCustomTemplate({
-          id: editTemplate.id, name: name || '未命名模板', slots, isBuiltIn: false,
+          id: editTemplate.id, name: name || t('home.createTemplate.unnamed'), slots: safeSlots, isBuiltIn: false,
           createdAt: existing?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
       } else {
-        await createCustomTemplate(name || '未命名模板', slots);
+        await createCustomTemplate(name || t('home.createTemplate.unnamed'), safeSlots);
       }
       onCreated();
       onClose();
@@ -296,23 +305,35 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
   /* ── 布局预设按钮 ── */
   const presets = [
-    { id: '2x2', label: '2×2', icon: 'grid', desc: '4等分' },
-    { id: '2x3', label: '2×3', icon: 'grid', desc: '6格' },
-    { id: '3x3', label: '3×3', icon: 'grid', desc: '9格' },
-    { id: '4x4', label: '4×4', icon: 'grid', desc: '16格' },
-    { id: '5x5', label: '5×5', icon: 'grid', desc: '25格' },
-    { id: 'pin-2', label: '品字2', icon: 'pin', desc: '大+2小' },
-    { id: 'pin-3', label: '品字3', icon: 'pin', desc: '左2+右1' },
-    { id: 'stagger-4', label: '错落4', icon: 'pin', desc: '大+3小' },
+    { id: '2x2', label: '2×2', icon: 'grid', desc: t('home.createTemplate.desc2x2') },
+    { id: '2x3', label: '2×3', icon: 'grid', desc: t('home.createTemplate.desc2x3') },
+    { id: '3x3', label: '3×3', icon: 'grid', desc: t('home.createTemplate.desc3x3') },
+    { id: '4x4', label: '4×4', icon: 'grid', desc: t('home.createTemplate.desc4x4') },
+    { id: '5x5', label: '5×5', icon: 'grid', desc: t('home.createTemplate.desc5x5') },
+    { id: 'pin-2', label: t('home.createTemplate.labelPin2'), icon: 'pin', desc: t('home.createTemplate.descPin2') },
+    { id: 'pin-3', label: t('home.createTemplate.labelPin3'), icon: 'pin', desc: t('home.createTemplate.descPin3') },
+    { id: 'stagger-4', label: t('home.createTemplate.labelStagger4'), icon: 'pin', desc: t('home.createTemplate.descStagger4') },
   ];
 
   return (
-    <Modal open={open} onClose={onClose} title={isEditing ? '编辑模板' : '创建模板'} maxWidth="860px">
+    <Modal open={open} onClose={onClose} title={isEditing ? t('home.createTemplate.editTitle') : t('home.createTemplate.createTitle')} maxWidth="860px"
+      footer={
+        <div className="flex justify-between items-center pt-3 border-t border-[var(--color-border-light)]">
+          <span className="text-[9px] text-[var(--color-text-tertiary)]">{t('home.createTemplate.regionCount', { count: safeSlots.length })}</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleSave} disabled={saving || photoCount === 0}>
+              {saving ? t('home.createTemplate.saving') : t('home.createTemplate.save')}
+            </Button>
+          </div>
+        </div>
+      }
+    >
       {/* 顶部：名称 + 吸附开关 */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-1">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="给你的模板起个名字" maxLength={20}
+            placeholder={t('home.createTemplate.namePlaceholder')} maxLength={20}
             className="w-full h-9 px-3 bg-white border border-[var(--color-border)] rounded-[var(--radius-md)]
                        text-[var(--text-body)] text-[var(--color-gray-800)] placeholder:text-[var(--color-text-tertiary)]
                        outline-none hover:border-[var(--color-border-hover)]
@@ -321,7 +342,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
           <input type="checkbox" checked={snapOn} onChange={() => setSnapOn(!snapOn)}
             className="w-3.5 h-3.5 accent-[var(--color-primary-600)] cursor-pointer" />
-          <span className="text-[var(--text-caption)] text-[var(--color-gray-600)]">吸附 {GRID}%</span>
+          <span className="text-[var(--text-caption)] text-[var(--color-gray-600)]">{t('home.createTemplate.snap', { grid: GRID })}</span>
         </label>
       </div>
 
@@ -330,7 +351,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
         <div className="w-[220px] shrink-0 space-y-4">
           {/* 网格预设 */}
           <div>
-            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">快速网格</div>
+            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">{t('home.createTemplate.quickGrid')}</div>
             <div className="grid grid-cols-3 gap-1">
               {presets.map((p) => (
                 <button key={p.id}
@@ -352,12 +373,12 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
           {/* 自定义行列 */}
           <div className="flex items-center gap-2 p-2 bg-[var(--color-gray-50)] rounded-[var(--radius-sm)] border border-[var(--color-border-light)]">
-            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">行</span>
+            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">{t('home.createTemplate.rows')}</span>
             <input type="number" min={1} max={12} value={rows}
               onChange={(e) => { setRows(Math.max(1, Math.min(12, Number(e.target.value) || 1))); setPreset('custom'); }}
               className="w-11 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
             <span className="text-[var(--color-gray-300)] text-[10px]">×</span>
-            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">列</span>
+            <span className="text-[9px] text-[var(--color-gray-500)] shrink-0">{t('home.createTemplate.cols')}</span>
             <input type="number" min={1} max={12} value={cols}
               onChange={(e) => { setCols(Math.max(1, Math.min(12, Number(e.target.value) || 1))); setPreset('custom'); }}
               className="w-11 h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
@@ -366,7 +387,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
 
           {/* 边距在创建相册时设置 */}
           <div className="text-[8px] text-[var(--color-text-tertiary)] bg-[var(--color-gray-50)] rounded-[var(--radius-sm)] p-2 leading-relaxed">
-            边距在创建相册时设置，模板内固定 3% 内置边距
+            {t('home.createTemplate.marginHint')}
           </div>
 
           {/* 操作 */}
@@ -374,22 +395,22 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
             <div className="flex gap-1.5">
               <button onClick={addPhotoSlot}
                 className="flex-1 h-7 flex items-center justify-center gap-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] font-[500] text-[var(--color-gray-600)] hover:border-[var(--color-primary-400)] hover:text-[var(--color-primary-600)] cursor-pointer transition-all">
-                +照片
+                {t('home.createTemplate.addPhoto')}
               </button>
               <button onClick={addTextZone}
                 className="flex-1 h-7 flex items-center justify-center gap-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] font-[500] text-[var(--color-gray-600)] hover:border-[var(--color-primary-400)] hover:text-[var(--color-primary-600)] cursor-pointer transition-all">
-                +文字
+                {t('home.createTemplate.addText')}
               </button>
             </div>
             <button onClick={removeSelectedSlot} disabled={selectedIdx === null}
               className="w-full h-7 flex items-center justify-center gap-1 bg-white border border-[var(--color-error)]/30 rounded-[var(--radius-xs)] text-[10px] font-[500] text-[var(--color-error)] hover:bg-[var(--color-error)]/5 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all">
-              删除选中
+              {t('home.createTemplate.deleteSelected')}
             </button>
           </div>
 
           {/* 提示 */}
           <div className="text-[8px] text-[var(--color-text-tertiary)] leading-relaxed">
-            点击预设自动生成 · 拖拽移动/缩放微调
+            {t('home.createTemplate.hint')}
           </div>
         </div>
 
@@ -401,10 +422,10 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               <defs><pattern id="g" width={GRID} height={GRID} patternUnits="userSpaceOnUse"><path d={`M ${GRID} 0 L 0 0 0 ${GRID}`} fill="none" stroke="var(--color-gray-200)" strokeWidth="0.3" /></pattern></defs>
               <rect width="100" height="100" fill="url(#g)" />
             </svg>
-            {slots.map((slot, i) => {
+            {safeSlots.map((slot, i) => {
               const isText = slot.id.startsWith('text_');
               const sel = selectedIdx === i;
-              const photoN = slots.filter((s, j) => j < i && !s.id.startsWith('text_')).length;
+              const photoN = safeSlots.filter((s, j) => j < i && !s.id.startsWith('text_')).length;
               return (
                 <div key={slot.id}
                   className={`absolute rounded-[var(--radius-sm)] flex items-center justify-center ${sel ? 'z-10' : 'z-[1]'}`}
@@ -427,20 +448,20 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
           </div>
 
           <div className="flex items-center justify-center gap-3 mt-1.5 text-[10px] text-[var(--color-text-tertiary)]">
-            <span>📷 {photoCount} 个照片位</span>
-            {textCount > 0 && <span>📝 {textCount} 个文字区</span>}
+            <span>📷 {t('home.createTemplate.photoSlots', { count: photoCount })}</span>
+            {textCount > 0 && <span>📝 {t('home.createTemplate.textZones', { count: textCount })}</span>}
           </div>
 
           {selectedIdx !== null && (
             <div className="mt-3 p-3 bg-[var(--color-gray-50)] rounded-[var(--radius-lg)] border border-[var(--color-border-light)]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-[500] text-[var(--color-gray-700)]">
-                  {slots[selectedIdx]?.id.startsWith('text_') ? '文字区' : `照片位 #${slots.filter((s, j) => j < selectedIdx && !s.id.startsWith('text_')).length + 1}`}
+                  {safeSlots[selectedIdx]?.id.startsWith('text_') ? t('home.createTemplate.textZone') : t('home.createTemplate.photoZoneN', { n: safeSlots.filter((s, j) => j < selectedIdx && !s.id.startsWith('text_')).length + 1 })}
                 </span>
                 <div className="flex gap-1">
                   <button onClick={moveUp} disabled={selectedIdx <= 0}
                     className="w-5 h-5 flex items-center justify-center border border-[var(--color-border)] rounded-[var(--radius-xs)] bg-white text-[var(--color-gray-500)] disabled:opacity-30 cursor-pointer text-[10px]">↑</button>
-                  <button onClick={moveDown} disabled={selectedIdx >= slots.length - 1}
+                  <button onClick={moveDown} disabled={selectedIdx >= safeSlots.length - 1}
                     className="w-5 h-5 flex items-center justify-center border border-[var(--color-border)] rounded-[var(--radius-xs)] bg-white text-[var(--color-gray-500)] disabled:opacity-30 cursor-pointer text-[10px]">↓</button>
                 </div>
               </div>
@@ -449,15 +470,15 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
                   <div key={k}>
                     <label className="block text-[8px] text-[var(--color-gray-500)] mb-0.5">{l}</label>
                     <input type="number" min={0} max={100} step={1}
-                      value={Math.round(slots[selectedIdx][k])}
+                      value={Math.round(safeSlots[selectedIdx][k])}
                       onChange={(e) => { const v = Math.max(0, Math.min(100, Number(e.target.value) || 0)); updateSlot(selectedIdx, { [k]: snap(v) }); }}
                       className="w-full h-6 px-1 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[10px] text-center outline-none [appearance:textfield]" />
                   </div>
                 ))}
               </div>
               <div className="flex items-center gap-1 mt-2 flex-wrap">
-                <span className="text-[8px] text-[var(--color-gray-400)]">预设:</span>
-                {[{l:'1:1',w:25,h:25},{l:'4:3',w:28,h:21},{l:'3:4',w:21,h:28},{l:'2:1',w:35,h:17.5},{l:'横条',w:80,h:12},{l:'竖条',w:12,h:80}].map((p) => (
+                <span className="text-[8px] text-[var(--color-gray-400)]">{t('home.createTemplate.presetLabel')}</span>
+                {[{l:'1:1',w:25,h:25},{l:'4:3',w:28,h:21},{l:'3:4',w:21,h:28},{l:'2:1',w:35,h:17.5},{l:t('home.createTemplate.ratioHorizontal'),w:80,h:12},{l:t('home.createTemplate.ratioVertical'),w:12,h:80}].map((p) => (
                   <button key={p.l}
                     className="px-1.5 py-0.5 bg-white border border-[var(--color-border)] rounded-[var(--radius-xs)] text-[8px] text-[var(--color-gray-500)] hover:border-[var(--color-primary-400)] cursor-pointer transition-colors"
                     onClick={() => updateSlot(selectedIdx!, { width: snap(p.w), height: snap(p.h) })}>
@@ -467,16 +488,6 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="flex justify-between items-center mt-4 pt-3 border-t border-[var(--color-border-light)]">
-        <span className="text-[9px] text-[var(--color-text-tertiary)]">{slots.length} 个区域</span>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={onClose}>取消</Button>
-          <Button variant="primary" onClick={handleSave} disabled={saving || photoCount === 0}>
-            {saving ? '保存中…' : '保存模板'}
-          </Button>
         </div>
       </div>
     </Modal>

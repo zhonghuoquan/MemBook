@@ -1,12 +1,14 @@
 import { useState, useCallback } from 'react';
 import { useEditorStore, usePhotoStore } from '../../store';
-import { TEMPLATES } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS } from '../../types';
+import { useTranslation } from 'react-i18next';
 
 interface PreviewModalProps {
   onClose: () => void;
 }
 
 export function PreviewModal({ onClose }: PreviewModalProps) {
+  const { t } = useTranslation();
   const pages = useEditorStore((s) => s.pages);
   const photos = usePhotoStore((s) => s.photos);
   const [currentPage, setCurrentPage] = useState(0);
@@ -20,7 +22,7 @@ export function PreviewModal({ onClose }: PreviewModalProps) {
   }, [pages.length]);
 
   const page = pages[currentPage];
-  const template = page ? TEMPLATES.find((t) => t.id === page.templateId) : null;
+  const template = page ? resolveTemplate(page) : null;
 
   return (
     <div
@@ -42,7 +44,7 @@ export function PreviewModal({ onClose }: PreviewModalProps) {
                 onClick={handlePrev}
                 disabled={currentPage === 0}
               >
-                上一页
+                {t('editor.previewModal.prevPage')}
               </button>
               <button
                 className="px-3 py-1.5 bg-white/10 border border-white/20 rounded-[var(--radius-md)]
@@ -51,7 +53,7 @@ export function PreviewModal({ onClose }: PreviewModalProps) {
                 onClick={handleNext}
                 disabled={currentPage >= pages.length - 1}
               >
-                下一页
+                {t('editor.previewModal.nextPage')}
               </button>
             </div>
           )}
@@ -96,7 +98,7 @@ export function PreviewModal({ onClose }: PreviewModalProps) {
                   width: `${slot.width}%`,
                   height: `${slot.height}%`,
                   background: photo ? undefined : (page?.background === '#FFFFFF' ? '#F1F3F5' : 'rgba(255,255,255,0.1)'),
-                  borderRadius: photo ? '2px' : '4px',
+                  borderRadius: `${page?.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS}px`,
                   overflow: 'hidden',
                   display: 'flex',
                   alignItems: 'center',

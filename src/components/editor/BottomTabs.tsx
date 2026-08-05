@@ -1,16 +1,17 @@
 import type { PanelTab } from '../../types';
 import { useUIStore } from '../../store';
+import { useTranslation } from 'react-i18next';
 
 type TabDef = {
   tab: PanelTab;
-  label: string;
+  labelKey: string;
   icon: React.ReactNode;
 };
 
 const tabs: TabDef[] = [
   {
     tab: 'photos',
-    label: '照片',
+    labelKey: 'editor.bottomTabs.photos',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <rect x="1.5" y="1.5" width="15" height="15" rx="2" />
@@ -21,7 +22,7 @@ const tabs: TabDef[] = [
   },
   {
     tab: 'templates',
-    label: '模板',
+    labelKey: 'editor.bottomTabs.templates',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <rect x="2" y="2" width="14" height="14" rx="2" />
@@ -33,7 +34,7 @@ const tabs: TabDef[] = [
   },
   {
     tab: 'theme',
-    label: '主题',
+    labelKey: 'editor.bottomTabs.theme',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <circle cx="9" cy="9" r="6.5" />
@@ -44,7 +45,7 @@ const tabs: TabDef[] = [
   },
   {
     tab: 'tools',
-    label: '工具',
+    labelKey: 'editor.bottomTabs.tools',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
         <circle cx="9" cy="9" r="2.5" />
@@ -54,7 +55,7 @@ const tabs: TabDef[] = [
   },
   {
     tab: 'market',
-    label: '模板中心',
+    labelKey: 'editor.bottomTabs.market',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <path d="M2 5l7-3 7 3v8l-7 3-7-3V5z" />
@@ -66,6 +67,7 @@ const tabs: TabDef[] = [
 ];
 
 export function BottomTabs() {
+  const { t } = useTranslation();
   const activePanel = useUIStore((s) => s.activePanel);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
 
@@ -90,7 +92,7 @@ export function BottomTabs() {
             onClick={() => setActivePanel(item.tab)}
           >
             {item.icon}
-            <span>{item.label}</span>
+            <span>{t(item.labelKey)}</span>
           </button>
         );
       })}

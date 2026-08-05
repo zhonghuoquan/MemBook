@@ -1,0 +1,90 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MemBook",
+  "version": "1.0.0",
+  "identifier": "app.membook.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MemBook",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "center": true,
+        "transparent": true,
+        "shadow": false,
+        "devtools": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
+        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src": "'self' https://fonts.gstatic.com",
+        "img-src": "'self' asset: http://asset.localhost https://asset.localhost blob: data:",
+        "media-src": "'self' asset: http://asset.localhost https://asset.localhost blob:",
+        "connect-src": "'self' http://ipc.localhost asset: http://asset.localhost https://asset.localhost https://api.bigdatacloud.net https://updates.membook.app https://github.com https://*.githubusercontent.com blob:",
+        "worker-src": "'self' blob:"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.icns",
+      "icons/128x128@2x.png",
+      "icons/128x128.png",
+      "icons/32x32.png"
+    ],
+    "category": "Productivity",
+    "shortDescription": "MemBook 电子相册编辑器",
+    "longDescription": "MemBook 是一款本地优先的电子相册制作工具，支持自定义尺寸、一键成册、模板套用、滤镜调色等。所有数据保存在你的设备上，不上传服务器。",
+    "publisher": "MemBook",
+    "copyright": "© 2026 MemBook",
+    "resources": {
+      "resources/sm.exe": "resources/sm.exe"
+    },
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "installerIcon": "icons/icon.ico"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEOUVGMThEQUU2MDY0REYKUldUZlpHQ3VqZkdlYlIrNXN5SWw0UEJuV3VHajFrQk05b1pBR0xxVzYyYS9DK1lNSUpxanI1VHEK",
+      "endpoints": [
+        "https://updates.membook.app/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

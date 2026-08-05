@@ -19,7 +19,10 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* Strict type checking (增量推进：先开 strictNullChecks) */
+    "strictNullChecks": true
   },
   "include": ["src"]
 }

@@ -1,0 +1,9 @@
+# MemBook pre-commit hook
+# 仅对暂存的 TS/TSX 文件做类型检查 + Lint，避免全量跑测试拖慢提交
+
+npx tsc --noEmit -p tsconfig.app.json || exit 1
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)
+if [ -n "$STAGED" ]; then
+  echo "$STAGED" | xargs npx eslint --no-warn-ignored || exit 1
+fi

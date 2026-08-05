@@ -1,11 +1,13 @@
 /**
  * PageThumbnail — 相册页面缩略图
- * 渲染页面背景色 + 模板槽位 + 已放置的照片（object-cover 撑满）
- * 用于项目列表中的封面展示
+ * 基于 Canvas 2D 渲染所有元素类型（照片/文本/便签/贴纸/画笔笔触），
+ * 与编辑器画布渲染保持一致。用于项目列表中的封面展示。
  */
-import { useMemo } from 'react';
-import { TEMPLATES } from '../../types';
-import type { AlbumPage, Photo } from '../../types';
+import { useEffect, useRef, useState } from 'react';
+import { resolveTemplate } from '../../types';
+import type { AlbumPage, Photo, AlbumSize } from '../../types';
+import { SLOT_PALETTE } from '../../constants/templatePalette';
+import CanvasPageThumbnail from '../common/CanvasPageThumbnail';
 
 interface PageThumbnailProps {
   page: AlbumPage;
@@ -14,22 +16,37 @@ interface PageThumbnailProps {
   scale?: number;
   /** 是否在无照片时显示空槽位轮廓，默认 true */
   showSlots?: boolean;
+  /** 相册尺寸（mm），有 slotOverrides 时需要用于将像素坐标转百分比 */
+  albumSize?: AlbumSize;
 }
 
-export function PageThumbnail({ page, photos, scale = 1, showSlots = true }: PageThumbnailProps) {
-  const template = useMemo(() => TEMPLATES.find((t) => t.id === page.templateId), [page.templateId]);
+export function PageThumbnail({ page, photos, albumSize }: PageThumbnailProps) {
+  const template = resolveTemplate(page);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
 
-  // 构建 photoId → Photo 快速查找表
-  const photoMap = useMemo(() => {
-    const map = new Map<string, Photo>();
-    photos.forEach((p) => map.set(p.id, p));
-    return map;
-  }, [photos]);
+  // 测量容器像素尺寸，传给 CanvasPageThumbnail 作为渲染画布大小
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setBox({ w, h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!template) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-[var(--color-gray-50)] rounded-[2px]">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-[var(--color-gray-300)]">
+      <div
+        className="w-full h-full flex items-center justify-center rounded-[2px]"
+        style={{ backgroundImage: SLOT_PALETTE[0] }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-[var(--color-brand)]/60">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <line x1="9" y1="9" x2="9" y2="9" />
         </svg>
@@ -38,62 +55,30 @@ export function PageThumbnail({ page, photos, scale = 1, showSlots = true }: Pag
   }
 
   if (template.slots.length === 0) {
-    return <div className="w-full h-full bg-[var(--color-primary-100)] rounded-[2px]" />;
+    return (
+      <div
+        className="w-full h-full rounded-[2px]"
+        style={{ backgroundImage: SLOT_PALETTE[1] }}
+      />
+    );
   }
 
   return (
     <div
+      ref={containerRef}
       className="w-full h-full relative overflow-hidden rounded-[2px]"
       style={{ backgroundColor: page.background || '#FFFFFF' }}
     >
-      {template.slots.map((slot, i) => {
-        const placement = page.placements.find((p) => p.slotId === slot.id);
-        const photo = placement?.photoId ? photoMap.get(placement.photoId) : undefined;
-
-        return (
-          <div
-            key={slot.id}
-            className="absolute overflow-hidden"
-            style={{
-              left: `${slot.x}%`,
-              top: `${slot.y}%`,
-              width: `${slot.width}%`,
-              height: `${slot.height}%`,
-              borderRadius: `${1 * scale}px`,
-            }}
-          >
-            {photo ? (
-              <img
-                src={photo.src}
-                alt=""
-                className="w-full h-full pointer-events-none select-none"
-                style={{
-                  objectFit: 'cover',
-                  objectPosition: 'center',
-                  // 如果 photo.height/width 比例与 slot 比例不匹配，objectFit:cover 自动处理
-                }}
-                loading="lazy"
-                draggable={false}
-                onError={(e) => {
-                  // 图片加载失败时显示槽位占位
-                  const target = e.currentTarget;
-                  target.style.display = 'none';
-                  target.parentElement!.style.backgroundColor = `var(--color-primary-${(i % 3) === 0 ? 100 : (i % 3) === 1 ? 200 : 300})`;
-                  target.parentElement!.style.opacity = `${Math.max(0.4, 1 - i * 0.12)}`;
-                }}
-              />
-            ) : showSlots ? (
-              <div
-                className="w-full h-full border border-white/20"
-                style={{
-                  backgroundColor: `var(--color-primary-${(i % 3) === 0 ? 100 : (i % 3) === 1 ? 200 : 300})`,
-                  opacity: Math.max(0.4, 1 - i * 0.12),
-                }}
-              />
-            ) : null}
-          </div>
-        );
-      })}
+      {box.w > 0 && box.h > 0 && (
+        <CanvasPageThumbnail
+          page={page}
+          photos={photos}
+          width={box.w}
+          height={box.h}
+          cacheSuffix="home"
+          albumSize={albumSize}
+        />
+      )}
     </div>
   );
 }

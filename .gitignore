@@ -1,4 +1,49 @@
+# ===== Node 依赖 =====
 node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== 构建产物 =====
 dist/
+dist-ssr/
+build/
+out/
 *.local
+
+# ===== Rust / Tauri =====
+src-tauri/target/
+src-tauri/gen/
+*.rs.bk
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.sublime-*
+*.code-workspace
+
+# ===== 系统文件 =====
 .DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# ===== 测试与临时输出 =====
+tsc_output.txt
+tsc_output2.txt
+test-env.log
+test-*.bat
+
+# ===== 大型本地文件 =====
+vs_BuildTools.exe
+*.exe
+exe-icon-extracted.png
+
+# ===== 密钥 =====
+.env
+.env.*
+*.pem
+
+# 更新签名私钥，禁止上传
+.tauri/membook-updater.key

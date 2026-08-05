@@ -1,0 +1,62 @@
+[package]
+name = "membook"
+version = "1.0.0"
+description = "MemBook — 电子相册编辑器"
+authors = ["MemBook"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "membook_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "devtools", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+winreg = "0.52"
+sha2 = "0.10"
+# heif-rs 会在构建时从 GitHub 下载预编译的静态 libheif/libde265/x265 二进制。
+# 如果构建环境无法访问 GitHub，请提前下载对应平台的 release zip
+# (https://github.com/vegidio/binaries-heif/releases) 并设置 HEIF_BINARIES_DIR 环境变量。
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"], optional = true }
+heif-rs = { version = "26.7", optional = true }
+windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_Graphics_Printing", "Win32_Security", "Win32_UI_Shell"] }
+
+[features]
+# 默认关闭 native-heic：当前 MSVC 工具链与预编译 libheif 的 C++ STL 版本不兼容，
+# 会导致 LNK2019（__std_unique_4 等符号未解析）。后续升级 MSVC 或重新编译 libheif
+# 后可改回 default = ["native-heic"]。
+# 关闭后仍保留 Windows WIC 解码（convert_heic_to_jpeg）与前端 heic2any WASM 回退。
+default = []
+# 启用 Rust 原生 HEIC 解码（基于 heif-rs/libheif）。
+# 首次构建需要从 GitHub 下载预编译静态库；离线构建请设置 HEIF_BINARIES_DIR。
+native-heic = ["dep:heif-rs", "dep:image"]
+
+[profile.release]
+panic = "abort"
+# 增加 codegen-units 可将编译拆分为更多独立单元，降低单个单元的峰值内存；
+# 同时保留合理的优化级别。LTO 使用 thin 以平衡体积与内存占用。
+codegen-units = 8
+lto = "thin"
+opt-level = "s"
+strip = true
+
+[profile.release.package."*"]
+# 第三方 crate 同样拆分为多个 codegen units，显著降低链接阶段内存峰值
+opt-level = "s"
+codegen-units = 8
+
+[dev-dependencies]
+# 用于 async 函数的单元测试（block_on）
+futures = "0.3"

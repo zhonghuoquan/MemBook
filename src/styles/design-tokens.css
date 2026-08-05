@@ -7,6 +7,15 @@
   --color-brand:              #6C63FF;
   --color-brand-dark:         #5046E5;
   --color-brand-light:        #F0EFFF;
+  --color-brand-bg:           #F0EFFF;       /* 品牌色淡背景，与 brand-light 同步但语义独立 */
+
+  /* ── Gradients (soft lavender + subtle cyan accent like reference) ── */
+  --gradient-header:          linear-gradient(135deg, #E0F7FA 0%, #EDE9FF 35%, #DDD6FF 100%);
+  --gradient-header-strong:   linear-gradient(135deg, #D6F0F5 0%, #DDD6FF 50%, #CFC8FF 100%);
+  --gradient-sidebar:         linear-gradient(180deg, #F5F3FF 0%, #EDE9FF 60%, #E5E1FF 100%);
+  --gradient-brand-soft:      linear-gradient(135deg, #F0EFFF 0%, #E8E5FF 100%);
+  --gradient-brand:           linear-gradient(135deg, #8C85FF 0%, #6C63FF 100%);
+  --gradient-surface:         linear-gradient(180deg, #FFFFFF 0%, #FAFAFF 100%);
 
   /* ── Primary Scale (蓝紫色 10阶) ── */
   --color-primary-50:         #F0EFFF;
@@ -61,12 +70,33 @@
   --color-accent-teal:        #20C997;
   --color-accent-amber:       #F59E0B;
 
+  /* ── Multi-Color Accents (用于多彩标签/分类/状态指示) ── */
+  --color-accent-pink:         #EC4899;
+  --color-accent-pink-soft:    #FDF2F8;
+  --color-accent-pink-border:  #FBCFE8;
+
+  --color-accent-green:        #10B981;
+  --color-accent-green-soft:   #ECFDF5;
+  --color-accent-green-border: #A7F3D0;
+
+  --color-accent-orange:       #F59E0B;
+  --color-accent-orange-soft:  #FFF7ED;
+  --color-accent-orange-border:#FED7AA;
+
+  --color-accent-cyan:         #06B6D4;
+  --color-accent-cyan-soft:    #ECFEFF;
+  --color-accent-cyan-border:  #A5F3FC;
+
+  --color-accent-red:          #EF4444;
+  --color-accent-red-soft:     #FEF2F2;
+  --color-accent-red-border:   #FECACA;
+
   /* ── Surface & Borders ── */
   --color-surface:            #FFFFFF;
   --color-surface-raised:     #FFFFFF;
-  --color-surface-panel:      #F8F9FA;
+  --color-surface-panel:      #FAFAFF;
   --color-surface-canvas:     #FFFFFF;
-  --color-surface-hover:      #F1F3F5;
+  --color-surface-hover:      #F4F2FF;
   --color-surface-selected:   #F0EFFF;
   --color-surface-overlay:    rgba(33, 37, 41, 0.3);
   --color-border:             #DEE2E6;
@@ -130,13 +160,14 @@
   --radius-full:              9999px;
 
   /* ── Shadows (中性黑阴影) ── */
-  --shadow-color:             33, 37, 41;
-  --shadow-xs:                0 1px 2px  rgba(33, 37, 41, 0.04);
-  --shadow-sm:                0 2px 6px  rgba(33, 37, 41, 0.06);
-  --shadow-md:                0 4px 16px rgba(33, 37, 41, 0.08);
-  --shadow-lg:                0 8px 32px rgba(33, 37, 41, 0.12);
-  --shadow-xl:                0 16px 48px rgba(33, 37, 41, 0.16);
-  --shadow-card-hover:        0 2px 12px rgba(33, 37, 41, 0.08);
+  --shadow-color:             108, 99, 255;
+  --shadow-xs:                0 1px 2px  rgba(108, 99, 255, 0.04);
+  --shadow-sm:                0 2px 8px  rgba(108, 99, 255, 0.06);
+  --shadow-md:                0 4px 20px rgba(108, 99, 255, 0.08);
+  --shadow-lg:                0 12px 36px rgba(108, 99, 255, 0.12);
+  --shadow-xl:                0 20px 56px rgba(108, 99, 255, 0.16);
+  --shadow-card-hover:        0 8px 24px rgba(108, 99, 255, 0.12);
+  --shadow-soft:              0 2px 16px rgba(108, 99, 255, 0.06);
 
   /* ── Animation & Transition ── */
   --transition-fast:          150ms ease;
@@ -153,8 +184,8 @@
 
   /* ── Layout Constants ── */
   --layout-nav-width:              64px;
-  --layout-panel-width:            220px;
-  --layout-panel-width-max:        450px;
+  --layout-panel-width:            440px;
+  --layout-panel-width-max:        650px;
   --layout-edit-flyout-width:      260px;
   --layout-toolbar-height:         48px;
   --layout-bottom-nav-height:      72px;
@@ -166,10 +197,140 @@
   --z-flat:                   1;
   --z-raised:                 10;
   --z-sticky:                 20;
+  --z-dropdown:               30;
   --z-overlay:                50;
+  --z-toolbar:                60;   /* 顶部工具栏：高于 overlay（画布编辑模式），低于 modal */
   --z-modal:                  100;
   --z-toast:                  200;
   --z-tooltip:                300;
+
+  /* ── Card / Dialog surface (for bg-white → bg-card 适配) ── */
+  --color-card:               #FFFFFF;
+}
+
+/* ============================================================
+   Dark Theme Overrides
+   ============================================================ */
+[data-theme="dark"] {
+  /* ── Brand（参考图风格：更鲜艳的紫罗兰蓝，低饱和点缀） ── */
+  --color-brand:              #8B7FFF;
+  --color-brand-dark:         #6E62E6;
+  --color-brand-light:        #1F1B40;
+  --color-brand-bg:           #1F1B40;       /* 品牌色淡背景（深色下用低透明紫色） */
+
+  /* ── Gradients（参考图风格：深邃中性深色，柔和分层） ── */
+  --gradient-header:          linear-gradient(135deg, #14141C 0%, #1A1A22 100%);
+  --gradient-header-strong:   linear-gradient(135deg, #1A1A22 0%, #25252E 100%);
+  --gradient-sidebar:         linear-gradient(180deg, #14141C 0%, #0F0F14 100%);
+  --gradient-brand-soft:      linear-gradient(135deg, #1F1B40 0%, #2A2548 100%);
+  --gradient-brand:           linear-gradient(135deg, #A29CFF 0%, #8B7FFF 100%);
+  --gradient-surface:         linear-gradient(180deg, #1A1A22 0%, #14141C 100%);
+
+  /* ── Primary Scale（暗色下更温润、低饱和的蓝紫） ── */
+  --color-primary-50:         #1e1a3e;
+  --color-primary-100:        #262256;
+  --color-primary-200:        #312b6e;
+  --color-primary-300:        #423c8c;
+  --color-primary-400:        #5c57b6;
+  --color-primary-500:        #7873d8;
+  --color-primary-600:        #8f8aef;
+  --color-primary-700:        #a9a5ff;
+  --color-primary-800:        #c4c1ff;
+  --color-primary-900:        #e0deff;
+
+  /* ── Neutral Gray Scale（蓝灰 Slate，柔和去纯黑，保持倒置语义） ── */
+  --color-white:              #FFFFFF;
+  --color-gray-25:            #13131a;
+  --color-gray-50:            #181820;
+  --color-gray-100:           #1e1e28;
+  --color-gray-150:           #242430;
+  --color-gray-200:           #2a2a38;
+  --color-gray-300:           #353544;
+  --color-gray-400:           #4a4a5e;
+  --color-gray-500:           #6e6e8a;
+  --color-gray-600:           #9c9cb4;
+  --color-gray-700:           #b8b8ce;
+  --color-gray-800:           #d6d6e8;
+  --color-gray-900:           #eaeaf8;
+
+  /* ── Semantic Colors（与蓝灰背景协调，降低刺眼感） ── */
+  --color-success:            #34d399;
+  --color-success-light:      #0f2e22;
+  --color-success-dark:       #6ee7b7;
+  --color-success-border:     #1b5e41;
+  --color-warning:            #fbbf24;
+  --color-warning-light:      #2d220a;
+  --color-warning-dark:       #fcd34d;
+  --color-warning-border:     #5c4610;
+  --color-error:              #fb7c7c;
+  --color-error-light:        #2d0f0f;
+  --color-error-dark:         #fca5a5;
+  --color-error-border:       #5c2020;
+  --color-info:               #60a5fa;
+  --color-info-light:         #0a1a2e;
+  --color-info-dark:          #93c5fd;
+  --color-info-border:        #1e3a5c;
+
+  /* ── Accent ── */
+  --color-accent-teal:        #34D399;
+  --color-accent-amber:       #fbbf24;
+
+  /* ── Multi-Color Accents (深色下更鲜艳饱和，用于多彩标签/分类) ── */
+  --color-accent-pink:         #F472B6;
+  --color-accent-pink-soft:    #2D1A24;
+  --color-accent-pink-border:  rgba(244, 114, 182, 0.40);
+
+  --color-accent-green:        #34D399;
+  --color-accent-green-soft:   #0F2A1F;
+  --color-accent-green-border: rgba(52, 211, 153, 0.40);
+
+  --color-accent-orange:       #FB923C;
+  --color-accent-orange-soft:  #2D1A0A;
+  --color-accent-orange-border:rgba(251, 146, 60, 0.40);
+
+  --color-accent-cyan:         #22D3EE;
+  --color-accent-cyan-soft:    #0A2A2E;
+  --color-accent-cyan-border:  rgba(34, 211, 238, 0.40);
+
+  --color-accent-red:          #F87171;
+  --color-accent-red-soft:     #2D0F0F;
+  --color-accent-red-border:   rgba(248, 113, 113, 0.40);
+
+  /* ── Surface & Borders（参考图风格：分层更明显的深邃中性色） ── */
+  --color-surface:            #1A1A22;
+  --color-surface-raised:     #25252E;
+  --color-surface-panel:      #0F0F14;
+  --color-surface-canvas:     #14141C;
+  --color-surface-hover:      #2D2D38;
+  --color-surface-selected:   #28283A;
+  --color-surface-overlay:    rgba(0, 0, 0, 0.72);
+  --color-border:             rgba(255, 255, 255, 0.10);
+  --color-border-light:       rgba(255, 255, 255, 0.06);
+  --color-border-hover:       rgba(255, 255, 255, 0.16);
+  --color-border-focus:       #8B7FFF;
+  --color-border-error:       rgba(248, 113, 113, 0.40);
+  --color-border-success:     rgba(52, 211, 153, 0.40);
+
+  /* ── Text（参考图风格：纯白主文本，对比度最大化） ── */
+  --color-text-primary:       #FFFFFF;
+  --color-text-secondary:     #B4B4C5;
+  --color-text-tertiary:      #7A7A8C;
+  --color-text-brand:         #A29CFF;
+  --color-text-inverse:       #0F0F14;
+  --color-text-link:          var(--color-info-dark);
+
+  /* ── Shadows（纯黑但更不透明，避免浮层过暗时阴影过重） ── */
+  --shadow-color:             0, 0, 0;
+  --shadow-xs:                0 1px 2px  rgba(0, 0, 0, 0.18);
+  --shadow-sm:                0 2px 8px  rgba(0, 0, 0, 0.22);
+  --shadow-md:                0 4px 20px rgba(0, 0, 0, 0.28);
+  --shadow-lg:                0 12px 36px rgba(0, 0, 0, 0.36);
+  --shadow-xl:                0 20px 56px rgba(0, 0, 0, 0.44);
+  --shadow-card-hover:        0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-soft:              0 2px 16px rgba(0, 0, 0, 0.18);
+
+  /* ── Card surface ── */
+  --color-card:               #1A1A22;
 }
 
 /* ── Base Styles ── */
@@ -181,7 +342,7 @@ html, body {
   font-size: var(--text-body);
   line-height: 1.55;
   color: var(--color-text-primary);
-  background: var(--color-gray-50);
+  background: var(--color-surface-panel);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -194,7 +355,12 @@ html, body {
   box-sizing: border-box;
 }
 
-/* ── Scrollbar ── */
+/* ── Scrollbar（全局极简悬浮风） ──
+   - 默认 thumb 透明，不占视觉空间
+   - 添加 .ps-scroll 工具类：hover 或滚动时显现半透明磨砂
+   - 6px 纤细、3px 圆角、无上下箭头
+   - 始终保留轨道宽度，内容永不抖动
+*/
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -203,11 +369,123 @@ html, body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-gray-200);
+  background: transparent;
   border-radius: 3px;
+  transition: background 0.2s ease;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-gray-300);
+/* 顶部/底部箭头（decrement/increment + corner）— 全局彻底隐藏 */
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-button:single-button,
+::-webkit-scrollbar-button:double-button,
+::-webkit-scrollbar-button:horizontal:decrement,
+::-webkit-scrollbar-button:horizontal:increment,
+::-webkit-scrollbar-button:vertical:decrement,
+::-webkit-scrollbar-button:vertical:increment,
+::-webkit-scrollbar-corner {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  -webkit-appearance: none !important;
+}
+/* Firefox */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+/* ═══ .ps-scroll：滚动条悬浮工具类（推荐用于弹窗/面板内容区）═══
+   默认不可见，hover 或挂 .ps-scroll-active 时优雅显现 */
+.ps-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s ease;
+}
+.ps-scroll::-webkit-scrollbar-button,
+.ps-scroll::-webkit-scrollbar-button:vertical:decrement,
+.ps-scroll::-webkit-scrollbar-button:vertical:increment,
+.ps-scroll::-webkit-scrollbar-button:horizontal:decrement,
+.ps-scroll::-webkit-scrollbar-button:horizontal:increment,
+.ps-scroll::-webkit-scrollbar-corner {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  -webkit-appearance: none !important;
+}
+.ps-scroll:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.14) transparent;
+}
+.ps-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+}
+.ps-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+.ps-scroll.ps-scroll-active {
+  scrollbar-color: rgba(0, 0, 0, 0.14) transparent;
+}
+.ps-scroll.ps-scroll-active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+}
+.ps-scroll.ps-scroll-active::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+/* ═══ .nav-scroll-x：底部缩略图横向滚动条（与 .ps-scroll 面板风格一致）═══
+   默认不可见，hover 或滚动时显现；6px 纤细圆角、中性灰半透明 */
+.nav-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.nav-scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+.nav-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nav-scroll-x::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+.nav-scroll-x:hover,
+.nav-scroll-x.nav-scroll-x-active {
+  scrollbar-color: rgba(0, 0, 0, 0.14) transparent;
+}
+.nav-scroll-x:hover::-webkit-scrollbar-thumb,
+.nav-scroll-x.nav-scroll-x-active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+}
+.nav-scroll-x:hover::-webkit-scrollbar-thumb:hover,
+.nav-scroll-x.nav-scroll-x-active::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+/* ═══ Dark mode scrollbar overrides ═══
+   暗色模式下 thumb 改用浅灰，保证在深色背景上可见 */
+[data-theme="dark"] .ps-scroll:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+[data-theme="dark"] .ps-scroll:hover::-webkit-scrollbar-thumb,
+[data-theme="dark"] .ps-scroll.ps-scroll-active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+[data-theme="dark"] .ps-scroll:hover::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .ps-scroll.ps-scroll-active::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+[data-theme="dark"] .nav-scroll-x:hover,
+[data-theme="dark"] .nav-scroll-x.nav-scroll-x-active {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+[data-theme="dark"] .nav-scroll-x:hover::-webkit-scrollbar-thumb,
+[data-theme="dark"] .nav-scroll-x.nav-scroll-x-active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+[data-theme="dark"] .nav-scroll-x:hover::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .nav-scroll-x.nav-scroll-x-active::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 /* ── Selection ── */
@@ -219,7 +497,7 @@ html, body {
 /* ── Focus ── */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 20%, transparent);
 }
 
 /* ── SVG Icon Base ── */

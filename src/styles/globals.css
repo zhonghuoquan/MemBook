@@ -12,9 +12,24 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 @keyframes modalFadeIn {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* TailwindCSS v4 自定义主题扩展 */
@@ -56,6 +71,23 @@
   --color-error: var(--color-error);
   --color-error-light: var(--color-error-light);
 
+  /* Multi-Color Accents (用于多彩标签/分类) */
+  --color-accent-pink: var(--color-accent-pink);
+  --color-accent-pink-soft: var(--color-accent-pink-soft);
+  --color-accent-pink-border: var(--color-accent-pink-border);
+  --color-accent-green: var(--color-accent-green);
+  --color-accent-green-soft: var(--color-accent-green-soft);
+  --color-accent-green-border: var(--color-accent-green-border);
+  --color-accent-orange: var(--color-accent-orange);
+  --color-accent-orange-soft: var(--color-accent-orange-soft);
+  --color-accent-orange-border: var(--color-accent-orange-border);
+  --color-accent-cyan: var(--color-accent-cyan);
+  --color-accent-cyan-soft: var(--color-accent-cyan-soft);
+  --color-accent-cyan-border: var(--color-accent-cyan-border);
+  --color-accent-red: var(--color-accent-red);
+  --color-accent-red-soft: var(--color-accent-red-soft);
+  --color-accent-red-border: var(--color-accent-red-border);
+
   --color-surface: var(--color-surface);
   --color-surface-panel: var(--color-surface-panel);
   --color-surface-canvas: var(--color-surface-canvas);
@@ -72,4 +104,172 @@
   --color-text-tertiary: var(--color-text-tertiary);
   --color-text-brand: var(--color-text-brand);
   --color-text-inverse: var(--color-text-inverse);
+
+  /* Card / Dialog surface (替代 bg-white 用于暗色切换) */
+  --color-card: var(--color-card);
+
+  /* Gradients */
+  --gradient-header: var(--gradient-header);
+  --gradient-header-strong: var(--gradient-header-strong);
+  --gradient-sidebar: var(--gradient-sidebar);
+  --gradient-brand-soft: var(--gradient-brand-soft);
+  --gradient-brand: var(--gradient-brand);
+  --gradient-surface: var(--gradient-surface);
+
+  /* Shadows */
+  --shadow-soft: var(--shadow-soft);
 }
+
+/* ── Tauri 窗口圆角与透明背景 ── */
+html.tauri-mode,
+html.tauri-mode body,
+html.tauri-mode #root {
+  background: transparent !important;
+  margin: 0;
+  padding: 0;
+}
+
+html.tauri-mode #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-rounded {
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  /* 用 clip-path 做更干净的圆角裁剪，减少透明窗口下边角锯齿/漏光 */
+  clip-path: inset(0 round 16px);
+}
+
+.app-maximized {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  clip-path: none !important;
+}
+
+/* 全屏视图期间移除所有可能裁剪/约束全屏的样式，确保内容真正铺满显示器 */
+html.fullscreen-open,
+html.fullscreen-open body,
+html.fullscreen-open #root,
+html.fullscreen-open [data-app-root] {
+  overflow: visible !important;
+  border-radius: 0 !important;
+  clip-path: none !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+html.fullscreen-open .app-rounded,
+html.fullscreen-open .app-maximized {
+  border-radius: 0 !important;
+  clip-path: none !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+/* 兜底：确保 React 根节点始终占满 */
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── 自定义滚动条（用于弹窗等需要明确滚动提示的区域）── */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-gray-300) transparent;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--color-gray-300);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-gray-400);
+}
+
+/* ── Dark Mode Utility Overrides ──
+   大量组件使用 Tailwind bg-white / bg-black 等硬编码工具类，暗色模式下会非常突兀。
+   这里通过全局覆盖，让它们在暗色主题下自动映射到设计系统的柔和表面色。 */
+[data-theme="dark"] .bg-white {
+  background-color: var(--color-card) !important;
+}
+
+/* 半透明白色背景在暗色下转为带透明度的表面色，保持玻璃态质感 */
+[data-theme="dark"] .bg-white\/40,
+[data-theme="dark"] .bg-white\/50,
+[data-theme="dark"] .bg-white\/60,
+[data-theme="dark"] .bg-white\/80,
+[data-theme="dark"] .bg-white\/90 {
+  background-color: color-mix(in srgb, var(--color-surface-raised) 80%, transparent) !important;
+}
+
+/* 纯黑遮罩在暗色下改用深蓝黑遮罩，避免死黑 */
+[data-theme="dark"] .bg-black\/30 { background-color: rgba(10, 10, 16, 0.45) !important; }
+[data-theme="dark"] .bg-black\/35 { background-color: rgba(10, 10, 16, 0.50) !important; }
+[data-theme="dark"] .bg-black\/40 { background-color: rgba(10, 10, 16, 0.55) !important; }
+[data-theme="dark"] .bg-black\/45 { background-color: rgba(10, 10, 16, 0.60) !important; }
+[data-theme="dark"] .bg-black\/50 { background-color: rgba(10, 10, 16, 0.65) !important; }
+[data-theme="dark"] .bg-black\/60 { background-color: rgba(10, 10, 16, 0.72) !important; }
+
+/* 纯黑文字在暗色下自动变为柔和浅色 */
+[data-theme="dark"] .text-black {
+  color: var(--color-text-primary) !important;
+}
+
+/* ═══ 多彩标签工具类 (参考图风格 Pill Tags) ═══
+   5 种语义颜色 × 2 种变体 (实色文字+淡背景 / 描边样式)
+   使用方式：<span class="tag tag-pink">标签</span> */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.tag-pink  { background: var(--color-accent-pink-soft);  color: var(--color-accent-pink);  border: 1px solid var(--color-accent-pink-border); }
+.tag-green { background: var(--color-accent-green-soft); color: var(--color-accent-green); border: 1px solid var(--color-accent-green-border); }
+.tag-orange{ background: var(--color-accent-orange-soft);color: var(--color-accent-orange);border: 1px solid var(--color-accent-orange-border); }
+.tag-cyan  { background: var(--color-accent-cyan-soft);  color: var(--color-accent-cyan);  border: 1px solid var(--color-accent-cyan-border); }
+.tag-red   { background: var(--color-accent-red-soft);   color: var(--color-accent-red);   border: 1px solid var(--color-accent-red-border); }
+.tag-brand { background: var(--color-brand-soft);        color: var(--color-text-brand);  border: 1px solid var(--color-border-focus); }
+
+/* ═══ 品牌色辉光效果 (参考图中紫色按钮的微妙外发光) ═══ */
+.brand-glow {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 30%, transparent),
+              0 4px 16px color-mix(in srgb, var(--color-brand) 24%, transparent);
+}
+[data-theme="dark"] .brand-glow {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 40%, transparent),
+              0 4px 20px color-mix(in srgb, var(--color-brand) 32%, transparent);
+}
+
+/* ═══ 玻璃态卡片 (参考图中浮层的玻璃质感) ═══
+   仅在亮色下提供白色玻璃；暗色下保持原色以避免过亮 */
+.glass-card {
+  background: color-mix(in srgb, var(--color-surface-raised) 85%, transparent);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid var(--color-border);
+}
+[data-theme="dark"] .glass-card {
+  background: color-mix(in srgb, var(--color-surface-raised) 70%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+}
+
+

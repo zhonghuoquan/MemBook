@@ -7,8 +7,9 @@
 import { useState, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
-import { TEMPLATES } from '../../types';
+import { findTemplateById } from '../../types';
 import type { AlbumPage, Photo } from '../../types';
+import { useTranslation } from 'react-i18next';
 
 interface TemplateSwitchDialogProps {
   open: boolean;
@@ -21,14 +22,15 @@ interface TemplateSwitchDialogProps {
 
 export function TemplateSwitchDialog({
   open,
-  currentPage,
+  currentPage: _currentPage,
   targetTemplateId,
   filledPhotos,
   onConfirm,
   onCancel,
 }: TemplateSwitchDialogProps) {
+  const { t } = useTranslation();
   const targetTemplate = useMemo(
-    () => TEMPLATES.find((t) => t.id === targetTemplateId),
+    () => findTemplateById(targetTemplateId),
     [targetTemplateId],
   );
 
@@ -69,16 +71,18 @@ export function TemplateSwitchDialog({
   if (!targetTemplate) return null;
 
   return (
-    <Modal open={open} onClose={onCancel} title="切换模板" maxWidth="480px">
+    <Modal open={open} onClose={onCancel} title={t('editor.templateSwitch.title')} maxWidth="480px"
+      footer={
+        <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border-light)]">
+          <Button variant="secondary" onClick={onCancel}>{t('editor.templateSwitch.cancel')}</Button>
+          <Button variant="primary" disabled={!canConfirm} onClick={() => onConfirm(Array.from(selected))}>{t('editor.templateSwitch.confirm')}</Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         {/* 说明 */}
         <div className="text-[var(--text-body-sm)] text-[var(--color-gray-600)] leading-relaxed">
-          新模板「<strong className="text-[var(--color-gray-800)]">{targetTemplate.name}</strong>」
-          只有 <strong className="text-[var(--color-brand)]">{M}</strong> 个照片位，
-          当前页面有 <strong className="text-[var(--color-gray-800)]">{N}</strong> 张照片。
-          <br />
-          请选择要保留的 <strong className="text-[var(--color-brand)]">{M}</strong> 张照片，
-          未选中的将回到照片列表。
+          {t('editor.templateSwitch.description', { name: targetTemplate.name, M: M, N: N })}
         </div>
 
         {/* 照片列表 */}
@@ -156,24 +160,11 @@ export function TemplateSwitchDialog({
         {/* 提示 */}
         {selected.size < M && (
           <p className="text-[var(--text-caption)] text-[var(--color-warning)]">
-            还需选择 {M - selected.size} 张照片
+            {t('editor.templateSwitch.needMore', { count: M - selected.size })}
           </p>
         )}
 
-        {/* Actions */}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onCancel}>
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!canConfirm}
-            onClick={() => onConfirm(Array.from(selected))}
-          >
-            确认切换
-          </Button>
         </div>
-      </div>
     </Modal>
   );
 }

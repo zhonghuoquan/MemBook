@@ -1,0 +1,38 @@
+{
+  "extends": ["@commitlint/config-conventional"],
+  "rules": {
+    "type-enum": [
+      2,
+      "always",
+      ["feat", "fix", "refactor", "perf", "test", "docs", "style", "chore", "ci", "build", "revert"]
+    ],
+    "scope-enum": [
+      2,
+      "always",
+      [
+        "editor",
+        "home",
+        "engine",
+        "storage",
+        "store",
+        "license",
+        "tauri",
+        "utils",
+        "db",
+        "i18n",
+        "ci",
+        "deps",
+        "components",
+        "hooks",
+        "services",
+        "photo-tools",
+        "canvas",
+        "export",
+        "print",
+        "updater",
+        "sentry"
+      ]
+    ],
+    "subject-case": [0]
+  }
+}

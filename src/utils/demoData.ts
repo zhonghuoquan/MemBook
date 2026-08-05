@@ -10,6 +10,7 @@ import { TEMPLATES, PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../types';
  * 不需要真实图片文件，程序化生成
  */
 function placeholderPhoto(index: number, label: string, hue: number): string {
+  const W = 1200, H = 900;
   const sat = 45 + (index * 8) % 30;
   const lig = 55 + (index * 5) % 25;
   const bg = `hsl(${hue}, ${sat}%, ${lig}%)`;
@@ -18,11 +19,11 @@ function placeholderPhoto(index: number, label: string, hue: number): string {
   return (
     `data:image/svg+xml,` +
     encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
-        <rect width="400" height="300" fill="${bg}"/>
-        <rect x="20" y="20" width="360" height="260" rx="8" fill="rgba(255,255,255,0.1)"/>
-        <text x="200" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="64" font-weight="bold" fill="${textColor}" opacity="0.8">${label}</text>
-        <text x="200" y="180" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="${textColor}" opacity="0.5">${400}×${300}</text>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+        <rect width="${W}" height="${H}" fill="${bg}"/>
+        <rect x="40" y="40" width="${W - 80}" height="${H - 80}" rx="16" fill="rgba(255,255,255,0.1)"/>
+        <text x="${W / 2}" y="${H * 0.44}" text-anchor="middle" font-family="Arial, sans-serif" font-size="140" font-weight="bold" fill="${textColor}" opacity="0.8">${label}</text>
+        <text x="${W / 2}" y="${H * 0.6}" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" fill="${textColor}" opacity="0.5">${W}×${H}</text>
       </svg>`
     )
   );
@@ -38,8 +39,8 @@ export function getDemoPhotos(): Photo[] {
     src: placeholderPhoto(i, label, hues[i]),
     name: `${label}.jpg`,
     date: new Date(2026, 4 + i, 10 + i).toISOString().split('T')[0],
-    width: 400,
-    height: 300,
+    width: 1200,
+    height: 900,
     orientation: 'landscape' as const,
   }));
 }

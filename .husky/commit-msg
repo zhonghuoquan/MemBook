@@ -1,0 +1,4 @@
+# MemBook commit-msg hook
+# 强制 Conventional Commits 规范：type(scope): subject
+
+npx --no -- commitlint --edit "$1"

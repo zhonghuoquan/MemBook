@@ -1,20 +1,24 @@
 import { TEMPLATES } from '../../types';
 import { useEditorStore, useUIStore } from '../../store';
 import { templatePreview } from '../../utils/templatePreview';
+import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
+import { useTranslation } from 'react-i18next';
 
 export function MarketPanel() {
+  const { t } = useTranslation();
   const pages = useEditorStore((s) => s.pages);
   const setPageTemplate = useEditorStore((s) => s.setPageTemplate);
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const addToast = useUIStore((s) => s.addToast);
+  const sb = useScrollbarVisibility<HTMLDivElement>();
 
   const handleApply = (templateId: string) => {
     if (pages.length === 0) {
-      addToast({ type: 'info', message: '请先创建相册页面' });
+      addToast({ type: 'info', message: t('editor.marketPanel.noPage') });
       return;
     }
     setPageTemplate(currentPageIndex, templateId);
-    addToast({ type: 'success', message: '模板已应用' });
+    addToast({ type: 'success', message: t('editor.marketPanel.applied') });
   };
 
   return (
@@ -23,21 +27,21 @@ export function MarketPanel() {
       {/* Header */}
       <div className="px-4 py-3 border-b border-[var(--color-border-light)]">
         <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">
-          模板中心
+          {t('editor.marketPanel.title')}
         </span>
       </div>
 
       {/* Categories */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+      <div ref={sb.ref} className={`flex-1 overflow-y-auto ps-scroll pl-4 pr-1 py-4 space-y-6 ${sb.className}`} {...sb.handlers}>
         <TemplateCategory
-          title="经典布局"
-          description="规整有序的经典照片排列"
+          title={t('editor.marketPanel.classicTitle')}
+          description={t('editor.marketPanel.classicDesc')}
           category="classic"
           onApply={handleApply}
         />
         <TemplateCategory
-          title="创意布局"
-          description="打破常规的创意照片排布"
+          title={t('editor.marketPanel.creativeTitle')}
+          description={t('editor.marketPanel.creativeDesc')}
           category="creative"
           onApply={handleApply}
         />
@@ -57,7 +61,8 @@ function TemplateCategory({
   category: string;
   onApply: (templateId: string) => void;
 }) {
-  const templates = TEMPLATES.filter((t) => t.category === category);
+  const { t } = useTranslation();
+  const templates = TEMPLATES.filter((tmpl) => tmpl.category === category);
 
   return (
     <div>
@@ -86,7 +91,7 @@ function TemplateCategory({
             <div className="px-3 py-2 border-t border-[var(--color-border-light)]">
               <div className="text-[var(--text-caption)] font-[500] text-[var(--color-gray-700)]">{tmpl.name}</div>
               <div className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">
-                {tmpl.slots.length} 个照片位
+                {t('editor.marketPanel.slotsCount', { count: tmpl.slots.length })}
               </div>
             </div>
           </div>

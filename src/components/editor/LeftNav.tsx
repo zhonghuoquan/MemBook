@@ -1,16 +1,17 @@
 import type { PanelTab } from '../../types';
 import { useUIStore } from '../../store';
+import { useTranslation } from 'react-i18next';
 
 type NavItemDef = {
   tab: PanelTab;
-  label: string;
+  labelKey: string;
   icon: React.ReactNode;
 };
 
 const items: NavItemDef[] = [
   {
     tab: 'photos',
-    label: '照片',
+    labelKey: 'editor.leftNav.photos',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
         <rect x="2" y="2" width="16" height="16" rx="2" />
@@ -21,7 +22,7 @@ const items: NavItemDef[] = [
   },
   {
     tab: 'templates',
-    label: '模板',
+    labelKey: 'editor.leftNav.templates',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
         <rect x="3" y="3" width="14" height="14" rx="2" />
@@ -33,7 +34,7 @@ const items: NavItemDef[] = [
   },
   {
     tab: 'tools',
-    label: '工具',
+    labelKey: 'editor.leftNav.tools',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-5 h-5">
         <circle cx="10" cy="10" r="3" />
@@ -44,6 +45,7 @@ const items: NavItemDef[] = [
 ];
 
 export function LeftNav() {
+  const { t } = useTranslation();
   const activePanel = useUIStore((s) => s.activePanel);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
 
@@ -69,7 +71,7 @@ export function LeftNav() {
           onClick={() => setActivePanel(item.tab)}
         >
           {item.icon}
-          <span className="mt-1">{item.label}</span>
+          <span className="mt-1">{t(item.labelKey)}</span>
         </button>
       ))}
 
@@ -84,7 +86,7 @@ export function LeftNav() {
           <circle cx="10" cy="10" r="2.5" />
           <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.93 4.93l1.41 1.41M13.66 13.66l1.41 1.41M4.93 15.07l1.41-1.41M13.66 6.34l1.41-1.41" />
         </svg>
-        <span className="mt-1 text-[var(--text-nano)]">设置</span>
+        <span className="mt-1 text-[var(--text-nano)]">{t('editor.leftNav.settings')}</span>
       </button>
     </nav>
   );

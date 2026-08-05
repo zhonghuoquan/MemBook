@@ -1,0 +1,44 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认权限：文件对话框 + 基本文件系统",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-effects",
+    "core:window:allow-start-dragging",
+    "core:webview:default",
+    "core:app:default",
+    "core:event:default",
+    "core:path:default",
+    "dialog:default",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    {
+      "identifier": "fs:scope",
+      "allow": ["**"]
+    },
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [{ "url": "https://api.bigdatacloud.net/**" }, { "url": "https://nominatim.openstreetmap.org/**" }]
+    },
+    "shell:default",
+    "shell:allow-open",
+    "updater:default",
+    "process:default"
+  ]
+}

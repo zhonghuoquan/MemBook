@@ -1,14 +1,17 @@
 import { useEffect, type ReactNode } from 'react';
+import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 
 interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: string;
+  footer?: ReactNode;
   children: ReactNode;
   maxWidth?: string;
 }
 
-export function Modal({ open, onClose, title, children, maxWidth = '640px' }: ModalProps) {
+export function Modal({ open, onClose, title, footer, children, maxWidth = '640px' }: ModalProps) {
+  const sb = useScrollbarVisibility<HTMLDivElement>();
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -17,6 +20,14 @@ export function Modal({ open, onClose, title, children, maxWidth = '640px' }: Mo
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [open, onClose]);
+
+  // 弹窗打开时锁定 body 滚动
+  useEffect(() => {
+    if (!open) { document.body.style.overflow = ''; return; }
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
 
   if (!open) return null;
 
@@ -28,16 +39,33 @@ export function Modal({ open, onClose, title, children, maxWidth = '640px' }: Mo
       <div className="absolute inset-0 bg-[var(--color-surface-overlay)]" />
       {/* Dialog */}
       <div
-        className="relative bg-white rounded-[var(--radius-2xl)] shadow-[var(--shadow-md)] p-8 w-[90vw] animate-[modalFadeIn_0.2s_ease-out]"
+        className="relative bg-[var(--color-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-md)] w-[90vw] max-h-[90vh] grid grid-rows-[auto_1fr_auto] overflow-hidden animate-[modalFadeIn_0.2s_ease-out]"
         style={{ maxWidth }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* 关闭按钮 */}
+        <button onClick={onClose}
+          className="absolute top-4 right-4 inline-flex items-center justify-center w-8 h-8 rounded-full text-[var(--color-gray-400)] hover:text-[var(--color-gray-600)] hover:bg-[var(--color-gray-100)] cursor-pointer transition-all duration-150 border-none bg-transparent z-10">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
         {title && (
-          <h2 className="text-[var(--text-h2)] font-[600] text-[var(--color-text-primary)] mb-3">
+          <h2 className="text-[var(--text-h2)] font-[600] text-[var(--color-text-primary)] mb-3 px-8 pt-8">
             {title}
           </h2>
         )}
-        {children}
+        {/* 内容区：贴边滚动条 —— 滚动条容器紧贴 Dialog 右边缘（webkit 始终占 6px 透明轨道）。
+            几何：内容右沿距 Dialog 边缘 32px，其中 6px 滚动条 + 26px 真实 padding。
+            内层 content 用 pl-8(32px) + pr-[26px]，footer 同样 32px/26px。 */}
+        <div ref={sb.ref} className={`overflow-y-auto min-h-0 ps-scroll ${sb.className}`} {...sb.handlers}>
+          <div className="pl-8 pr-[26px] pb-2">
+            {children}
+          </div>
+        </div>
+        {footer && (
+          <div className="pl-8 pr-[26px] pb-6">{footer}</div>
+        )}
       </div>
     </div>
   );

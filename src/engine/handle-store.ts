@@ -6,6 +6,8 @@
  * - 照片 Blob 也存入 IndexedDB 供 import 模式使用。
  */
 
+import type { FSADirectoryHandle } from './storage/fsa-types';
+
 const DB_NAME = 'MemBookStorage';
 const DB_VERSION = 1;
 
@@ -35,7 +37,7 @@ function openDB(): Promise<IDBDatabase> {
 /* ── Directory Handle ── */
 
 /** 保存目录句柄 (用 IndexedDB 持久化) */
-export async function setDirectHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+export async function setDirectHandle(handle: FSADirectoryHandle): Promise<void> {
   const d = await openDB();
   const tx = d.transaction('handles', 'readwrite');
   return new Promise((resolve, reject) => {
@@ -50,7 +52,7 @@ export async function setDirectHandle(handle: FileSystemDirectoryHandle): Promis
 }
 
 /** 读取已保存的目录句柄 */
-export async function getDirectHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function getDirectHandle(): Promise<FSADirectoryHandle | null> {
   try {
     const d = await openDB();
     const tx = d.transaction('handles', 'readonly');
@@ -68,12 +70,23 @@ export async function getDirectHandle(): Promise<FileSystemDirectoryHandle | nul
 
 /** 保存照片 Blob 到 IndexedDB */
 export async function savePhotoBlob(id: string, blob: Blob): Promise<void> {
+  await savePhotoBlobs([{ id, blob }]);
+}
+
+/** 批量保存照片 Blob 到 IndexedDB（同一事务，性能更好） */
+export async function savePhotoBlobs(items: { id: string; blob: Blob }[]): Promise<void> {
+  if (items.length === 0) return;
   const d = await openDB();
   const tx = d.transaction('blobs', 'readwrite');
   return new Promise((resolve, reject) => {
-    const req = tx.objectStore('blobs').put({ id, blob, createdAt: Date.now() });
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
+    const now = Date.now();
+    for (const { id, blob } of items) {
+      tx.objectStore('blobs').put({ id, blob, createdAt: now });
+    }
+    // 必须在事务提交后才 resolve，否则后续读取可能看不到数据
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
   });
 }
 
