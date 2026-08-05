@@ -2,10 +2,22 @@
 
 > 一款运行在桌面的电子相册制作工具，所有数据保存在你的设备上，不上传服务器。支持自定义尺寸、一键成册、模板套用、滤镜调色、HEIC 解码、PDF 导出、直连打印等完整工作流。
 
+[![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
+
 - **版本**：1.0.0
 - **标识符**：`app.membook.desktop`
 - **技术栈**：Tauri 2 + React 19 + TypeScript + Konva 10 + Zustand 5 + Tailwind 4 + Dexie 4 (IndexedDB) + Rust
 - **平台**：Windows（主要）/ macOS 10.15+ / Linux
+
+---
+
+## 产品主页
+
+- 产品官网与下载：<https://zhonghuoquan.github.io/membook-home/>
+- 桌面安装包：`download/MemBook_1.0.0_x64-setup.exe`（约 13MB，NSIS）
 
 ---
 
@@ -124,7 +136,7 @@ MemBookDB (IndexedDB)
 ├── photos            # 照片元数据
 ├── customTemplates   # 自定义模板
 ├── photoBlobs        # 照片二进制（preview/original/thumb）
-└── thumbnails        # 页面缩略图缓存（P2-1，跨会话持久化）
+└── thumbnails        # 页面缩略图缓存（跨会话持久化）
 ```
 
 ---
@@ -132,11 +144,12 @@ MemBookDB (IndexedDB)
 ## 三、项目文件树
 
 ```
-membook-backup/
+membook/
 ├── .cargo/                    # Cargo 配置（限制并行编译任务数降低内存峰值）
 │   └── config.toml
 ├── .github/workflows/
 │   └── ci.yml                 # GitHub Actions: lint + typecheck + test + build
+├── .husky/                    # Git 钩子（commit-msg 规范 + pre-commit lint）
 ├── .tauri/                    # Tauri 签名密钥（私钥不提交，仅提交公钥）
 │   └── membook-updater.key.pub
 ├── public/                    # 静态资源
@@ -160,7 +173,7 @@ membook-backup/
 │   ├── build.rs
 │   └── tauri.conf.json        # Tauri 配置（窗口/CSP/bundle/updater）
 ├── src/                       # 前端源码
-│   ├── components/            # UI 组件（81 个文件）
+│   ├── components/            # UI 组件
 │   │   ├── common/            # 通用组件（Modal/Toast/Button/ErrorBoundary/UpdateDialog）
 │   │   ├── editor/            # 编辑器组件（Canvas/GridView/PhotoPanel/ExportDialog）
 │   │   │   ├── canvas/        # Konva 画布相关（渲染/拖拽/缩放/快捷键）
@@ -190,7 +203,7 @@ membook-backup/
 │   │   └── editorStore/       # 编辑器 slice 拆分
 │   ├── styles/                # 全局样式 + 设计 tokens
 │   ├── types/                 # TypeScript 类型定义
-│   ├── utils/                 # 工具层（24 个文件）
+│   ├── utils/                 # 工具层
 │   │   ├── lruCache           # LRU 缓存
 │   │   ├── imageBitmapLoader  # ImageBitmap 加载（显式 close 释放内存）
 │   │   ├── gridThumbnailRenderer # 网格缩略图渲染
@@ -204,6 +217,7 @@ membook-backup/
 │   ├── App.tsx                # 根组件（页面切换/许可证/更新检查）
 │   ├── main.tsx               # 入口（Sentry 初始化 + React 渲染）
 │   └── version.ts             # 版本号与构建信息
+├── tools/                     # 独立工具（许可证生成器等，私有工具不提交）
 ├── .gitignore
 ├── eslint.config.js           # ESLint Flat Config
 ├── index.html                 # HTML 入口
@@ -212,7 +226,9 @@ membook-backup/
 ├── tsconfig.json              # TS 项目引用
 ├── tsconfig.app.json          # 前端 TS 配置
 ├── vite.config.ts             # Vite 配置（混淆/资源校验/分块/预构建）
-└── vitest.config.ts           # Vitest 配置（jsdom + fake-indexeddb）
+├── vitest.config.ts           # Vitest 配置（jsdom + fake-indexeddb）
+├── 开发日志.md                # 开发迭代记录
+└── Readme.md
 ```
 
 ---
@@ -257,30 +273,32 @@ npm run desktop:build:debug # 调试版桌面端
 .\setup-tauri.ps1
 ```
 
+> 注意：项目启用了 husky 的 pre-commit（ESLint）+ commit-msg（commitlint）钩子。
+> 提交时若被 lint 拦截，可先修复代码，或用 `git commit --no-verify` 临时跳过。
+
 ### 构建产物
 
-- **前端**：`dist/`（Vite 构建，主 chunk ~1MB / gzip ~290KB）
-- **桌面安装包**（仅 NSIS，跳过 WiX/MSI 减少依赖）：
+- **前端**：`dist/`（Vite 构建）
+- **桌面安装包**（NSIS，跳过 WiX/MSI 减少依赖）：
   - `src-tauri/target/release/bundle/nsis/MemBook_1.0.0_x64-setup.exe`（约 13MB）
 - **签名**：`.sig` 文件用于自动更新校验
 
 ### 测试
 
 - **框架**：Vitest 4 + jsdom + fake-indexeddb
-- **覆盖**：6 个测试文件，84 个用例（引擎层 + Store + DB）
-- **配置**：[vitest.config.ts](file:///f:/N-编程/MenBook开发项目/MemBook/vitest.config.ts)
+- **覆盖**：引擎层 + Store + DB 的单元测试（配置见 [`vitest.config.ts`](vitest.config.ts)）
 
 ### CI
 
-- **平台**：GitHub Actions（[.github/workflows/ci.yml](file:///f:/N-编程/MenBook开发项目/MemBook/.github/workflows/ci.yml)）
+- **平台**：GitHub Actions（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）
 - **流程**：Lint → TypeCheck → Test → Build
-- **触发**：push/PR 到 main/master
+- **触发**：push / PR 到 `main`
 
 ---
 
 ## 五、性能优化要点
 
-针对 300+ 照片 / 100+ 页场景的优化（详见 [开发日志.md](file:///f:/N-编程/MenBook开发项目/MemBook/开发日志.md)）：
+针对 300+ 照片 / 100+ 页场景的优化（详见 [`开发日志.md`](开发日志.md)）：
 
 | 优化项           | 说明                                                            |
 | ---------------- | --------------------------------------------------------------- |
@@ -305,7 +323,23 @@ npm run desktop:build:debug # 调试版桌面端
 - Tauri 自动更新需 CSP 允许 `updates.membook.app` 和 GitHub 域名
 - CSP `connect-src` 必须包含 `blob:`，否则 `fetch(blob:url)` 加载 ImageBitmap 会被拦截导致页面崩溃
 - `tauri.conf.json` 的 bundle targets 必须为 `["nsis"]`，跳过 WiX/MSI 减少依赖
-- 进行一轮需求优化修复调整后，自己完成exe安装包构建，如构建过程中出现报错，需要优化解决。
 - Sentry 仅生产环境初始化，敏感 URL 需脱敏
 - 导入 >100 张照片时，存储模式对话框必须在文件选择后立即弹出
 - 照片导入进度需显示三阶段：读取文件 / 导入 / 加载缩略图
+
+---
+
+## 七、贡献指南
+
+1. Fork 本仓库并创建功能分支：`git checkout -b feat/your-feature`
+2. 提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范（项目已配置 commitlint）
+3. 提交前运行 `npm run lint` 与 `npm run typecheck` 确保通过
+4. 推送分支并提交 Pull Request
+
+---
+
+## 八、许可证与版权
+
+© 2026 MemBook. **保留所有权利。**
+
+本项目为闭源商业软件，未经许可不得复制、分发、修改或用于商业用途。激活码授权由内置 RSA 离线授权系统管理。
