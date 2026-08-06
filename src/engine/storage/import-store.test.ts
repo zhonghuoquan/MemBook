@@ -13,7 +13,7 @@
  * - readPhotoFromDB 复活延迟回收队列中的 URL
  * - invalidateBlobUrlCache 强制回收
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 受控的 blob 存储模拟
 const mockBlobs = new Map<string, Blob>();
@@ -48,6 +48,8 @@ function putMockBlob(blobId: string): void {
 
 describe('P2-4 blobUrlCache 引用计数', () => {
   beforeEach(() => {
+    // 启用假定时器：releasePhotoUrl 延迟 10s 回收，需 advanceTimersByTime 触发
+    vi.useFakeTimers();
     // 先清空 import-store 内部状态（会调用 revokeObjectURL）
     revokeAllBlobUrls();
     // 再清空测试用的记录集合，避免被上面 revoke 污染
@@ -55,6 +57,10 @@ describe('P2-4 blobUrlCache 引用计数', () => {
     createdUrls.clear();
     revokedUrls.clear();
     urlCounter = 0;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('acquirePhotoUrl：首次 acquire 从 IDB 加载并创建 URL', async () => {
@@ -78,12 +84,15 @@ describe('P2-4 blobUrlCache 引用计数', () => {
     expect(url).toBeNull();
   });
 
-  it('releasePhotoUrl：refCount 降为 0 时立即回收', async () => {
+  it('releasePhotoUrl：refCount 降为 0 时延迟回收', async () => {
     putMockBlob('b1');
     const url = await acquirePhotoUrl('b1');
     expect(url).not.toBeNull();
     expect(revokedUrls.size).toBe(0);
     releasePhotoUrl('b1');
+    // 延迟回收：10s 宽限期内不应回收
+    expect(revokedUrls.size).toBe(0);
+    vi.advanceTimersByTime(10_000);
     expect(revokedUrls.size).toBe(1);
   });
 
@@ -94,7 +103,8 @@ describe('P2-4 blobUrlCache 引用计数', () => {
     expect(u1).toBe(u2);
     releasePhotoUrl('b1'); // refCount=1，不应回收
     expect(revokedUrls.size).toBe(0);
-    releasePhotoUrl('b1'); // refCount=0，应回收
+    releasePhotoUrl('b1'); // refCount=0，延迟回收
+    vi.advanceTimersByTime(10_000);
     expect(revokedUrls.size).toBe(1);
   });
 
@@ -106,7 +116,8 @@ describe('P2-4 blobUrlCache 引用计数', () => {
   it('releasePhotoUrl：多次 release 不会使 refCount 变负', async () => {
     putMockBlob('b1');
     await acquirePhotoUrl('b1'); // refCount=1
-    releasePhotoUrl('b1'); // refCount=0，回收
+    releasePhotoUrl('b1'); // refCount=0，延迟回收
+    vi.advanceTimersByTime(10_000);
     expect(revokedUrls.size).toBe(1);
     // 再次 release 不应抛错或重复回收
     expect(() => releasePhotoUrl('b1')).not.toThrow();
@@ -166,7 +177,8 @@ describe('P2-4 blobUrlCache 引用计数', () => {
     await acquirePhotoUrl('b1');
     releasePhotoUrl('b1'); // refCount=1，不应回收
     expect(revokedUrls.size).toBe(0);
-    releasePhotoUrl('b1'); // refCount=0，回收
+    releasePhotoUrl('b1'); // refCount=0，延迟回收
+    vi.advanceTimersByTime(10_000);
     expect(revokedUrls.size).toBe(1);
   });
 
@@ -176,7 +188,8 @@ describe('P2-4 blobUrlCache 引用计数', () => {
     const u2 = await acquirePhotoUrl('b1'); // refCount=1
     expect(u1).toBe(u2);
     expect(createdUrls.size).toBe(1);
-    releasePhotoUrl('b1'); // refCount=0，回收
+    releasePhotoUrl('b1'); // refCount=0，延迟回收
+    vi.advanceTimersByTime(10_000);
     expect(revokedUrls.size).toBe(1);
   });
 });

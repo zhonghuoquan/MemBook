@@ -72,9 +72,13 @@ export function updateStickerDrag(clientX: number, clientY: number) {
   notify();
 }
 
-/** 结束拖拽，返回贴纸拖拽数据（active 期间才有值） */
-export function endStickerDrag(): StickerDragState | null {
+/** 结束拖拽，返回贴纸拖拽数据（active 期间才有值）
+ *  可传入 mouseup 的最终坐标，确保 Canvas drop 检测使用真实释放位置
+ *  （而非最后一次 mousemove 的位置，避免快速拖拽到面板释放时坐标滞后） */
+export function endStickerDrag(clientX?: number, clientY?: number): StickerDragState | null {
   if (!stickerDragState.active) return null;
+  if (clientX !== undefined) stickerDragState.clientX = clientX;
+  if (clientY !== undefined) stickerDragState.clientY = clientY;
   const data = { ...stickerDragState };
   stickerDragState.active = false;
   notify();

@@ -18,6 +18,7 @@ import {
 } from '../../../engine/selection-engine';
 import type { SelectedElement } from '../../../store/editorStore/types';
 import { useEditorStore } from '../../../store';
+import { MM_TO_PX } from './constants';
 
 export interface UseMarqueeGroupSelectOptions {
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -89,13 +90,14 @@ export function useMarqueeGroupSelect({
       setMarquee(null);
       return true;
     }
-    // 收集所有可选槽位的 px 几何（模板槽位 + extraSlots），统一参与框选命中检测
-    const candidates: SlotRect[] = [];
+    // 收集所有可选元素的 px 几何（槽位 + 文字 + 便利贴 + 贴纸），统一参与框选命中检测
+    // 带类型标记，用于命中后还原 SelectedElement
+    const candidates: (SlotRect & { type: SelectedElement['type'] })[] = [];
     // 槽位（模板槽位 + extraSlots）
     for (const slot of template.slots) {
       const ov = currentPage.slotOverrides?.[slot.id];
       candidates.push({
-        id: slot.id,
+        id: slot.id, type: 'slot',
         x: ov ? ov.x : (slot.x / 100) * CANVAS_W,
         y: ov ? ov.y : (slot.y / 100) * CANVAS_H,
         width: ov ? ov.width : (slot.width / 100) * CANVAS_W,
@@ -106,7 +108,7 @@ export function useMarqueeGroupSelect({
       for (const slot of currentPage.extraSlots) {
         const ov = currentPage.slotOverrides?.[slot.id];
         candidates.push({
-          id: slot.id,
+          id: slot.id, type: 'slot',
           x: ov ? ov.x : (slot.x / 100) * CANVAS_W,
           y: ov ? ov.y : (slot.y / 100) * CANVAS_H,
           width: ov ? ov.width : (slot.width / 100) * CANVAS_W,
@@ -114,13 +116,50 @@ export function useMarqueeGroupSelect({
         });
       }
     }
+    // 文字元素（x/y 为左上角）
+    if (currentPage.textElements) {
+      for (const el of currentPage.textElements) {
+        candidates.push({
+          id: el.id, type: 'text',
+          x: el.x * MM_TO_PX, y: el.y * MM_TO_PX,
+          width: el.width * MM_TO_PX, height: el.height * MM_TO_PX,
+        });
+      }
+    }
+    // 便利贴（x/y 为左上角）
+    if (currentPage.stickyNotes) {
+      for (const note of currentPage.stickyNotes) {
+        candidates.push({
+          id: note.id, type: 'sticky',
+          x: note.x * MM_TO_PX, y: note.y * MM_TO_PX,
+          width: note.width * MM_TO_PX, height: note.height * MM_TO_PX,
+        });
+      }
+    }
+    // 贴纸（x/y 为中心点，需转换为左上角）
+    if (currentPage.stickerElements) {
+      for (const st of currentPage.stickerElements) {
+        candidates.push({
+          id: st.id, type: 'sticker',
+          x: (st.x - st.width / 2) * MM_TO_PX,
+          y: (st.y - st.height / 2) * MM_TO_PX,
+          width: st.width * MM_TO_PX,
+          height: st.height * MM_TO_PX,
+        });
+      }
+    }
     // 命中检测：完全包含在框选矩形内的元素
     const hits = candidates.filter((s) => hitTestMarquee(marquee, s));
     setMarquee(null);
     if (hits.length > 1) {
-      setMultiSelectedElements(hits.map((s) => ({ type: 'slot' as const, id: s.id })));
+      setMultiSelectedElements(hits.map((s) => ({ type: s.type, id: s.id })));
     } else if (hits.length === 1) {
-      useEditorStore.getState().setSelectedSlot(hits[0].id);
+      // 单个命中：按类型设置单选
+      const h = hits[0];
+      if (h.type === 'slot') useEditorStore.getState().setSelectedSlot(h.id);
+      else if (h.type === 'text') useEditorStore.getState().setSelectedTextId(h.id);
+      else if (h.type === 'sticky') useEditorStore.getState().setSelectedStickyId(h.id);
+      else if (h.type === 'sticker') useEditorStore.getState().setSelectedStickerId(h.id);
     }
     return true;
   }, [isMarqueeSelecting, marquee, template, currentPage, CANVAS_W, CANVAS_H, setMultiSelectedElements]);

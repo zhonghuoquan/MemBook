@@ -19,12 +19,14 @@ import { useStickerImage } from '../../../hooks/useStickerSrc';
 import type { StickerElement } from '../../../types';
 
 function StickerNodeImpl({
-  sticker, mmToPx, isSelected,
+  sticker, mmToPx, isSelected, showHandles = true,
   onUpdate, onRemove: _onRemove, onSelect,
 }: {
   sticker: StickerElement;
   mmToPx: number;
   isSelected: boolean;
+  /** 是否显示 resize/旋转等单独控制手柄。多选模式下应设为 false，由组包围盒统一控制 */
+  showHandles?: boolean;
   onUpdate: (patch: Partial<StickerElement>, recordHistory?: boolean) => void;
   onRemove: () => void;
   onSelect: (e: KonvaEventObject<MouseEvent>) => void;
@@ -327,8 +329,9 @@ function StickerNodeImpl({
         />
       )}
 
-      {/* 选中态：8 方向 resize 手柄（角点圆形 + 边点长方块，参考照片槽样式） */}
-      {isSelected && (
+      {/* 选中态：8 方向 resize 手柄（角点圆形 + 边点长方块，参考照片槽样式）
+          多选模式下隐藏，由组包围盒统一控制 */}
+      {isSelected && showHandles && (
         <>
           {/* 4 角（圆形） */}
           {cornerHandle(-pw / 2, -ph / 2, 'nw-resize')}
@@ -343,8 +346,9 @@ function StickerNodeImpl({
         </>
       )}
 
-      {/* 旋转手柄（参考照片编辑模式 RotationIcon：位于贴纸下方，白色圆底 + ↻ 图标，以中心点旋转，单击旋转 90°） */}
-      {isSelected && (
+      {/* 旋转手柄（参考照片编辑模式 RotationIcon：位于贴纸下方，白色圆底 + ↻ 图标，以中心点旋转，单击旋转 90°）
+          多选模式下隐藏 */}
+      {isSelected && showHandles && (
         <>
           <Line
             points={[0, ph / 2, 0, ph / 2 + ICON_OFFSET]}

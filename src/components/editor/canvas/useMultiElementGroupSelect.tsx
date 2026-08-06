@@ -87,10 +87,11 @@ function collectElementRects(
     } else if (m.type === 'sticker') {
       const st = currentPage.stickerElements?.find((s) => s.id === m.id);
       if (!st) continue;
+      // StickerElement.x/y 是中心点，需转换为左上角
       rects.push({
         id: m.id,
-        x: st.x * MM_TO_PX,
-        y: st.y * MM_TO_PX,
+        x: (st.x - st.width / 2) * MM_TO_PX,
+        y: (st.y - st.height / 2) * MM_TO_PX,
         width: st.width * MM_TO_PX,
         height: st.height * MM_TO_PX,
       });

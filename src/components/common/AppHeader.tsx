@@ -22,6 +22,7 @@ function isTauri() {
 
 export function useWindowMaximize() {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -34,9 +35,19 @@ export function useWindowMaximize() {
       if (!api) return;
       const win = api.getCurrentWindow();
       setIsMaximized(await win.isMaximized());
+      try {
+        setIsFullscreen(await win.isFullscreen());
+      } catch {
+        // isFullscreen 在某些平台可能不可用，忽略
+      }
 
       unlisten = await win.onResized(async () => {
         setIsMaximized(await win.isMaximized());
+        try {
+          setIsFullscreen(await win.isFullscreen());
+        } catch {
+          // 忽略
+        }
       });
       // 竞态处理：如果组件在 await 期间已卸载，立即注销
       if (disposed) {
@@ -69,7 +80,7 @@ export function useWindowMaximize() {
     }
   }, []);
 
-  return { isMaximized, toggleMaximize };
+  return { isMaximized, isFullscreen, toggleMaximize };
 }
 
 interface AppHeaderProps {
@@ -80,7 +91,7 @@ interface AppHeaderProps {
 
 export function AppHeader({ children, className = '', height = 'toolbar' }: AppHeaderProps) {
   const headerRef = useRef<HTMLElement>(null);
-  const { toggleMaximize } = useWindowMaximize();
+  const { isMaximized, isFullscreen, toggleMaximize } = useWindowMaximize();
 
   const heightClass = height === 'home'
     ? 'h-[var(--layout-home-header-height)]'
@@ -110,6 +121,12 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
     toggleMaximize();
   }, [toggleMaximize]);
 
+  // macOS: 最大化/全屏时交通灯按钮按系统逻辑隐藏，logo 和工具栏左对齐（移除让位 padding）
+  const trafficLightsHidden = isMaximized || isFullscreen;
+  const macPaddingStyle = isMacOS() && !trafficLightsHidden
+    ? { paddingLeft: `${MAC_TRAFFIC_LIGHTS_WIDTH}px` }
+    : undefined;
+
   return (
     <header
       ref={headerRef}
@@ -117,8 +134,8 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
       data-toolbar={height === 'toolbar' ? '' : undefined}
       onDoubleClick={handleDoubleClick}
       className={`${heightClass} bg-[image:var(--gradient-header)] flex items-center px-4 gap-1 shrink-0 z-[var(--z-toolbar)] select-none ${className}`}
-      // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）
-      style={isMacOS() ? { paddingLeft: `${MAC_TRAFFIC_LIGHTS_WIDTH}px` } : undefined}
+      // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）；最大化/全屏时移除
+      style={macPaddingStyle}
     >
       {children}
       <WindowControls />

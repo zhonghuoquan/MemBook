@@ -265,34 +265,50 @@ function StickerGridItem({
     if (!rect) return;
     const offsetX = e.clientX - rect.left;
     const offsetY = e.clientY - rect.top;
+    const startX = e.clientX;
+    const startY = e.clientY;
 
-    // 确保 dataURL 已缓存（拖拽预览需要即时取到）
-    const dataURL = getCachedStickerSrc(sticker.blobId) || await preloadStickerSrc(sticker.blobId) || '';
-    if (!dataURL) return;
+    // 拖拽阈值：移动超过 4px 才真正启动拖拽，避免纯点击时预览闪现
+    const DRAG_THRESHOLD = 4;
+    let dragStarted = false;
+    let dataURL = '';
 
-    startStickerDrag(
-      sticker.id,
-      sticker.blobId,
-      dataURL,
-      sticker.width,
-      sticker.height,
-      e.clientX,
-      e.clientY,
-      offsetX,
-      offsetY,
-    );
-    dragStartedRef.current = true;
-
-    const onMove = (me: MouseEvent) => {
-      if (!isStickerDragging()) return;
-      updateStickerDrag(me.clientX, me.clientY);
+    const onMove = async (me: MouseEvent) => {
+      if (dragStarted) {
+        // 拖拽已启动：更新位置
+        if (isStickerDragging()) {
+          updateStickerDrag(me.clientX, me.clientY);
+        }
+        return;
+      }
+      // 检查是否超过阈值
+      const dx = me.clientX - startX;
+      const dy = me.clientY - startY;
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      // 超过阈值：预加载 dataURL 并启动拖拽
+      dataURL = getCachedStickerSrc(sticker.blobId) || await preloadStickerSrc(sticker.blobId) || '';
+      if (!dataURL) return;
+      startStickerDrag(
+        sticker.id,
+        sticker.blobId,
+        dataURL,
+        sticker.width,
+        sticker.height,
+        me.clientX,
+        me.clientY,
+        offsetX,
+        offsetY,
+      );
+      dragStarted = true;
+      dragStartedRef.current = true;
     };
 
-    const onUp = (_me: MouseEvent) => {
+    const onUp = (me: MouseEvent) => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      if (dragStartedRef.current) {
-        endStickerDrag();
+      if (dragStarted) {
+        // 传入 mouseup 实际坐标，确保 Canvas drop 检测使用真实释放位置
+        endStickerDrag(me.clientX, me.clientY);
         dragStartedRef.current = false;
       }
     };

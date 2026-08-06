@@ -1539,12 +1539,15 @@ export function Canvas() {
       const stWithPreview: StickerElement = previewRect
         ? { ...st, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
         : st;
+      // 多选模式下隐藏单独控制手柄（resize/旋转），由组包围盒统一控制
+      const inMultiSelectMode = multiSelectedElements.length >= 2;
       items.push({
         z: st.zIndex || 0,
         typeOrder: 1,
         render: <StickerNode
           key={st.id} sticker={stWithPreview} mmToPx={MM_TO_PX}
           isSelected={selectedStickerId === st.id || isMultiSelected}
+          showHandles={!inMultiSelectMode}
           onUpdate={(p: Partial<StickerElement>, rh?: boolean) => updateStickerElement(currentPageIndex, st.id, p, rh)}
           onRemove={() => { removeStickerElement(currentPageIndex, st.id); setSelectedStickerId(null); }}
           onSelect={(e) => {
@@ -2631,7 +2634,11 @@ export function Canvas() {
             } else if (m.type === 'sticker') {
               const st = currentPage?.stickerElements?.find((s) => s.id === m.id);
               if (!st) continue;
-              x = st.x * MM_TO_PX; y = st.y * MM_TO_PX; w = st.width * MM_TO_PX; h = st.height * MM_TO_PX;
+              // StickerElement.x/y 是中心点，需转换为左上角
+              x = (st.x - st.width / 2) * MM_TO_PX;
+              y = (st.y - st.height / 2) * MM_TO_PX;
+              w = st.width * MM_TO_PX;
+              h = st.height * MM_TO_PX;
             }
             if (x < minX) minX = x;
             if (y < minY) minY = y;

@@ -894,9 +894,11 @@ fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
         let frame: NSRect = msg_send![ns_window, frame];
         let window_height = frame.size.height;
 
-        // 交通灯按钮左下角位置：x=20（默认左边距），y=windowHeight-31（中心在 24px from top）
+        // 交通灯按钮左下角位置：x=20（默认左边距），y=windowHeight-35（中心在 28px from top）
+        // 28px 与 Home 页 logo 中心对齐（56px header / 36px 容器居中 → 中心 28px）
+        // 按钮高度约 14px（半径 7px），中心 28px → 底边 35px → y = windowHeight - 35
         // 用结构体字面量构造 NSPoint（避免 new 方法版本兼容问题）
-        let point = NSPoint { x: 20.0, y: window_height - 31.0 };
+        let point = NSPoint { x: 20.0, y: window_height - 35.0 };
         let _: () = msg_send![ns_window, setTrafficLightPosition: point];
     }
 }
