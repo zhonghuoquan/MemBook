@@ -106,7 +106,7 @@ export function shouldCompress(file: File): boolean {
   return file.type !== 'image/jpeg' || file.size > SKIP_COMPRESS_MAX_SIZE;
 }
 
-/** 主线程压缩（fallback） */
+/** 主线程压缩（fallback）：自动检测透明度，含 alpha 的图片输出 PNG 保留透明底 */
 export function compressImage(file: File, maxWidth = MAX_IMPORT_WIDTH, quality = 0.92): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -122,10 +122,18 @@ export function compressImage(file: File, maxWidth = MAX_IMPORT_WIDTH, quality =
       canvas.height = h;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0, w, h);
+      // 透明度检测：采样 alpha 通道，有透明像素则输出 PNG
+      let hasAlpha = false;
+      try {
+        const sample = ctx.getImageData(0, 0, Math.min(w, 64), Math.min(h, 64)).data;
+        for (let i = 3; i < sample.length; i += 4) {
+          if (sample[i] < 250) { hasAlpha = true; break; }
+        }
+      } catch { /* getImageData 被禁用时保守用 JPEG */ }
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
         else reject(new Error('压缩失败'));
-      }, 'image/jpeg', quality);
+      }, hasAlpha ? 'image/png' : 'image/jpeg', hasAlpha ? undefined : quality);
     };
     img.onerror = reject;
     img.src = URL.createObjectURL(file);

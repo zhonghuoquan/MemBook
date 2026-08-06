@@ -208,7 +208,9 @@ export function PrintDialog({ isOpen, onClose }: Props) {
       onClose();
     } catch (error) {
       logger.error('打印失败:', error);
-      addToast({ type: 'error', message: t('editor.print.printFailedConnection') });
+      // 显示实际错误信息，而非通用的"无法连接打印机"，便于用户排查（如 sm.exe 缺失、打印机离线等）
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      addToast({ type: 'error', message: t('editor.print.printFailed', { message: errorMsg }) });
     } finally {
       setIsPrinting(false);
     }

@@ -873,8 +873,8 @@ mod commands {
 #[cfg(target_os = "macos")]
 fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
     use cocoa::foundation::{NSPoint, NSRect};
-    use objc::msg_send;
-    use objc::sel_impl;
+    // msg_send! 宏内部展开会调用 sel!，必须同时导入 msg_send / sel / sel_impl
+    use objc::{msg_send, sel, sel_impl};
 
     let ns_window_ptr = match window.ns_window() {
         Ok(ptr) => ptr,

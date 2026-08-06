@@ -114,7 +114,15 @@ async function generateThumbnail(photo: Photo, maxSize = THUMB_MAX_SIZE): Promis
       if (!ctx) { resolve(null); return; }
       ctx.drawImage(img, 0, 0, w, h);
       try {
-        resolve(canvas.toDataURL('image/jpeg', 0.72));
+        // 透明度检测：含 alpha 的 PNG 用 PNG 格式保留透明底，否则用 JPEG（体积更小）
+        let hasAlpha = false;
+        try {
+          const sample = ctx.getImageData(0, 0, Math.min(w, 32), Math.min(h, 32)).data;
+          for (let i = 3; i < sample.length; i += 4) {
+            if (sample[i] < 250) { hasAlpha = true; break; }
+          }
+        } catch { /* getImageData 不可用时保守用 JPEG */ }
+        resolve(hasAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.72));
       } catch {
         // canvas 被污染（跨域）时 toDataURL 抛异常，返回 null 让占位色块兜底
         resolve(null);

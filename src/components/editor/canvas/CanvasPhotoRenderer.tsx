@@ -137,7 +137,10 @@ async function loadCachedImage(src: string): Promise<CachedImage> {
           if (filePath) {
             const { readFile } = await import('@tauri-apps/plugin-fs');
             const bytes = await readFile(filePath);
-            blob = new Blob([bytes], { type: 'image/jpeg' });
+            // 按文件扩展名推断 MIME，避免 PNG 被标记为 image/jpeg
+            const ext = filePath.toLowerCase().split('.').pop() || '';
+            const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp' };
+            blob = new Blob([bytes], { type: mimeMap[ext] || 'image/jpeg' });
             tempBlobUrl = URL.createObjectURL(blob);
           } else {
             blob = await fetch(src).then((r) => r.blob());
