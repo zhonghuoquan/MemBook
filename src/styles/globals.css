@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @import "./design-tokens.css" layer(base);
 
+/* ── 拖拽期间禁用所有文本/元素选中（防止工作区紫色高亮） ──
+   drag-manager 在 startDrag 时给 <html> 加 .is-dragging 类，
+   endDrag 时移除。用 !important 覆盖所有元素的 user-select。 */
+html.is-dragging,
+html.is-dragging * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+html.is-dragging *::selection {
+  background: transparent !important;
+}
+
 /* ── Custom Keyframe Animations ── */
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(12px) scale(0.95); }

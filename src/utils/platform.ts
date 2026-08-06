@@ -28,6 +28,6 @@ export function isWindows(): boolean {
 /**
  * macOS 交通灯按钮宽度（左红黄绿三个按钮 + 右侧间距）
  * 用于标题栏左侧 padding 让位，避免按钮遮挡内容。
- * 标准值：3 个按钮 × 14px + 间距 ≈ 78px（含左右 padding）
+ * 3 个按钮（每个 12px）+ 间距 + 左边距 20px ≈ 68px，padding 设 72px 留 4px 间距
  */
-export const MAC_TRAFFIC_LIGHTS_WIDTH = 78;
+export const MAC_TRAFFIC_LIGHTS_WIDTH = 72;

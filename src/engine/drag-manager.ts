@@ -40,8 +40,10 @@ export function startDrag(photoIds: string[], clientX: number, clientY: number, 
   dragState.offsetX = offsetX;
   dragState.offsetY = offsetY;
   dragState.active = true;
-  // 拖拽期间禁用文本选中，防止鼠标划过工作区时高亮选中文字/元素
-  document.body.style.userSelect = 'none';
+  // 拖拽期间禁用文本选中：给 <html> 加 .is-dragging 类
+  // globals.css 中 html.is-dragging * { user-select: none !important } 覆盖所有子元素
+  // 之前的 document.body.style.userSelect 不继承到子元素，macOS 仍出现紫色高亮
+  document.documentElement.classList.add('is-dragging');
   notify();
 }
 
@@ -56,7 +58,7 @@ export function endDrag(): string[] {
   const ids = [...dragState.photoIds];
   dragState.active = false;
   // 恢复文本选中
-  document.body.style.userSelect = '';
+  document.documentElement.classList.remove('is-dragging');
   notify();
   dragState.photoIds = [];
   return ids;

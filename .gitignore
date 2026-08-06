@@ -38,6 +38,7 @@ test-*.bat
 # ===== 大型本地文件 =====
 vs_BuildTools.exe
 *.exe
+!src-tauri/resources/sm.exe
 exe-icon-extracted.png
 
 # ===== 密钥 =====

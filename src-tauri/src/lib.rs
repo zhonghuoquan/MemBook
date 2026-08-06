@@ -863,6 +863,36 @@ mod commands {
     }
 }
 
+/// macOS: 调整交通灯按钮（红黄绿）位置，让按钮中心对齐 AppHeader 内容中心。
+///
+/// AppHeader 高度 48px（--layout-toolbar-height），内容 items-center 垂直居中在 24px from top。
+/// macOS 标准标题栏 28px，交通灯默认中心在 14px from top，与 logo 中心差 10px。
+///
+/// setTrafficLightPosition 的坐标系：原点在窗口左下角，y 轴向上。
+/// 按钮高约 14px，要中心在 24px from top → 按钮左下角 y = windowHeight - 24 - 7 = windowHeight - 31
+#[cfg(target_os = "macos")]
+fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
+    use cocoa::foundation::{NSPoint, NSRect};
+    use objc::msg_send;
+    use objc::sel_impl;
+
+    let ns_window_ptr = match window.ns_window() {
+        Ok(ptr) => ptr,
+        Err(_) => return,
+    };
+    let ns_window = ns_window_ptr as *mut objc::runtime::Object;
+
+    unsafe {
+        // 获取窗口 frame 以计算高度
+        let frame: NSRect = msg_send![ns_window, frame];
+        let window_height = frame.size.height;
+
+        // 交通灯按钮左下角位置：x=20（默认左边距），y=windowHeight-31（中心在 24px from top）
+        let point = NSPoint::new(20.0, window_height - 31.0);
+        let _: () = msg_send![ns_window, setTrafficLightPosition: point];
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -940,6 +970,27 @@ pub fn run() {
                     if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
                         let _ = window.set_icon(icon);
                     }
+                }
+            }
+            #[cfg(target_os = "macos")]
+            {
+                // macOS: 隐藏窗口标题文字 + 调整交通灯按钮位置对齐 logo
+                if let Some(window) = app.get_webview_window("main") {
+                    // 1. 隐藏标题栏中央的 "MemBook" 标题文字
+                    let _ = window.set_title("");
+
+                    // 2. 调整交通灯按钮位置：让按钮中心对齐 AppHeader 内容中心
+                    //    AppHeader 高度 48px，内容垂直居中在 24px from top
+                    //    macOS 标准标题栏 28px，交通灯默认中心在 14px，与 logo 差 10px
+                    //    setTrafficLightPosition 的坐标系：x 从左，y 从窗口底部
+                    //    按钮高约 14px，要中心在 24px from top → 按钮左下角 y = windowHeight - 31
+                    set_mac_traffic_light_position(&window);
+
+                    // 3. 窗口 resize 时重新设置（y 值依赖窗口高度）
+                    let win_clone = window.clone();
+                    let _ = window.on_resized(move |_| {
+                        set_mac_traffic_light_position(&win_clone);
+                    });
                 }
             }
             // 启动时把数据目录打出来，方便排查
