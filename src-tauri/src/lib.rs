@@ -883,6 +883,13 @@ fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
     let ns_window = ns_window_ptr as *mut objc::runtime::Object;
 
     unsafe {
+        // 防御性检查：setTrafficLightPosition: 是非公开 API，macOS 26 (Tahoe) 可能已移除。
+        // 不响应则跳过，交通灯回到默认位置，避免 "unrecognized selector" 崩溃。
+        let responds: bool = msg_send![ns_window, respondsToSelector: sel!(setTrafficLightPosition:)];
+        if !responds {
+            return;
+        }
+
         // 获取窗口 frame 以计算高度
         let frame: NSRect = msg_send![ns_window, frame];
         let window_height = frame.size.height;
