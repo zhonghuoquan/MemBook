@@ -40,6 +40,8 @@ export function startDrag(photoIds: string[], clientX: number, clientY: number, 
   dragState.offsetX = offsetX;
   dragState.offsetY = offsetY;
   dragState.active = true;
+  // 拖拽期间禁用文本选中，防止鼠标划过工作区时高亮选中文字/元素
+  document.body.style.userSelect = 'none';
   notify();
 }
 
@@ -53,6 +55,8 @@ export function updateDrag(clientX: number, clientY: number) {
 export function endDrag(): string[] {
   const ids = [...dragState.photoIds];
   dragState.active = false;
+  // 恢复文本选中
+  document.body.style.userSelect = '';
   notify();
   dragState.photoIds = [];
   return ids;

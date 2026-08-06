@@ -104,6 +104,9 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('[data-no-drag]')) return;
+    // macOS: 系统原生处理双击标题栏最大化/还原，不需要前端介入
+    // 前端 toggleMaximize 会与系统行为冲突导致窗口异常
+    if (isMacOS()) return;
     toggleMaximize();
   }, [toggleMaximize]);
 

@@ -1344,12 +1344,14 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
       style={{ width: thumbW, height: thumbH }}
       onMouseDown={(e) => {
         if (photo.processing) return;
-        // 多选模式下由 onClick 负责切换选择，不启动拖拽
-        if (multiSelectMode) return;
+        // 多选模式下：
+        //   - 当前照片已被选中 → 允许启动拖拽（拖拽所有选中照片）
+        //   - 当前照片未被选中 → 不启动拖拽，由 onClick 切换选择
+        if (multiSelectMode && !selectedPhotoIds.has(photo.id)) return;
 
         const ctrlOrMeta = e.ctrlKey || e.metaKey;
-        // Ctrl/Cmd+单击仅用于切换选择，不进入拖拽流程
-        if (ctrlOrMeta) {
+        // Ctrl/Cmd+单击仅用于切换选择，不进入拖拽流程（仅非多选模式）
+        if (!multiSelectMode && ctrlOrMeta) {
           const onUp = (ev: MouseEvent) => {
             document.removeEventListener('mouseup', onUp);
             onToggleSelect(photo.id, ev.ctrlKey || ev.metaKey);
@@ -1364,6 +1366,7 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
         const offsetX = e.clientX - rect.left;
         const offsetY = e.clientY - rect.top;
         // 拖拽已选中照片时，同时拖拽所有已选照片；否则只拖拽当前照片
+        // 多选模式下 dragIds 始终为所有选中照片（已在上面确认当前照片被选中）
         const dragIds = selectedPhotoIds.size > 0 && selectedPhotoIds.has(photo.id)
           ? [...selectedPhotoIds]
           : [photo.id];
@@ -1375,7 +1378,7 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
           startDrag(dragIds, startX, startY, offsetX, offsetY);
         };
 
-        // 普通模式延迟 200ms 启动拖拽，移动超过阈值时立即启动，避免单击时误显示缩略图
+        // 延迟 200ms 启动拖拽，移动超过阈值时立即启动，避免单击时误显示缩略图
         const timer = setTimeout(() => {
           startDragNow();
         }, 200);
@@ -1399,9 +1402,19 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
           document.removeEventListener('mouseup', onUp);
           if (isDragging) {
             endDrag();
+            // 拖拽完成后阻止后续 click 事件触发选择切换（多选模式下尤其重要）
+            const stopClick = (clickEv: MouseEvent) => {
+              clickEv.stopPropagation();
+              clickEv.preventDefault();
+              document.removeEventListener('click', stopClick, true);
+            };
+            document.addEventListener('click', stopClick, true);
           } else {
             // 未触发拖拽的 mouseup 视为单击：切换选择
-            onToggleSelect(photo.id, ev.ctrlKey || ev.metaKey);
+            // 多选模式下由 onClick 处理选择切换，此处不重复处理
+            if (!multiSelectMode) {
+              onToggleSelect(photo.id, ev.ctrlKey || ev.metaKey);
+            }
           }
         };
 
@@ -1410,7 +1423,7 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
       }}
       onClick={(e) => {
         if (photo.processing) return;
-        // 仅多选模式下通过点击切换选择；普通模式由 mouseup 处理，避免与拖拽冲突
+        // 多选模式下通过点击切换选择（普通模式由 mouseup 处理）
         if (multiSelectMode) {
           onToggleSelect(photo.id, e.ctrlKey || e.metaKey);
         }

@@ -913,8 +913,12 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             {
-                // 移除 WS_SYSMENU，阻止 Alt+Space 调出系统菜单（还原/移动/大小/最大化/最小化/关闭）
+                // Windows: 移除原生窗口装饰（标题栏/边框），用前端自定义标题栏
+                // tauri.conf.json 设 decorations: true 是为 macOS 交通灯按钮，
+                // Windows 上在此处动态移除装饰
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                    // 移除 WS_SYSMENU，阻止 Alt+Space 调出系统菜单（还原/移动/大小/最大化/最小化/关闭）
                     if let Ok(hwnd) = window.hwnd() {
                         unsafe {
                             let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -932,9 +936,6 @@ pub fn run() {
                         }
                     }
                     // 设置高分辨率窗口图标（128x128 PNG），覆盖 generate_context! 嵌入的默认图标
-                    // Tauri generate_context! 可能从 ICO 中提取低分辨率尺寸作为窗口图标，
-                    // 导致任务栏"从不合并"模式下图标模糊。手动设置 128x128 确保 Windows 可从中
-                    // 选择合适的尺寸（任务栏 32/48/64px），避免缩放模糊
                     let icon_bytes = include_bytes!("../icons/128x128.png");
                     if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
                         let _ = window.set_icon(icon);
