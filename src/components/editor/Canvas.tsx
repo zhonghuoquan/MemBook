@@ -491,10 +491,20 @@ export function Canvas() {
         setStickerDragActive(false);
         stickerDragStateRef.current = null;
         if (state.stickerId && state.dataURL) {
-          // P0-fix: 必须用 stageRef（Konva Stage 容器）计算坐标，不能用 containerRef（滚动容器）。
-          //   groupOX/groupOY 是页面在 Stage 内的偏移，相对于 Stage 坐标系。
+          // 边界检测：用 containerRef（滚动容器 = 可见工作区）判断鼠标是否在中间工作区内。
+          //   不能仅用 stageRef：Stage 可能比可见区域大（可滚动），getBoundingClientRect() 返回
+          //   滚动后的位置（left 可能为负），导致拖拽到左侧面板的坐标也落在 Stage 逻辑范围内。
+          const containerBox = containerRef.current?.getBoundingClientRect();
           const stageBox = stageRef.current?.container().getBoundingClientRect();
-          if (stageBox) {
+          if (containerBox && stageBox) {
+            // 第一步：鼠标必须在可见工作区（containerRef）内，否则拒绝（如左侧面板、顶部工具栏）
+            const inContainer =
+              state.clientX >= containerBox.left &&
+              state.clientX <= containerBox.right &&
+              state.clientY >= containerBox.top &&
+              state.clientY <= containerBox.bottom;
+            if (!inContainer) return;
+            // 第二步：用 stageRef 计算 Konva 坐标（groupOX/groupOY 相对于 Stage 坐标系）
             const sx = state.clientX - stageBox.left;
             const sy = state.clientY - stageBox.top;
             // 接受范围：整个 Stage 容器（包含页面 + 周围灰色区域）

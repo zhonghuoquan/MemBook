@@ -497,10 +497,13 @@ function StickerCard({
           </svg>
         </div>
       )}
-      {/* 预览区：透明棋盘格背景，突出贴纸主体 */}
-      <div className="aspect-square p-4 flex items-center justify-center rounded-t-[var(--radius-2xl)]
+      {/* 预览区：透明棋盘格背景，突出贴纸主体
+          使用 relative + absolute 定位图片，避免长贴纸撑开容器（macOS WebKit aspect-square + flex 兼容问题）
+          overflow-hidden 确保容器尺寸固定，不随图片内容变化 */}
+      <div className="relative w-full overflow-hidden rounded-t-[var(--radius-2xl)]
                       bg-[image:var(--gradient-brand-soft)]"
            style={{
+             aspectRatio: '1 / 1',
              backgroundImage:
                'repeating-conic-gradient(rgba(108,99,255,0.04) 0% 25%, transparent 0% 50%) 50% / 16px 16px',
            }}>
@@ -508,11 +511,13 @@ function StickerCard({
           <img
             src={src}
             alt={sticker.name}
-            className="max-w-full max-h-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.12)]"
+            className="absolute inset-0 w-full h-full object-contain p-4 drop-shadow-[0_2px_6px_rgba(0,0,0,0.12)]"
             draggable={false}
           />
         ) : (
-          <div className="w-8 h-8 border-[2.5px] border-[var(--color-primary-200)] border-t-[var(--color-primary-500)] rounded-full animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-8 h-8 border-[2.5px] border-[var(--color-primary-200)] border-t-[var(--color-primary-500)] rounded-full animate-spin" />
+          </div>
         )}
       </div>
 

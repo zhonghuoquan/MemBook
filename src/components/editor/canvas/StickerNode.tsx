@@ -45,8 +45,6 @@ function StickerNodeImpl({
   // 主 Group ref：用于旋转时获取贴纸中心的绝对坐标
   const mainGroupRef = useRef<Konva.Group>(null);
 
-  // 拖拽ref
-  const dragRef = useRef({ startX: 0, startY: 0, startNx: 0, startNy: 0 });
   // resize ref
   // P0-fix: 缩放锚点 = 对角/对边在页面空间的固定点（含旋转修正）。
   //   sticker.x/y 是中心点坐标，旧代码按"左上角"处理 → 实际以中心缩放，
@@ -251,38 +249,18 @@ function StickerNodeImpl({
       onMouseLeave={() => setHovered(false)}
       onDragStart={(e) => {
         e.cancelBubble = true;
-        const stage = e.target.getStage()!;
-        const startPos = stage.getPointerPosition()!;
-        dragRef.current = {
-          startX: startPos.x,
-          startY: startPos.y,
-          startNx: sticker.x,
-          startNy: sticker.y,
-        };
       }}
       onDragMove={(e) => {
+        // 不调用 onUpdate，避免 Konva 拖拽位置与 React state 重新渲染冲突导致闪烁放大
         e.cancelBubble = true;
-        const { startX, startY, startNx, startNy } = dragRef.current;
-        const stage = e.target.getStage()!;
-        const pos = stage.getPointerPosition();
-        if (!pos) return;
-        const dx = (pos.x - startX) / mmToPx / canvasZoom;
-        const dy = (pos.y - startY) / mmToPx / canvasZoom;
-        onUpdate({ x: startNx + dx, y: startNy + dy }, false);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;
-        const { startX, startY, startNx, startNy } = dragRef.current;
-        const stage = e.target.getStage()!;
-        const pos = stage.getPointerPosition();
-        let finalX = sticker.x, finalY = sticker.y;
-        if (pos) {
-          const dx = (pos.x - startX) / mmToPx / canvasZoom;
-          const dy = (pos.y - startY) / mmToPx / canvasZoom;
-          finalX = startNx + dx;
-          finalY = startNy + dy;
-        }
-        onUpdate({ x: finalX, y: finalY }, true);
+        // 拖拽结束后读取 Konva Group 的实际位置（已由 Konva 拖拽更新），一次性更新 state
+        const node = e.target;
+        const newX = node.x() / mmToPx;
+        const newY = node.y() / mmToPx;
+        onUpdate({ x: newX, y: newY }, true);
       }}
     >
       {/* 贴纸图片 */}

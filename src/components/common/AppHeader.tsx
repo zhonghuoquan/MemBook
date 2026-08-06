@@ -122,9 +122,13 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
   }, [toggleMaximize]);
 
   // macOS: 最大化/全屏时交通灯按钮按系统逻辑隐藏，logo 和工具栏左对齐（移除让位 padding）
+  // 使用 CSS transition 让 padding 平滑过渡，避免内容瞬移
   const trafficLightsHidden = isMaximized || isFullscreen;
-  const macPaddingStyle = isMacOS() && !trafficLightsHidden
-    ? { paddingLeft: `${MAC_TRAFFIC_LIGHTS_WIDTH}px` }
+  const macStyle = isMacOS()
+    ? {
+        paddingLeft: trafficLightsHidden ? '1rem' : `${MAC_TRAFFIC_LIGHTS_WIDTH}px`,
+        transition: 'padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      }
     : undefined;
 
   return (
@@ -134,8 +138,8 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
       data-toolbar={height === 'toolbar' ? '' : undefined}
       onDoubleClick={handleDoubleClick}
       className={`${heightClass} bg-[image:var(--gradient-header)] flex items-center px-4 gap-1 shrink-0 z-[var(--z-toolbar)] select-none ${className}`}
-      // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）；最大化/全屏时移除
-      style={macPaddingStyle}
+      // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）；最大化/全屏时平滑过渡到 1rem
+      style={macStyle}
     >
       {children}
       <WindowControls />
