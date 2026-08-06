@@ -48,9 +48,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "windows": ["resources/sm.exe"]
-    },
     "icon": [
       "icons/icon.ico",
       "icons/icon.icns",

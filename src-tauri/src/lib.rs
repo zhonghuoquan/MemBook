@@ -888,7 +888,8 @@ fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
         let window_height = frame.size.height;
 
         // 交通灯按钮左下角位置：x=20（默认左边距），y=windowHeight-31（中心在 24px from top）
-        let point = NSPoint::new(20.0, window_height - 31.0);
+        // 用结构体字面量构造 NSPoint（避免 new 方法版本兼容问题）
+        let point = NSPoint { x: 20.0, y: window_height - 31.0 };
         let _: () = msg_send![ns_window, setTrafficLightPosition: point];
     }
 }
@@ -987,9 +988,12 @@ pub fn run() {
                     set_mac_traffic_light_position(&window);
 
                     // 3. 窗口 resize 时重新设置（y 值依赖窗口高度）
+                    //    Tauri 2.x 用 on_window_event 监听 WindowEvent::Resized
                     let win_clone = window.clone();
-                    let _ = window.on_resized(move |_| {
-                        set_mac_traffic_light_position(&win_clone);
+                    let _ = window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::Resized(_) = event {
+                            set_mac_traffic_light_position(&win_clone);
+                        }
                     });
                 }
             }
