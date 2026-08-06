@@ -91,7 +91,7 @@ interface AppHeaderProps {
 
 export function AppHeader({ children, className = '', height = 'toolbar' }: AppHeaderProps) {
   const headerRef = useRef<HTMLElement>(null);
-  const { isMaximized, isFullscreen, toggleMaximize } = useWindowMaximize();
+  const { isFullscreen, toggleMaximize } = useWindowMaximize();
 
   const heightClass = height === 'home'
     ? 'h-[var(--layout-home-header-height)]'
@@ -121,9 +121,12 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
     toggleMaximize();
   }, [toggleMaximize]);
 
-  // macOS: 最大化/全屏时交通灯按钮按系统逻辑隐藏，logo 和工具栏左对齐（移除让位 padding）
-  // 使用 CSS transition 让 padding 平滑过渡，避免内容瞬移
-  const trafficLightsHidden = isMaximized || isFullscreen;
+  // macOS 红绿灯处理（参考 VSCode/Figma/Notion）：
+  //   - 最大化（zoom）：窗口放大但保留标题栏，红绿灯仍显示 → 内容保持让位 padding，不左移
+  //   - 全屏（fullscreen）：进入独立全屏空间，红绿灯隐藏 → 内容左移填满
+  //   - 最小化：窗口隐藏，不影响
+  // 仅全屏时移除 padding，最大化/正常窗口都保留红绿灯让位
+  const trafficLightsHidden = isFullscreen;
   const macStyle = isMacOS()
     ? {
         paddingLeft: trafficLightsHidden ? '1rem' : `${MAC_TRAFFIC_LIGHTS_WIDTH}px`,

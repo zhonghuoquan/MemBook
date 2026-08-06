@@ -865,11 +865,14 @@ mod commands {
 
 /// macOS: 调整交通灯按钮（红黄绿）位置，让按钮中心对齐 AppHeader 内容中心。
 ///
-/// AppHeader 高度 48px（--layout-toolbar-height），内容 items-center 垂直居中在 24px from top。
-/// macOS 标准标题栏 28px，交通灯默认中心在 14px from top，与 logo 中心差 10px。
+/// AppHeader 高度统一 56px（--layout-toolbar-height = --layout-home-header-height），
+/// 内容 items-center 垂直居中在 28px from top。
+/// macOS 标准标题栏 28px，交通灯默认中心在 14px from top，与 logo 中心差 14px。
 ///
 /// setTrafficLightPosition 的坐标系：原点在窗口左下角，y 轴向上。
-/// 按钮高约 14px，要中心在 24px from top → 按钮左下角 y = windowHeight - 24 - 7 = windowHeight - 31
+/// point.y 直接对齐按钮中心位置（实测语义，非左下角）。
+/// 统一 header 高度 56px，内容 items-center → 中心 28px from top
+/// 目标中心 28px → point.y = windowHeight - 28
 #[cfg(target_os = "macos")]
 fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
     use cocoa::foundation::{NSPoint, NSRect};
@@ -894,13 +897,15 @@ fn set_mac_traffic_light_position(window: &tauri::WebviewWindow) {
         let frame: NSRect = msg_send![ns_window, frame];
         let window_height = frame.size.height;
 
-        // 交通灯按钮左下角位置：x=20（默认左边距），y=windowHeight-37（中心在 30px from top）
-        // macOS 交通灯按钮容器存在底部 padding，按钮实际中心比 frame origin 高约 2px。
-        // Home 页 logo 中心在 28px from top（56px header / 36px 容器居中 → 中心 28px）
-        // 按钮直径约 12-14px（半径 6-7px），frame origin y_offset=37 → 实际中心 ≈ 28-30px
-        // 经验值：37 比 35 更接近视觉居中（补偿容器 padding 导致的偏上）
-        // 用结构体字面量构造 NSPoint（避免 new 方法版本兼容问题）
-        let point = NSPoint { x: 20.0, y: window_height - 37.0 };
+        // 交通灯按钮位置：x=20（默认左边距）
+        //
+        // setTrafficLightPosition: 的 NSPoint.y 语义（实测）：
+        //   - 坐标系：窗口左下角为原点，y 轴向上
+        //   - point.y 直接对齐按钮中心位置（非左下角）
+        //
+        // 统一 header 高度为 56px，所有内容 items-center 垂直居中 → 中心 28px from top
+        // point.y = window_height - 28（让按钮中心在 28px from top）
+        let point = NSPoint { x: 20.0, y: window_height - 28.0 };
         let _: () = msg_send![ns_window, setTrafficLightPosition: point];
     }
 }
@@ -992,10 +997,8 @@ pub fn run() {
                     let _ = window.set_title("");
 
                     // 2. 调整交通灯按钮位置：让按钮中心对齐 AppHeader 内容中心
-                    //    AppHeader 高度 48px，内容垂直居中在 24px from top
-                    //    macOS 标准标题栏 28px，交通灯默认中心在 14px，与 logo 差 10px
-                    //    setTrafficLightPosition 的坐标系：x 从左，y 从窗口底部
-                    //    按钮高约 14px，要中心在 24px from top → 按钮左下角 y = windowHeight - 31
+                    //    AppHeader 高度统一 56px，内容 items-center 垂直居中 → 中心 28px from top
+                    //    point.y = windowHeight - 28（按钮中心直接对齐 28px）
                     set_mac_traffic_light_position(&window);
 
                     // 3. 窗口 resize 时重新设置（y 值依赖窗口高度）
