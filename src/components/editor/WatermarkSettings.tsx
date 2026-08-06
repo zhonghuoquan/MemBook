@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../store';
 import { useDraggable } from '../../hooks/useDraggable';
+import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 import { ModalGuard } from '../../utils/modal-guard';
 import type { WatermarkSettings, LocationGranularity } from '../../types';
 import { DEFAULT_WATERMARK_SETTINGS } from '../../types';
@@ -61,6 +62,9 @@ export function WatermarkSettings({ open, onClose }: Props) {
   const handleCancel = useCallback(() => {
     onClose();
   }, [onClose]);
+
+  // Enter 确认 / Esc 取消快捷键
+  useDialogHotkeys({ onConfirm: handleConfirm, onCancel: handleCancel, enabled: open });
 
   if (!open) return null;
 

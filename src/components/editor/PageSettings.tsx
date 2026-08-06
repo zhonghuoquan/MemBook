@@ -6,6 +6,7 @@ import type { PageMarginSettings, AlbumSize } from '../../types';
 import { useDraggable } from '../../hooks/useDraggable';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { useWheel } from '../../hooks/useWheel';
+import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 import { ModalGuard } from '../../utils/modal-guard';
 
 interface Props {
@@ -125,6 +126,9 @@ export function PageSettings({ open, onClose }: Props) {
   const handleCancel = useCallback(() => {
     onClose();
   }, [onClose]);
+
+  // Enter 确认 / Esc 取消快捷键
+  useDialogHotkeys({ onConfirm: handleConfirm, onCancel: handleCancel, enabled: open });
 
   // ═══ 重置：将本地状态恢复默认（不写 Store，等确认）═══
   const handleReset = useCallback(() => {

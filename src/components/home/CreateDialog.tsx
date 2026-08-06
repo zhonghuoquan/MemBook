@@ -121,7 +121,7 @@ export function CreateDialog({ open, onClose, onCreate, title }: CreateDialogPro
   const canFlip = (!isCustom && selectedPreset.orientation !== 'square') || isCustom;
 
   return (
-    <Modal open={open} onClose={onClose} title={resolvedTitle} maxWidth="640px"
+    <Modal open={open} onClose={onClose} onConfirm={handleCreate} confirmDisabled={!canCreate} title={resolvedTitle} maxWidth="640px"
       footer={
         <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border-light)]">
           <Button variant="secondary" onClick={onClose}>{t('home.createDialog.cancel')}</Button>

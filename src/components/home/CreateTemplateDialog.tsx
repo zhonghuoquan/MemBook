@@ -316,7 +316,7 @@ export function CreateTemplateDialog({ open, onClose, onCreated, editTemplate }:
   ];
 
   return (
-    <Modal open={open} onClose={onClose} title={isEditing ? t('home.createTemplate.editTitle') : t('home.createTemplate.createTitle')} maxWidth="860px"
+    <Modal open={open} onClose={onClose} onConfirm={handleSave} confirmDisabled={saving || photoCount === 0} title={isEditing ? t('home.createTemplate.editTitle') : t('home.createTemplate.createTitle')} maxWidth="860px"
       footer={
         <div className="flex justify-between items-center pt-3 border-t border-[var(--color-border-light)]">
           <span className="text-[9px] text-[var(--color-text-tertiary)]">{t('home.createTemplate.regionCount', { count: safeSlots.length })}</span>

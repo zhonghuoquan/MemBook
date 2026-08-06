@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore } from '../../store';
 import { useDraggable } from '../../hooks/useDraggable';
+import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 import { generatePrintPreviewsStream, printPages, type PrintRange, type PrintColor, type PrintDuplex, type PrintOrientation, type PrintPaperSize } from '../../utils/printEngine';
 import { ModalGuard } from '../../utils/modal-guard';
 import { logger } from '../../utils/logger';
@@ -89,15 +90,6 @@ export function PrintDialog({ isOpen, onClose }: Props) {
     if (isOpen) ModalGuard.open();
     return () => { ModalGuard.close(); };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -215,6 +207,9 @@ export function PrintDialog({ isOpen, onClose }: Props) {
       setIsPrinting(false);
     }
   }, [range, startPage, endPage, color, duplex, copies, paperSize, orientation, selectedPrinter, totalPages, addToast, onClose, isPrinting]);
+
+  // Enter 确认 / Esc 取消快捷键（替换原有仅 Esc 的监听）
+  useDialogHotkeys({ onConfirm: handlePrint, onCancel: onClose, enabled: isOpen, confirmDisabled: isPrinting || totalPages === 0 });
 
   const pageSizeLabel = albumSize ? `${albumSize.width}×${albumSize.height} mm` : t('editor.print.unknownSize');
 

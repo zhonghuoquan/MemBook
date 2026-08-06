@@ -4,6 +4,7 @@ import { useEditorStore, useUIStore } from '../../store';
 import type { ExportOptions, ExportFormat, ExportResult } from '../../utils/exportEngine';
 import { exportToPNG, exportToJPG, exportToPDF, cancelExport } from '../../utils/exportEngine';
 import { useDraggable } from '../../hooks/useDraggable';
+import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 import { logger } from '../../utils/logger';
 
 interface ExportDialogProps {
@@ -300,6 +301,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     setExportResult(null);
     onClose();
   }, [onClose]);
+
+  // Enter 确认 / Esc 取消快捷键：仅在设置面板可见时生效（导出中/结果态不响应 Enter）
+  useDialogHotkeys({
+    onConfirm: handleExport,
+    onCancel: onClose,
+    enabled: isOpen && !isExporting && !exportResult,
+    confirmDisabled: isExporting,
+  });
 
   if (!isOpen && !isExporting && !exportResult) return null;
 

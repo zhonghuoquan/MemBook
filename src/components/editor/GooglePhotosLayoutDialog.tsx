@@ -41,6 +41,7 @@ const RHYTHM_OPTS: { id: GooglePhotosLayoutRhythm; labelKey: string; descKey: st
   { id: 'rich', labelKey: 'editor.smartLayout.rhythm.rich.label', descKey: 'editor.smartLayout.rhythm.rich.desc' },
 ];
 import { ModalGuard } from '../../utils/modal-guard';
+import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 
 interface GooglePhotosLayoutDialogProps {
   selectedPhotos: Photo[];
@@ -570,6 +571,9 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
       setExecuting(false);
     }
   }, [executing, layoutResult.pages, insertIndex, selectedPhotos.length, config.gap, config.margin, addToast, onComplete, onClose, appendPages, t]);
+
+  // Enter 确认 / Esc 取消快捷键（执行中禁用 Enter 避免重复触发）
+  useDialogHotkeys({ onConfirm: handleExecute, onCancel: onClose, enabled: true, confirmDisabled: executing });
 
   if (layoutResult.pages.length === 0) {
     return (

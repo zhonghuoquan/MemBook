@@ -71,7 +71,7 @@ export function TemplateSwitchDialog({
   if (!targetTemplate) return null;
 
   return (
-    <Modal open={open} onClose={onCancel} title={t('editor.templateSwitch.title')} maxWidth="480px"
+    <Modal open={open} onClose={onCancel} onConfirm={() => onConfirm(Array.from(selected))} confirmDisabled={!canConfirm} title={t('editor.templateSwitch.title')} maxWidth="480px"
       footer={
         <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border-light)]">
           <Button variant="secondary" onClick={onCancel}>{t('editor.templateSwitch.cancel')}</Button>

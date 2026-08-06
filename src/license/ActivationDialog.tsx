@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { useLicenseStore } from './licenseStore';
 import { useEditorStore, useUIStore } from '../store';
 import { getMachineId } from './licenseService';
+import { useDialogHotkeys } from '../hooks/useDialogHotkeys';
 import { DEFAULT_WATERMARK_SETTINGS } from '../types';
 
 interface ActivationDialogProps {
@@ -25,6 +26,9 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
   const [copied, setCopied] = useState(false);
   const { isActivated, hasLicense, activate, clear } = useLicenseStore();
   const addToast = useUIStore((s) => s.addToast);
+
+  // Esc 取消（Enter 已由 <form onSubmit> 天然支持）
+  useDialogHotkeys({ onCancel: onClose, enabled: open });
 
   if (!open) return null;
 

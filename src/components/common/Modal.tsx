@@ -4,22 +4,40 @@ import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 interface ModalProps {
   open: boolean;
   onClose: () => void;
+  /** Enter 快捷键确认回调。在 input 中按 Enter 触发；textarea 中 Enter 仍为换行 */
+  onConfirm?: () => void;
+  /** 确认按钮是否可用（disabled 时不响应 Enter），默认 true */
+  confirmDisabled?: boolean;
   title?: string;
   footer?: ReactNode;
   children: ReactNode;
   maxWidth?: string;
 }
 
-export function Modal({ open, onClose, title, footer, children, maxWidth = '640px' }: ModalProps) {
+export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title, footer, children, maxWidth = '640px' }: ModalProps) {
   const sb = useScrollbarVisibility<HTMLDivElement>();
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === 'Enter' && onConfirm && !confirmDisabled) {
+        const target = e.target as HTMLElement;
+        const tag = target?.tagName;
+        // textarea 中 Enter 为换行，不触发确认；contenteditable 同理
+        if (tag === 'TEXTAREA' || target?.isContentEditable) return;
+        // Shift+Enter 在 input 中也视为换行（部分用户习惯），不触发确认
+        if (e.shiftKey) return;
+        e.preventDefault();
+        onConfirm();
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+  }, [open, onClose, onConfirm, confirmDisabled]);
 
   // 弹窗打开时锁定 body 滚动
   useEffect(() => {

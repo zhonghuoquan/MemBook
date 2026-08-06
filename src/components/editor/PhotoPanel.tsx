@@ -28,7 +28,7 @@ function checkPhotoVisible(photoId: string, placedIds: Set<string>, mode: PhotoF
 export function isAllGroupsExpanded() { return false; } // 默认不展开
 
 // ── 照片自适应行布局（Justified Rows，类似 Google Photos / Flickr）──
-const ITEM_GAP = 6;
+const ITEM_GAP = 8;
 const TARGET_ROW_HEIGHT = 110;
 const MAX_ROW_HEIGHT = 132; // 最高高度限制，防止单张或极竖照片无限放大
 
@@ -723,6 +723,40 @@ export function PhotoPanel({ photoImport, onNavigateToSmartLayout }: { photoImpo
     });
   };
 
+  // ── 导入照片时自动展开本次新增照片对应的月/日分组 ──
+  // 用 ref 跟踪上一次的 photo id 集合，diff 出新增照片后展开其所在分组。
+  // 首次挂载只初始化 ref，不展开（保留用户折叠偏好）。
+  const prevPhotoIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const currentIds = new Set(photos.map((p) => p.id));
+    const prevIds = prevPhotoIdsRef.current;
+    prevPhotoIdsRef.current = currentIds;
+    if (prevIds === null) return; // 首次挂载，不自动展开
+
+    // 找出本次新增的照片（导入）
+    const newPhotos = photos.filter((p) => !prevIds.has(p.id));
+    if (newPhotos.length === 0) return;
+
+    // 根据新照片的 date 计算需要展开的 monthKey 和 dayKey
+    const keysToExpand = new Set<string>();
+    for (const photo of newPhotos) {
+      const d = new Date(photo.date);
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const dayKey = `${monthKey}-${String(d.getDate()).padStart(2, '0')}`;
+      keysToExpand.add(monthKey);
+      keysToExpand.add(dayKey);
+    }
+
+    setExpandedGroups((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const k of keysToExpand) {
+        if (!next.has(k)) { next.add(k); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [photos]);
+
   // 展开层级：all=全部展开（到日），month=展开到月（日收起），none=全部收起
   const applyExpandLevel = useCallback((level: 'all' | 'month' | 'none') => {
     if (level === 'none') {
@@ -1340,7 +1374,7 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
                  border-[var(--color-gray-200)]/60
                  hover:border-[var(--color-primary-400)] hover:shadow-[0_2px_12px_rgba(108,99,255,0.15)]
                  transition-all duration-200 ease-out cursor-grab active:cursor-grabbing
-                 ${selected && !multiSelectMode ? 'ring-2 ring-[var(--color-brand)] ring-offset-1 ring-offset-white' : ''}`}
+                 ${selected && !multiSelectMode ? 'border-[var(--color-brand)] border-[1.5px]' : ''}`}
       style={{ width: thumbW, height: thumbH }}
       onMouseDown={(e) => {
         if (photo.processing) return;
@@ -1437,9 +1471,9 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
       ) : (
         <PhotoThumbImg key={`${photo.id}-${photo.src}`} photo={photo} onLoaded={onLoaded} />
       )}
-      {/* 选中态高亮 */}
+      {/* 选中态高亮：轻微蒙层 + 内描边（inset 向内绘制，不超出边界，靠边照片也能完整显示） */}
       {selected && (
-        <div className="absolute inset-0 bg-[var(--color-brand)]/8 ring-2 ring-[var(--color-brand)] rounded-lg pointer-events-none transition-opacity duration-200" />
+        <div className="absolute inset-0 rounded-lg pointer-events-none transition-opacity duration-200 bg-[var(--color-brand)]/10 shadow-[inset_0_0_0_2.5px_var(--color-brand)]" />
       )}
       {/* 多选模式勾选框 */}
       {multiSelectMode && (
