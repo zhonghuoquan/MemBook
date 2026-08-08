@@ -16,10 +16,10 @@ import {
   type OrganizePreviewItem,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, countByExt, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 
-export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan }: ToolProps) {
+export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan, onBusyChange }: ToolProps) {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -29,6 +29,13 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
   const [useFileDate, setUseFileDate] = useState(false);
   const [excludeSorted, setExcludeSorted] = useState(true);
   const [excludedExts, setExcludedExts] = useState<Set<string>>(new Set());
+
+  // 通知父组件工具执行状态（previewing/executing），用于禁用标签切换
+  const busy = previewing || executing;
+  useEffect(() => {
+    onBusyChange?.('organize', busy);
+    return () => { onBusyChange?.('organize', false); };
+  }, [busy, onBusyChange]);
 
   const canUse = isTauri() && !!rootPath && sourceMode === 'folder';
 
@@ -169,19 +176,25 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
                 <div>
                   <span className="text-xs text-[var(--color-gray-600)] mb-1.5 block">{t('home.organize.organize.selectFormats')}</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {allExts.map((ext) => (
-                      <button
-                        key={ext}
-                        onClick={() => toggleExt(ext)}
-                        className={`px-2 py-1 rounded text-xs font-mono cursor-pointer border-none transition-all ${
-                          !excludedExts.has(ext)
-                            ? 'bg-[var(--color-brand)] text-white'
-                            : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] line-through'
-                        }`}
-                      >
-                        {ext}
-                      </button>
-                    ))}
+                    {(() => {
+                      const extCounts = new Map(countByExt(photos).map(({ ext, count }) => [ext, count]));
+                      return allExts.map((ext) => (
+                        <button
+                          key={ext}
+                          onClick={() => toggleExt(ext)}
+                          className={`px-2 py-1 rounded text-xs font-mono cursor-pointer border-none transition-all inline-flex items-center gap-1 ${
+                            !excludedExts.has(ext)
+                              ? 'bg-[var(--color-brand)] text-white'
+                              : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] line-through'
+                          }`}
+                        >
+                          {ext}
+                          <span className={`text-[10px] ${!excludedExts.has(ext) ? 'text-white/70' : ''}`}>
+                            {extCounts.get(ext) ?? 0}
+                          </span>
+                        </button>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
@@ -205,15 +218,15 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
           {(previewing || executing) && <ProgressBar progress={progress} />}
 
           {items.length > 0 && !executing && (
-            <div className="space-y-3">
-              {/* 左右分栏：左=正常识别待移动，右=无法识别日期 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-3 flex flex-col max-h-[520px]">
+              {/* 左右分栏：左=正常识别待移动，右=无法识别日期，高度限制内自适应 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 min-h-0">
                 {/* 左：正常识别的照片及目标目录 */}
-                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
-                  <div className="text-sm text-blue-800 font-[600] mb-2">
+                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 flex flex-col min-h-0">
+                  <div className="text-sm text-blue-800 font-[600] mb-2 shrink-0">
                     {t('home.organize.organize.movedSummary', { count: movedItems.length })}
                   </div>
-                  <div className="max-h-[220px] overflow-auto space-y-1 pr-1">
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-1 pr-1 custom-scrollbar">
                     {movedItems.slice(0, 100).map((item, idx) => (
                       <div key={idx} className="text-xs px-2 py-1 rounded bg-white/70 flex items-center gap-2">
                         <span className="truncate flex-1 min-w-0 text-[var(--color-gray-600)]">{item.sourcePath.split(/[\\/]/).pop()}</span>
@@ -228,11 +241,11 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
                 </div>
 
                 {/* 右：无法识别拍摄日期的文件 */}
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-gray-50)] p-3">
-                  <div className="text-sm text-[var(--color-gray-600)] font-[600] mb-2">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-gray-50)] p-3 flex flex-col min-h-0">
+                  <div className="text-sm text-[var(--color-gray-600)] font-[600] mb-2 shrink-0">
                     {t('home.organize.organize.noDateSummary', { count: noDatePhotos.length })}
                   </div>
-                  <div className="max-h-[220px] overflow-auto space-y-1 pr-1">
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-1 pr-1 custom-scrollbar">
                     {noDatePhotos.slice(0, 100).map((p) => (
                       <div key={p.id} className="text-xs px-2 py-1 rounded bg-white/70 truncate text-[var(--color-gray-600)]">
                         {p.relativePath || p.name}
@@ -248,7 +261,7 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 <PrimaryButton onClick={handleExecute}>
                   {t('home.organize.organize.executeButton', { count: movedItems.length })}
                 </PrimaryButton>

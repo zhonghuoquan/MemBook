@@ -1734,21 +1734,38 @@ export function Canvas() {
 
       {/* 贴纸拖拽预览：跟随鼠标的贴纸缩略图
           P0-fix: 预览位置用 DOM 直操 transform（ref），不触发 React 重渲染。
-          active 状态仅在拖拽开始/结束切换一次，dataURL 从 ref 读取。 */}
-      {stickerDragActive && stickerDragStateRef.current?.dataURL && (
-        <div
-          ref={stickerPreviewRef}
-          className="fixed z-[9999] pointer-events-none"
-          style={{ left: 0, top: 0, opacity: 0.85, willChange: 'transform' }}
-        >
-          <img
-            src={stickerDragStateRef.current.dataURL}
-            alt=""
-            className="w-full h-full object-contain rounded-lg shadow-2xl border-2 border-white/90"
-            draggable={false}
-          />
-        </div>
-      )}
+          active 状态仅在拖拽开始/结束切换一次，dataURL 从 ref 读取。
+          flicker-fix: 挂载时即从 ref 计算初始 width/height/transform 写入 inline style，
+          避免首次绘制时父级无尺寸导致 <img> 回退到原始大尺寸而瞬间放大闪烁。
+          （ref 在 setStickerDragActive 前已同步设置，渲染时读取安全。） */}
+      {stickerDragActive && stickerDragStateRef.current?.dataURL && (() => {
+        const st = stickerDragStateRef.current!;
+        const thumbW = 64;
+        const ratio = st.height > 0 && st.width > 0 ? st.width / st.height : 1;
+        const thumbH = thumbW / ratio;
+        return (
+          <div
+            ref={stickerPreviewRef}
+            className="fixed z-[9999] pointer-events-none"
+            style={{
+              left: 0,
+              top: 0,
+              opacity: 0.85,
+              willChange: 'transform',
+              width: `${thumbW}px`,
+              height: `${thumbH}px`,
+              transform: `translate(${st.clientX - thumbW / 2}px, ${st.clientY - thumbH / 2}px)`,
+            }}
+          >
+            <img
+              src={st.dataURL}
+              alt=""
+              className="w-full h-full object-contain rounded-lg shadow-2xl border-2 border-white/90"
+              draggable={false}
+            />
+          </div>
+        );
+      })()}
 
       {/* Stage 容器 */}
       <div style={{

@@ -9,6 +9,7 @@ export type {
   PhotoFileInfo,
   DedupeGroup,
   DedupeResult,
+  DuplicateSimilarity,
   OrganizePreviewItem,
   OrganizeResult,
   ExifEditItem,
@@ -22,6 +23,10 @@ export { isTauri, getPlatform, supportsFileSystemWrite, supportsShellCommand, ge
 
 // 哈希去重
 export { deduplicatePhotos, formatBytes } from './hash';
+export type { DedupeOptions } from './hash';
+
+// 感知哈希
+export { computePHash, hammingDistance, DEFAULT_PHASH_THRESHOLD } from './perceptual-hash';
 
 // 文件名时间解析
 export { parseFilenameDate } from './filename-time';
@@ -29,6 +34,7 @@ export { parseFilenameDate } from './filename-time';
 // EXIF 读写
 export {
   readExifDate,
+  readExifDateWithFallback,
   readExifFull,
   readExifGps,
   writeExifDateToJpeg,

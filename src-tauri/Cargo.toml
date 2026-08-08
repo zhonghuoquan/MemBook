@@ -25,6 +25,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 sha2 = "0.10"
+# EXIF 读取（照片整理扫描）：kamadak-exif 是 Rust 生态最成熟的 EXIF 库
+# 支持 JPEG/HEIC/TIFF/PNG/WebP，在 Rust 端批量读取避免 JS IPC 开销
+# crate 名是 kamadak-exif，但 import 时用 `use exif::...`
+kamadak-exif = "0.5"
+walkdir = "2"
 # 跨平台回收站：macOS 用 NSWorkspace，Windows 用 SHFileOperation
 trash = "5"
 # heif-rs 会在构建时从 GitHub 下载预编译的静态 libheif/libde265/x265 二进制。

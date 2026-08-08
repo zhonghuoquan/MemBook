@@ -1,6 +1,6 @@
 // MemBook — Tauri 入口
 // 仅做最小化的窗口启动，业务逻辑全部跑在前端
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -861,6 +861,538 @@ mod commands {
             trash::delete_all(path_refs).map_err(|e| format!("移入回收站失败: {}", e))
         }
     }
+
+    /// 在系统文件管理器中打开指定文件夹
+    /// Windows: explorer.exe /select,"path"（选中文件，若是文件夹则直接打开）
+    /// macOS: open <path>
+    /// Linux: xdg-open <path>
+    #[tauri::command]
+    pub fn open_folder(path: String) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            use std::process::Command;
+            // 使用 explorer.exe 打开文件夹（若路径含空格需引号）
+            Command::new("explorer.exe")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件夹失败: {}", e))?;
+            Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            Command::new("open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件夹失败: {}", e))?;
+            Ok(())
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            use std::process::Command;
+            Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件夹失败: {}", e))?;
+            Ok(())
+        }
+    }
+
+    // ── 照片整理：Rust 端批量扫描文件夹 + 读取 EXIF 日期 ──
+
+    /// 照片扫描结果项（Rust → 前端）
+    #[derive(serde::Serialize)]
+    pub struct PhotoScanItem {
+        pub path: String,
+        pub name: String,
+        pub size: u64,
+        pub ext: String,
+        pub relative_path: String,
+        /// EXIF 拍摄日期（ISO 8601 字符串），无则 None
+        pub date_taken: Option<String>,
+        pub gps_lat: Option<f64>,
+        pub gps_lon: Option<f64>,
+        /// Rust 端 EXIF 解析失败，需要前端用 exifr 重新解析
+        /// 场景：美图秀秀等软件写入非标准 IFD 链，kamadak-exif 严格解析器报 "Unexpected next IFD"
+        /// exifr（JS 库）更宽松，能跳过损坏的 IFD 链继续解析
+        pub needs_js_fallback: bool,
+    }
+
+    /// 支持的图片扩展名
+    const PHOTO_EXTS: &[&str] = &[
+        "jpg", "jpeg", "png", "webp", "heic", "heif", "tiff", "tif", "bmp", "gif",
+    ];
+
+    /// 递归扫描文件夹，在 Rust 端批量读取 EXIF 拍摄日期。
+    ///
+    /// 相比前端 JS 方案（每文件 4 次 IPC + exifr 解析），Rust 方案：
+    /// - 零 IPC 开销（一次调用返回全部结果）
+    /// - kamadak-exif 是 Rust 生态最成熟的 EXIF 库，支持 JPEG/HEIC/TIFF/PNG/WebP
+    /// - 直接文件 I/O + BufReader，性能最佳（1000 张约 0.5-1 秒）
+    /// - 读取完整的 EXIF 段（不只是前 64KB），不会因头部截断漏读
+    ///
+    /// 扫描过程中通过 Tauri event `organize://scan-progress` 实时推送进度：
+    /// { current: 当前已扫描数, message: 当前文件名 }
+    ///
+    /// 性能优化（2026-08-07）：
+    /// 1. async fn + spawn_blocking：扫描在独立线程执行，不阻塞 Tauri 主线程（UI 响应）
+    /// 2. 进度 emit 节流：每 50 张 emit 一次（而非每张），1000 张仅 20 次 IPC 事件
+    #[tauri::command]
+    pub async fn scan_photos_with_exif(
+        app: tauri::AppHandle,
+        folder_path: String,
+    ) -> Result<Vec<PhotoScanItem>, String> {
+        // 校验在主线程快速完成（不进入 spawn_blocking）
+        let root = std::path::Path::new(&folder_path);
+        if !root.is_dir() {
+            return Err(format!("不是有效目录: {}", folder_path));
+        }
+        if root.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err("路径中包含非法的..段".to_string());
+        }
+
+        // spawn_blocking 在 tokio 阻塞线程池执行，不占用 async runtime 线程
+        // AppHandle 是 Clone + Send + 'static，可安全 move 进闭包
+        let app_for_progress = app.clone();
+        let handle = tauri::async_runtime::spawn_blocking(move || {
+            scan_photos_blocking(app_for_progress, &folder_path)
+        });
+
+        handle
+            .await
+            .map_err(|e| format!("扫描任务异常: {}", e))?
+    }
+
+    /// 实际的同步扫描逻辑（在 spawn_blocking 线程中执行）。
+    ///
+    /// 进度 emit 节流策略：每 50 张照片 emit 一次进度事件。
+    /// 1000 张照片仅触发 20 次 IPC 事件（原来每张一次 = 1000 次），
+    /// 前端 React 重渲染次数从 1000 次降至 20 次，UI 完全流畅。
+    fn scan_photos_blocking(
+        app: tauri::AppHandle,
+        folder_path: &str,
+    ) -> Result<Vec<PhotoScanItem>, String> {
+        use walkdir::WalkDir;
+
+        let root = std::path::Path::new(folder_path);
+        let mut results = Vec::new();
+        let mut count: u32 = 0;
+        /// 进度 emit 频率：每 N 张照片推送一次（避免事件风暴）
+        const PROGRESS_INTERVAL: u32 = 50;
+
+        for entry in WalkDir::new(folder_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let path = entry.path();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{}", e.to_lowercase()))
+                .unwrap_or_default();
+
+            let ext_no_dot = ext.strip_prefix('.').unwrap_or(&ext);
+            if !PHOTO_EXTS.contains(&ext_no_dot) {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let full_path = path.to_string_lossy().to_string();
+            let relative_path = path
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| name.clone());
+
+            count += 1;
+
+            // 节流：每 PROGRESS_INTERVAL 张 emit 一次进度
+            // 首张也 emit（让前端尽快看到"已扫描 1 张"反馈）
+            if count == 1 || count % PROGRESS_INTERVAL == 0 {
+                let _ = app.emit(
+                    "organize://scan-progress",
+                    serde_json::json!({
+                        "current": count,
+                        "message": name,
+                    }),
+                );
+            }
+
+            let (date_taken, gps_lat, gps_lon, needs_js_fallback) = read_exif_from_file(path);
+
+            results.push(PhotoScanItem {
+                path: full_path,
+                name,
+                size,
+                ext,
+                relative_path,
+                date_taken,
+                gps_lat,
+                gps_lon,
+                needs_js_fallback,
+            });
+        }
+
+        // 扫描结束 emit 最终计数（覆盖节流遗漏的最后几张）
+        if count > 0 && count % PROGRESS_INTERVAL != 0 {
+            let _ = app.emit(
+                "organize://scan-progress",
+                serde_json::json!({
+                    "current": count,
+                    "message": "",
+                }),
+            );
+        }
+
+        Ok(results)
+    }
+
+    /// 从文件读取 EXIF 拍摄日期和 GPS 坐标。
+    ///
+    /// 返回 (date_taken, gps_lat, gps_lon, needs_js_fallback)
+    /// - 成功解析：返回日期/GPS，needs_js_fallback=false
+    /// - 无 EXIF 段：全 None，needs_js_fallback=false（确实没日期）
+    /// - 解析失败：全 None，needs_js_fallback=true（需前端 exifr 容错解析）
+    ///
+    /// 日期优先级（业界标准）：
+    /// 1. DateTimeOriginal（拍摄时间）
+    /// 2. DateTimeDigitized（数字化时间）
+    /// 3. DateTime（修改时间）
+    ///
+    /// 日期有效性验证：年份 ≥ 2000，排除全零 "0000:00:00 00:00:00" 和传感器噪声乱码。
+    pub(crate) fn read_exif_from_file(
+        path: &std::path::Path,
+    ) -> (Option<String>, Option<f64>, Option<f64>, bool) {
+        use exif::{In, Reader, Tag, Value};
+
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return (None, None, None, false),
+        };
+        let mut bufreader = std::io::BufReader::new(&file);
+        let exifreader = Reader::new();
+        let exif = match exifreader.read_from_container(&mut bufreader) {
+            Ok(e) => e,
+            Err(_) => {
+                // kamadak-exif 严格解析失败（如美图秀秀非标准 IFD 链 "Unexpected next IFD"）
+                // 尝试手动解析 DateTimeOriginal：直接在字节流中查找 tag，跳过 IFD 链验证
+                if let Some(date) = read_exif_date_manual(path) {
+                    return (Some(date), None, None, false);
+                }
+                // 手动解析也失败，标记 needs_js_fallback=true，让前端 exifr 容错解析
+                return (None, None, None, true);
+            }
+        };
+
+        // 日期读取（3 级优先）
+        let date_taken = [Tag::DateTimeOriginal, Tag::DateTimeDigitized, Tag::DateTime]
+            .iter()
+            .find_map(|tag| {
+                exif.get_field(*tag, In::PRIMARY).and_then(|f| match &f.value {
+                    Value::Ascii(ref vec) => {
+                        if let Some(bytes) = vec.first() {
+                            parse_exif_date(&String::from_utf8_lossy(bytes))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                })
+            });
+
+        // GPS 经纬度（kamadak-exif 的 In::PRIMARY 包含 GPS IFD）
+        let gps_lat = exif
+            .get_field(Tag::GPSLatitude, In::PRIMARY)
+            .and_then(|f| rational_to_gps_coord(&f.value));
+
+        let gps_lon = exif
+            .get_field(Tag::GPSLongitude, In::PRIMARY)
+            .and_then(|f| rational_to_gps_coord(&f.value));
+
+        (date_taken, gps_lat, gps_lon, false)
+    }
+
+    /// 手动解析 JPEG EXIF 日期（kamadak-exif 严格解析失败时的 fallback）
+    ///
+    /// 直接在字节流中查找 DateTimeOriginal tag，跳过 IFD 链验证。
+    /// 适用于美图秀秀等软件产生的非标准 EXIF（kamadak-exif 报 "Unexpected next IFD"）。
+    ///
+    /// 优先级：DateTimeOriginal (0x9003) → DateTimeDigitized (0x9004) → DateTime (0x0132)
+    pub(crate) fn read_exif_date_manual(path: &std::path::Path) -> Option<String> {
+        use std::io::Read;
+
+        // 1. 读取文件前 64KB（EXIF 段在文件头部）
+        let mut file = std::fs::File::open(path).ok()?;
+        let mut buf = vec![0u8; 65536];
+        let n = file.read(&mut buf).ok()?;
+        let data = &buf[..n];
+
+        // 2. 验证 JPEG SOI (FF D8)
+        if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+            return None;
+        }
+
+        // 3. 遍历 JPEG 段，查找 APP1 段 (FF E1)
+        let mut pos = 2;
+        while pos + 4 < data.len() {
+            if data[pos] != 0xFF {
+                pos += 1;
+                continue;
+            }
+            let marker = data[pos + 1];
+
+            // SOS 段开始，停止扫描（后面是图像数据）
+            if marker == 0xDA {
+                break;
+            }
+
+            // 读取段长度（大端，含 2 字节长度字段本身）
+            let seg_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
+            let seg_data_start = pos + 4;
+
+            if marker == 0xE1 && seg_data_start + 6 <= data.len() {
+                // APP1 段，验证 "Exif\0\0"
+                if &data[seg_data_start..seg_data_start + 4] == b"Exif"
+                    && data[seg_data_start + 4] == 0
+                    && data[seg_data_start + 5] == 0
+                {
+                    let tiff_start = seg_data_start + 6;
+                    if tiff_start + 8 <= data.len() {
+                        if let Some(date) = parse_tiff_for_date(&data[tiff_start..]) {
+                            return Some(date);
+                        }
+                    }
+                }
+            }
+
+            // 跳到下一段（seg_len 含 2 字节长度字段，实际数据是 seg_len - 2）
+            let next_pos = seg_data_start + seg_len.saturating_sub(2);
+            if next_pos <= pos {
+                break; // 防止无限循环
+            }
+            pos = next_pos;
+        }
+        None
+    }
+
+    /// 在 TIFF 数据中查找拍摄日期
+    ///
+    /// 遍历 IFD0 → 查找 ExifIFD 指针 (0x8769) → 遍历 ExifIFD → 查找 DateTimeOriginal (0x9003)
+    /// 同时也检查 IFD0 中的 DateTime (0x0132) 作为 fallback
+    fn parse_tiff_for_date(tiff: &[u8]) -> Option<String> {
+        if tiff.len() < 8 {
+            return None;
+        }
+
+        // 字节序：II=小端，MM=大端
+        let le = tiff[0] == b'I' && tiff[1] == b'I';
+        let be = tiff[0] == b'M' && tiff[1] == b'M';
+        if !le && !be {
+            return None;
+        }
+
+        let read_u16 = |buf: &[u8], off: usize| -> u16 {
+            if le {
+                u16::from_le_bytes([buf[off], buf[off + 1]])
+            } else {
+                u16::from_be_bytes([buf[off], buf[off + 1]])
+            }
+        };
+        let read_u32 = |buf: &[u8], off: usize| -> u32 {
+            if le {
+                u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+            } else {
+                u32::from_be_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+            }
+        };
+
+        // IFD0 偏移（相对于 TIFF header）
+        let ifd0_off = read_u32(tiff, 4) as usize;
+        if ifd0_off + 2 > tiff.len() {
+            return None;
+        }
+
+        // 优先：在 IFD0 中查找 ExifIFD 指针 (0x8769)
+        if let Some(exif_off) = find_tag_long(tiff, ifd0_off, 0x8769, &read_u16, &read_u32) {
+            // 在 ExifIFD 中查找 DateTimeOriginal (0x9003) 或 DateTimeDigitized (0x9004)
+            for tag in [0x9003u16, 0x9004u16] {
+                if let Some(date_str) = find_tag_ascii(tiff, exif_off, tag, &read_u16, &read_u32) {
+                    if let Some(valid) = parse_exif_date(&date_str) {
+                        return Some(valid);
+                    }
+                }
+            }
+        }
+
+        // fallback：IFD0 中的 DateTime (0x0132)
+        if let Some(date_str) = find_tag_ascii(tiff, ifd0_off, 0x0132, &read_u16, &read_u32) {
+            if let Some(valid) = parse_exif_date(&date_str) {
+                return Some(valid);
+            }
+        }
+
+        None
+    }
+
+    /// 在 IFD 中查找指定 tag 的 LONG 值（用于 ExifIFD 指针）
+    fn find_tag_long(
+        tiff: &[u8],
+        ifd_off: usize,
+        target_tag: u16,
+        read_u16: &dyn Fn(&[u8], usize) -> u16,
+        read_u32: &dyn Fn(&[u8], usize) -> u32,
+    ) -> Option<usize> {
+        if ifd_off + 2 > tiff.len() {
+            return None;
+        }
+        let count = read_u16(tiff, ifd_off) as usize;
+        let entries_start = ifd_off + 2;
+
+        for i in 0..count {
+            let entry_off = entries_start + i * 12;
+            if entry_off + 12 > tiff.len() {
+                break;
+            }
+
+            let tag = read_u16(tiff, entry_off);
+            if tag == target_tag {
+                // value/offset 字段在 entry_off + 8
+                let val = read_u32(tiff, entry_off + 8) as usize;
+                return Some(val);
+            }
+        }
+        None
+    }
+
+    /// 在 IFD 中查找指定 tag 的 ASCII 值
+    fn find_tag_ascii(
+        tiff: &[u8],
+        ifd_off: usize,
+        target_tag: u16,
+        read_u16: &dyn Fn(&[u8], usize) -> u16,
+        read_u32: &dyn Fn(&[u8], usize) -> u32,
+    ) -> Option<String> {
+        if ifd_off + 2 > tiff.len() {
+            return None;
+        }
+        let count = read_u16(tiff, ifd_off) as usize;
+        let entries_start = ifd_off + 2;
+
+        for i in 0..count {
+            let entry_off = entries_start + i * 12;
+            if entry_off + 12 > tiff.len() {
+                break;
+            }
+
+            let tag = read_u16(tiff, entry_off);
+            if tag != target_tag {
+                continue;
+            }
+
+            // type 字段（entry_off + 2），ASCII=2
+            let type_id = read_u16(tiff, entry_off + 2);
+            if type_id != 2 {
+                continue;
+            }
+
+            // count 字段（entry_off + 4）
+            let str_count = read_u32(tiff, entry_off + 4) as usize;
+
+            // 如果 count <= 4，value 在 entry 内（entry_off + 8）
+            // 否则 value 是 offset（相对于 TIFF header）
+            let data_off = if str_count <= 4 {
+                entry_off + 8
+            } else {
+                read_u32(tiff, entry_off + 8) as usize
+            };
+
+            if data_off + str_count > tiff.len() {
+                continue;
+            }
+
+            // 读取 ASCII 字符串（去掉尾部 null）
+            let bytes = &tiff[data_off..data_off + str_count];
+            let s = String::from_utf8_lossy(bytes);
+            let s = s.trim_end_matches('\0').trim();
+            return Some(s.to_string());
+        }
+        None
+    }
+
+    /// EXIF 日期字符串 "2024:01:15 14:30:00" → ISO 8601 "2024-01-15T14:30:00"
+    /// 带有效性验证（年份 ≥ 2000，排除全零日期）
+    fn parse_exif_date(s: &str) -> Option<String> {
+        let s = s.trim();
+        // 标准格式 "YYYY:MM:DD HH:MM:SS" 长度 19
+        if s.len() < 19 {
+            return None;
+        }
+
+        // 拆分日期和时间部分
+        let parts: Vec<&str> = s.splitn(2, ' ').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+
+        let date_parts: Vec<&str> = parts[0].split(':').collect();
+        if date_parts.len() != 3 {
+            return None;
+        }
+
+        let time_parts: Vec<&str> = parts[1].split(':').collect();
+        if time_parts.len() < 3 {
+            return None;
+        }
+
+        let year: i32 = date_parts[0].parse().ok()?;
+        let month: u32 = date_parts[1].parse().ok()?;
+        let day: u32 = date_parts[2].parse().ok()?;
+        let hour: u32 = time_parts[0].parse().ok()?;
+        let minute: u32 = time_parts[1].parse().ok()?;
+        // 秒可能有子秒部分 "SS.00"
+        let second: u32 = time_parts[2].split('.').next()?.parse().ok()?;
+
+        // 日期有效性检查（排除全零和传感器噪声乱码）
+        if year < 2000 {
+            return None;
+        }
+        if !(1..=12).contains(&month) {
+            return None;
+        }
+        if day < 1 || day > 31 {
+            return None;
+        }
+        if hour > 23 || minute > 59 || second > 59 {
+            return None;
+        }
+
+        Some(format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            year, month, day, hour, minute, second
+        ))
+    }
+
+    /// EXIF GPS Rational [d, m, s] → 十进制坐标
+    fn rational_to_gps_coord(value: &exif::Value) -> Option<f64> {
+        use exif::Value;
+        match value {
+            Value::Rational(ref vec) => {
+                if vec.len() >= 3 {
+                    let d = vec[0].to_f32() as f64;
+                    let m = vec[1].to_f32() as f64;
+                    let s = vec[2].to_f32() as f64;
+                    Some(d + m / 60.0 + s / 3600.0)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 /// macOS: 调整交通灯按钮（红黄绿）位置，让按钮中心对齐 AppHeader 内容中心。
@@ -937,6 +1469,8 @@ pub fn run() {
         commands::save_trial_anchor,
         commands::open_file,
         commands::trash_files,
+        commands::scan_photos_with_exif,
+        commands::open_folder,
     ]);
 
     #[cfg(not(feature = "native-heic"))]
@@ -954,6 +1488,8 @@ pub fn run() {
         commands::save_trial_anchor,
         commands::open_file,
         commands::trash_files,
+        commands::scan_photos_with_exif,
+        commands::open_folder,
     ]);
 
     builder

@@ -44,6 +44,14 @@ html.is-dragging *::selection {
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* 扫描进度不确定动画：渐变光带从左滑入、柔和扫过、右侧淡出，无缝循环 */
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateX(250%); opacity: 0; }
+}
+
 /* TailwindCSS v4 自定义主题扩展 */
 @theme {
   --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

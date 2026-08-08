@@ -203,12 +203,21 @@ export async function convertToJpg(
   const e = ext.toLowerCase();
   if (e === '.livp') return convertLivpToJpg(data, options);
   if (e === '.heic' || e === '.heif') return convertHeicToJpg(data, options);
+  // JPG/JPEG：通过 Canvas 重新编码，清除非标准 EXIF 结构（修复 piexifjs 无法处理的 JPEG）
+  // 不保留原 EXIF（这些照片本就无日期，且原 EXIF 结构是导致修改失败的原因）
+  if (e === '.jpg' || e === '.jpeg') {
+    const { quality = 0.95, onProgress } = options;
+    onProgress?.({ phase: 'convert', current: 0, total: 1, message: 'JPG 重编码修复中...' });
+    const blob = await convertImageViaCanvas(data, quality);
+    onProgress?.({ phase: 'done', current: 1, total: 1, message: '修复完成' });
+    return { blob, exif: null };
+  }
   if (CANVAS_EXTS.has(e)) return convertImageToJpg(data, options);
   throw new Error(`不支持的格式: ${ext}`);
 }
 
-/** 判断文件扩展名是否可转换 */
+/** 判断文件扩展名是否可转换（含 JPG 重编码修复） */
 export function isConvertible(ext: string): boolean {
   const e = ext.toLowerCase();
-  return e === '.livp' || e === '.heic' || e === '.heif' || CANVAS_EXTS.has(e);
+  return e === '.livp' || e === '.heic' || e === '.heif' || e === '.jpg' || e === '.jpeg' || CANVAS_EXTS.has(e);
 }

@@ -12,17 +12,23 @@ import {
   convertToJpg,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, downloadBlob, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
-export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast }: ToolProps) {
+export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange }: ToolProps) {
   const { t } = useTranslation();
   const [quality, setQuality] = useState(0.95);
   const [deleteOriginal, setDeleteOriginal] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
   const [excludedExts, setExcludedExts] = useState<Set<string>>(new Set());
+
+  // 通知父组件工具执行状态（running），用于禁用标签切换
+  useEffect(() => {
+    onBusyChange?.('convert', running);
+    return () => { onBusyChange?.('convert', false); };
+  }, [running, onBusyChange]);
 
   const convertiblePhotos = photos.filter((p) => CONVERTIBLE_EXTS.has(p.ext));
   const isDesktop = isTauri();
@@ -132,19 +138,25 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
             <div>
               <span className="text-xs text-[var(--color-gray-600)] mb-1.5 block">{t('home.organize.convert.selectFormats')}</span>
               <div className="flex flex-wrap gap-1.5">
-                {allExts.map((ext) => (
-                  <button
-                    key={ext}
-                    onClick={() => toggleExt(ext)}
-                    className={`px-2 py-1 rounded text-xs font-mono cursor-pointer border-none transition-all ${
-                      !excludedExts.has(ext)
-                        ? 'bg-[var(--color-brand)] text-white'
-                        : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] line-through'
-                    }`}
-                  >
-                    {ext}
-                  </button>
-                ))}
+                {(() => {
+                  const extCounts = new Map(countByExt(convertiblePhotos).map(({ ext, count }) => [ext, count]));
+                  return allExts.map((ext) => (
+                    <button
+                      key={ext}
+                      onClick={() => toggleExt(ext)}
+                      className={`px-2 py-1 rounded text-xs font-mono cursor-pointer border-none transition-all inline-flex items-center gap-1 ${
+                        !excludedExts.has(ext)
+                          ? 'bg-[var(--color-brand)] text-white'
+                          : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] line-through'
+                      }`}
+                    >
+                      {ext}
+                      <span className={`text-[10px] ${!excludedExts.has(ext) ? 'text-white/70' : ''}`}>
+                        {extCounts.get(ext) ?? 0}
+                      </span>
+                    </button>
+                  ));
+                })()}
               </div>
             </div>
           )}
@@ -174,17 +186,34 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
             </label>
           )}
 
-          {/* 文件列表预览 */}
-          <div className="max-h-[120px] overflow-auto space-y-1">
-            {selectedPhotos.slice(0, 20).map((p) => (
-              <div key={p.id} className="text-xs px-2 py-1 rounded bg-[var(--color-gray-50)] text-[var(--color-gray-600)] flex items-center gap-2">
-                <span className="text-[var(--color-brand)] font-mono">{p.ext}</span>
-                <span className="truncate flex-1">{p.name}</span>
-                <span className="text-[var(--color-gray-400)]">→ .jpg</span>
-              </div>
-            ))}
+          {/* 文件列表预览（含原大小 + 预估 JPG 大小） */}
+          <div className="max-h-[200px] overflow-y-auto overflow-x-hidden space-y-1 pr-1 custom-scrollbar">
+            {selectedPhotos.slice(0, 20).map((p) => {
+              const estSize = estimateJpgSize(p.size, p.ext, quality);
+              const isExpanding = estSize > p.size;
+              return (
+                <div key={p.id} className="text-xs px-2 py-1 rounded bg-[var(--color-gray-50)] text-[var(--color-gray-600)] flex items-center gap-2">
+                  <span className="text-[var(--color-brand)] font-mono shrink-0">{p.ext}</span>
+                  <span className="truncate flex-1 min-w-0" title={p.name}>{p.name}</span>
+                  <span className="text-[var(--color-gray-400)] shrink-0 tabular-nums">{formatBytes(p.size)}</span>
+                  <span className="text-[var(--color-gray-400)] shrink-0">→</span>
+                  <span className={`shrink-0 tabular-nums ${isExpanding ? 'text-orange-500' : 'text-green-600'}`} title={t('home.organize.convert.estimatedSizeHint')}>
+                    {formatBytes(estSize)}
+                  </span>
+                </div>
+              );
+            })}
             {selectedPhotos.length > 20 && (
               <div className="text-xs text-center text-[var(--color-gray-400)] py-1">{t('home.organize.convert.moreFiles', { count: selectedPhotos.length - 20 })}</div>
+            )}
+            {/* 汇总：原总大小 → 预估总大小 */}
+            {selectedPhotos.length > 0 && (
+              <div className="text-xs px-2 py-1.5 rounded bg-[var(--color-brand-bg)] text-[var(--color-brand)] flex items-center gap-2 font-[600] mt-1">
+                <span>{t('home.organize.convert.totalSummary')}</span>
+                <span className="tabular-nums">{formatBytes(selectedPhotos.reduce((s, p) => s + p.size, 0))}</span>
+                <span>→</span>
+                <span className="tabular-nums">{formatBytes(selectedPhotos.reduce((s, p) => s + estimateJpgSize(p.size, p.ext, quality), 0))}</span>
+              </div>
             )}
           </div>
 

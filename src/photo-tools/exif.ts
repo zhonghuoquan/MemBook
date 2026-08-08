@@ -37,16 +37,160 @@ function dataURLToArrayBuffer(dataURL: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-/** 读取 EXIF 拍摄时间（优先级：DateTimeOriginal → CreateDate → DateTime） */
-export async function readExifDate(data: ArrayBuffer): Promise<Date | null> {
+/**
+ * 读取 EXIF 拍摄时间（增强版）
+ *
+ * 优先级（业界通用）：
+ * 1. SubSecDateTimeOriginal（iPhone 子秒级精度，含时区偏移）
+ * 2. DateTimeOriginal（标准拍摄时间）
+ * 3. CreateDate / DateTimeDigitized（数字化时间）
+ * 4. DateTime（TIFF/IFD0 修改时间）
+ * 5. GPSDateStamp + GPSTimeStamp（GPS 时间，跨时区时可能不准但比没有强）
+ *
+ * 增强：
+ * - 日期有效性验证（排除全零 "0000:00:00 00:00:00" 等无效日期）
+ * - 年份合理性检查（≥2000，避免传感器噪声产生的乱码日期）
+ * - 接受 ArrayBuffer | Uint8Array（兼容 Tauri readFile 返回的 Uint8Array）
+ *
+ * @param data 图片二进制数据（前 64KB 即可，EXIF 段在文件头部）
+ */
+export async function readExifDate(data: ArrayBuffer | Uint8Array): Promise<Date | null> {
   try {
-    const result = await exifr.parse(data, ['DateTimeOriginal', 'CreateDate', 'DateTime']);
-    if (result?.DateTimeOriginal) return result.DateTimeOriginal;
-    if (result?.CreateDate) return result.CreateDate;
-    if (result?.DateTime) return result.DateTime;
+    // 用对象形式指定 IFD 段，比数组更灵活，能获取 SubSec* 和 GPS 字段
+    const result = await exifr.parse(data, {
+      tiff: true,   // IFD0: DateTime
+      exif: true,   // Exif IFD: DateTimeOriginal, DateTimeDigitized, SubSec*
+      gps: true,    // GPS IFD: GPSDateStamp, GPSTimeStamp
+    });
+
+    if (result) {
+      // 按优先级遍历候选日期字段
+      const candidates: unknown[] = [
+        result.SubSecDateTimeOriginal,
+        result.DateTimeOriginal,
+        result.CreateDate,
+        result.DateTime,
+      ];
+
+      for (const c of candidates) {
+        const d = pickValidDate(c);
+        if (d) return d;
+      }
+
+      // GPS 时间作为最后 fallback
+      if (result.GPSDateStamp) {
+        const d = gpsToDate(result.GPSDateStamp, result.GPSTimeStamp);
+        if (d) return d;
+      }
+    }
   } catch {
     // 解析失败静默处理
   }
+  return null;
+}
+
+/**
+ * 验证并转换日期值
+ * - 排除全零 "0000:00:00 00:00:00" 等无效日期
+ * - 年份必须 ≥2000（避免传感器噪声产生的乱码日期）
+ */
+function pickValidDate(v: unknown): Date | null {
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    if (v.getFullYear() < 2000) return null;
+    return v;
+  }
+  if (typeof v === 'number') {
+    // exifr 可能返回 Unix 时间戳（秒或毫秒）
+    const ms = v > 1e12 ? v : v * 1000;
+    const d = new Date(ms);
+    if (isNaN(d.getTime()) || d.getFullYear() < 2000) return null;
+    return d;
+  }
+  if (typeof v === 'string') {
+    // EXIF 日期格式: "2024:01:15 14:30:00" 或 "2024-01-15 14:30:00"
+    const m = v.match(/^(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (m) {
+      const year = +m[1];
+      if (year < 2000) return null;
+      const d = new Date(year, +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+      if (isNaN(d.getTime())) return null;
+      return d;
+    }
+    // 尝试标准 Date 解析
+    const d = new Date(v);
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) return d;
+  }
+  return null;
+}
+
+/**
+ * GPS 日期时间 → Date
+ * GPSDateStamp 格式: "2024:01:15"
+ * GPSTimeStamp exifr 可能返回字符串 "14:30:00" 或有理数数组 [[14,1],[30,1],[0,1]]
+ */
+function gpsToDate(dateStamp: string, timeStamp?: unknown): Date | null {
+  const dm = typeof dateStamp === 'string'
+    ? dateStamp.match(/^(\d{4}):(\d{2}):(\d{2})/)
+    : null;
+  if (!dm) return null;
+  const year = +dm[1], month = +dm[2], day = +dm[3];
+  if (year < 2000) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  let hour = 12, minute = 0, second = 0;
+
+  if (timeStamp) {
+    if (typeof timeStamp === 'string') {
+      const tm = timeStamp.match(/^(\d{1,2}):(\d{2}):(\d{2})/);
+      if (tm) {
+        hour = +tm[1]; minute = +tm[2]; second = +tm[3];
+      }
+    } else if (Array.isArray(timeStamp) && timeStamp.length >= 3) {
+      // exifr 可能返回有理数数组 [[14,1],[30,1],[0,1]]
+      const toNum = (v: unknown): number => {
+        if (typeof v === 'number') return v;
+        if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'number') return v[0] / v[1];
+        return 0;
+      };
+      hour = Math.floor(toNum(timeStamp[0]));
+      minute = Math.floor(toNum(timeStamp[1]));
+      second = Math.floor(toNum(timeStamp[2]));
+    }
+  }
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    hour = 12; minute = 0; second = 0;
+  }
+
+  const d = new Date(year, month - 1, day, hour, minute, second);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * 读取拍摄日期（增强版：EXIF + 文件名 fallback）
+ *
+ * 先尝试 EXIF 读取（5 个字段 + GPS 时间），全部失败后从文件名解析日期。
+ * 适用于扫描时填充 dateTaken 字段——很多照片（如微信保存的截图）EXIF 被剥离，
+ * 但文件名包含日期信息（如 "2025-05-05 100649.jpg"）。
+ *
+ * @param data 图片二进制（前 64KB 即可）
+ * @param filename 文件名（用于 fallback 解析）
+ * @returns ISO 字符串（可直接填入 PhotoFileInfo.dateTaken），全失败返回 null
+ */
+export async function readExifDateWithFallback(
+  data: ArrayBuffer | Uint8Array,
+  filename: string,
+): Promise<string | null> {
+  // 1. EXIF 读取
+  const d = await readExifDate(data);
+  if (d) return d.toISOString();
+
+  // 2. 文件名解析 fallback
+  const { parseFilenameDate } = await import('./filename-time');
+  const d2 = parseFilenameDate(filename);
+  if (d2) return d2.toISOString();
+
   return null;
 }
 
@@ -111,7 +255,27 @@ export async function writeExifDateToJpeg(
 
   const exifBytes = piexif.dump(exifObj);
   const newDataURL = piexif.insert(exifBytes, dataURL);
-  return dataURLToArrayBuffer(newDataURL);
+  const result = dataURLToArrayBuffer(newDataURL);
+
+  // 验证：用 exifr 读回 DateTimeOriginal 确认日期已写入
+  // 注意：piexifjs 的 load 返回 ASCII 值为字节数组（非字符串），不能直接用 piexif.load 比对
+  try {
+    const readBack = await exifr.parse(result, ['DateTimeOriginal']);
+    const actualDate = readBack?.DateTimeOriginal;
+    if (!actualDate) {
+      throw new Error('读回的 EXIF 中无 DateTimeOriginal');
+    }
+    const actualStr = formatDateForExif(actualDate instanceof Date ? actualDate : new Date(actualDate));
+    if (actualStr !== dateStr) {
+      throw new Error(`日期验证不匹配（期望 "${dateStr}"，实际 "${actualStr}"）`);
+    }
+  } catch (verifyErr) {
+    throw new Error(
+      `EXIF 写入后验证失败，修改未生效: ${verifyErr instanceof Error ? verifyErr.message : verifyErr}`,
+    );
+  }
+
+  return result;
 }
 
 /**
@@ -386,10 +550,41 @@ export async function writeExifDate(
   if (ext === '.jpg' || ext === '.jpeg') {
     return writeExifDateToJpeg(data, date, preserveTime);
   }
-  const exifBytes = buildDateExifBytes(date, preserveTime);
-  if (ext === '.png') return insertExifIntoPng(data, exifBytes);
-  if (ext === '.webp') return insertExifIntoWebp(data, exifBytes);
-  throw new Error(`不支持写入 EXIF 的格式: ${ext}`);
+  const finalDate = preserveTime
+    ? new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+        preserveTime.getHours(),
+        preserveTime.getMinutes(),
+        preserveTime.getSeconds(),
+      )
+    : date;
+  const expectedDateStr = formatDateForExif(finalDate);
+  const exifBytes = buildDateExifBytes(finalDate, undefined);
+  let result: ArrayBuffer;
+  if (ext === '.png') result = insertExifIntoPng(data, exifBytes);
+  else if (ext === '.webp') result = insertExifIntoWebp(data, exifBytes);
+  else throw new Error(`不支持写入 EXIF 的格式: ${ext}`);
+
+  // 验证：用 exifr 读回 DateTimeOriginal 确认日期已写入
+  try {
+    const readBack = await exifr.parse(result, ['DateTimeOriginal']);
+    const actualDate = readBack?.DateTimeOriginal;
+    if (!actualDate) {
+      throw new Error('读回的 EXIF 中无 DateTimeOriginal');
+    }
+    const actualStr = formatDateForExif(actualDate instanceof Date ? actualDate : new Date(actualDate));
+    if (actualStr !== expectedDateStr) {
+      throw new Error(`日期验证不匹配（期望 "${expectedDateStr}"，实际 "${actualStr}"）`);
+    }
+  } catch (verifyErr) {
+    throw new Error(
+      `EXIF 写入后验证失败，修改未生效: ${verifyErr instanceof Error ? verifyErr.message : verifyErr}`,
+    );
+  }
+
+  return result;
 }
 
 /**

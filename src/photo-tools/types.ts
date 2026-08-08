@@ -58,20 +58,30 @@ export interface PhotoFileInfo {
   thumbUrl?: string;
 }
 
-/** 去重组：一组内容完全相同的文件 */
+/** 重复类型
+ * - exact: 字节级完全相同（SHA256 哈希匹配）
+ * - visual: 视觉相同但字节不同（pHash 汉明距离 ≤ 阈值，如 EXIF 差异/重新压缩）
+ */
+export type DuplicateSimilarity = 'exact' | 'visual';
+
+/** 去重组：一组内容相同（精确或视觉）的文件 */
 export interface DedupeGroup {
   /** 组内序号 */
   groupId: string;
-  /** SHA256 哈希（前 16 位用于展示） */
+  /** SHA256 哈希（前 16 位用于展示）；visual 类型时为 pHash */
   hashShort: string;
-  /** 完整 SHA256 哈希 */
+  /** 完整 SHA256 哈希；visual 类型时为 pHash 全量 */
   hashFull: string;
   /** 组内所有文件 */
   files: PhotoFileInfo[];
   /** 建议保留的文件索引 */
   keepIndex: number;
-  /** 文件大小 (bytes，组内都一样) */
+  /** 文件大小 (bytes；exact 组内相同，visual 组内可能不同，取首个) */
   fileSize: number;
+  /** 重复类型：精确匹配 / 视觉相似 */
+  similarity: DuplicateSimilarity;
+  /** visual 类型时的汉明距离（0 = pHash 完全相同），exact 类型为 0 */
+  distance?: number;
 }
 
 /** 去重结果 */
@@ -86,6 +96,10 @@ export interface DedupeResult {
   freedBytes: number;
   /** 所有重复组 */
   groups: DedupeGroup[];
+  /** 精确匹配组数（SHA256 完全相同） */
+  exactGroups?: number;
+  /** 视觉相似组数（pHash 汉明距离 ≤ 阈值） */
+  visualGroups?: number;
 }
 
 /** 时间归类预览条目 */
