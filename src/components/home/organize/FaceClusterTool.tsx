@@ -87,6 +87,48 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         n.delete(photo.id);
         return n;
       });
+      // 同步从聚类结果与检测缓存中移除，保证界面显示即时更新
+      setResult((prev) => {
+        if (!prev) return prev;
+        let hasFace = false;
+        const clusters = prev.clusters
+          .map((c) => {
+            const photos = c.photos.filter((p) => p.id !== photo.id);
+            const faces = c.faces.filter((f) => f.photoId !== photo.id);
+            // 照片未命中本组，原样返回
+            if (photos.length === c.photos.length && faces.length === c.faces.length) return c;
+            if (c.faces.length > faces.length) hasFace = true;
+            // 组内照片删光则整组移除
+            if (photos.length === 0) return null;
+            return {
+              ...c,
+              photos,
+              faces,
+              representativeFace: faces.length > 0
+                ? faces.reduce((best, f) => (f.width * f.height * f.score > best.width * best.height * best.score ? f : best), faces[0])
+                : c.representativeFace,
+              photoCount: photos.length,
+            };
+          })
+          .filter((c): c is FaceCluster => c !== null);
+        const noFacePhotos = prev.noFacePhotos.filter((p) => p.id !== photo.id);
+        // 照片整体数量、有人脸照片数、无人脸照片数同步递减
+        const totalPhotos = Math.max(0, prev.totalPhotos - 1);
+        const photosWithFaces = Math.max(0, prev.photosWithFaces - (hasFace ? 1 : 0));
+        return { ...prev, clusters, noFacePhotos, totalPhotos, photosWithFaces };
+      });
+      setDetection((prev) => {
+        if (!prev) return prev;
+        const faces = prev.faces.filter((f) => f.photoId !== photo.id);
+        const nextSet = new Set(prev.photosWithFacesSet);
+        nextSet.delete(photo.id);
+        return {
+          ...prev,
+          faces,
+          photosWithFacesSet: nextSet,
+          totalPhotos: Math.max(0, prev.totalPhotos - 1),
+        };
+      });
     },
     [sourceMode, onPhotosUpdate, addToast, t],
   );
