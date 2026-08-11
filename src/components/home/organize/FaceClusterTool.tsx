@@ -309,7 +309,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <label className="text-xs text-[var(--color-text-secondary)] whitespace-nowrap">
-            {t('home.organize.faceCluster.threshold', '距离阈值')}
+            {t('home.organize.faceCluster.threshold', '识别灵敏度')}
           </label>
           <input
             type="range"
@@ -336,7 +336,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         )}
       </div>
       <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
-        {t('home.organize.faceCluster.thresholdHint', '值越小分越细（更多人脸组），值越大合越多（更宽松）')}
+        {t('home.organize.faceCluster.thresholdHint', '数值越小识别越严格（分组更多更精细），数值越大识别越宽松（同一个人更易被归为一组）')}
       </p>
 
       {/* ── 中部：进度条 + 三阶段指示 ── */}

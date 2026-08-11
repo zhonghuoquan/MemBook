@@ -320,12 +320,12 @@
         "processing": "处理中..."
       },
       "exif": {
-        "title": "Exif修改",
-        "description": "修改拍摄日期 / 添加 GPS（支持 JPEG/PNG/WebP，当前 {{count}} 张可处理）",
-        "sidebarDesc": "改拍摄日期/加GPS",
-        "noWritablePhotos": "当前无可处理的照片（支持 JPEG / PNG / WebP）",
+        "title": "修改拍摄信息",
+        "description": "修改拍摄日期或添加拍摄位置（支持常见图片格式，当前 {{count}} 张可处理）",
+        "sidebarDesc": "改日期/加位置",
+        "noWritablePhotos": "当前没有可处理的照片（支持常见图片格式）",
         "modeDate": "修改日期",
-        "modeGps": "添加 GPS",
+        "modeGps": "添加位置",
         "excludeSorted": "排除已在\"MemBook照片整理\"目录中的文件",
         "targetDate": "目标日期",
         "targetDatePlaceholder": "如 2024-01-15 或 2024:01:15 14:30",
@@ -415,8 +415,8 @@
       },
       "dedupe": {
         "title": "照片去重",
-        "description": "查找并移除重复照片（SHA256 精确匹配 + pHash 视觉相似匹配）",
-        "sidebarDesc": "精确+视觉相似匹配",
+        "description": "找出重复的照片并帮你移除，节省存储空间",
+        "sidebarDesc": "完全相同 + 看起来相似",
         "startScan": "开始扫描重复",
         "cancel": "取消",
         "noDuplicatesResult": "未发现重复照片。",
@@ -437,11 +437,11 @@
         "visualBadge": "视觉 {{count}} 组",
         "exactLabel": "精确",
         "visualLabel": "视觉",
-        "exactTooltip": "字节级完全相同（SHA256 匹配）",
-        "visualTooltip": "视觉相同但字节不同（pHash 汉明距离 ≤ 阈值，如 EXIF 差异/重新压缩）",
+        "exactTooltip": "两张照片的文件内容完全相同",
+        "visualTooltip": "看起来一样但文件细节有差别（例如经过重新压缩）",
         "hasDateLabel": "有日期",
         "noDateLabel": "无日期",
-        "hasDateTooltip": "含 EXIF 拍摄日期，优先保留",
+        "hasDateTooltip": "含拍摄日期，优先保留",
         "noDateTooltip": "缺失拍摄日期，优先删除",
         "willFree": "将删除 {{count}} 张 · 释放 {{size}}",
         "keepAtLeastOne": "每组至少需保留 1 张",
@@ -468,15 +468,15 @@
       },
       "similar": {
         "title": "相似照片分析",
-        "description": "查找视觉相似的照片（连拍/同场景），手动标记删除",
+        "description": "找出角度、场景相似的连拍照片，帮你挑选保留",
         "sidebarDesc": "连拍/同场景相似照",
         "startScan": "分析相似照片",
         "rescan": "重新分析",
         "cancel": "取消",
-        "distanceLabel": "相似距离",
-        "distanceHint": "pHash 距离范围（6-15 为相似，越小越接近），拖动两端滑块可同时设置最小/最大距离",
+        "distanceLabel": "相似程度",
+        "distanceHint": "拖动滑块调节相似程度：数字越小越严格（只找几乎一样的），数字越大越宽松（连拍、同场景也会被找出）",
         "noResult": "未发现相似照片。",
-        "groupLabel": "{{count}} 张 · 平均距离 {{avg}}",
+        "groupLabel": "{{count}} 张 · 平均相似度 {{avg}}",
         "suggestKeep": "建议保留",
         "clickToToggle": "点击切换标记删除",
         "deleteSelected": "删除选中 {{count}} 张",
@@ -618,8 +618,8 @@
         "title": "人脸识别",
         "description": "按人物归类照片，自动识别同一人的不同照片，可加入相册",
         "sidebarDesc": "按人物自动分类",
-        "threshold": "距离阈值",
-        "thresholdHint": "值越小分越细（更多人脸组），值越大合越多（更宽松）",
+        "threshold": "识别灵敏度",
+        "thresholdHint": "数值越小识别越严格（分组更多更精细），数值越大识别越宽松（同一个人更易被归为一组）",
         "start": "开始识别",
         "redetect": "重新检测",
         "cancel": "取消",
@@ -678,7 +678,7 @@
       },
       "sidebar": {
         "categorySmart": "智能整理",
-        "categoryMetadata": "元数据",
+        "categoryMetadata": "照片信息",
         "categoryBrowse": "浏览查看",
         "timeline": "时间线",
         "timelineDesc": "按年/月浏览照片",
@@ -808,7 +808,7 @@
     "tools": {
       "dedupe": {
         "title": "照片去重",
-        "desc": "基于文件哈希检测并移除重复照片",
+        "desc": "自动找出重复的照片并帮你移除，节省存储空间",
         "shortDesc": "查找并移除完全相同的重复照片"
       },
       "organize": {
@@ -817,9 +817,9 @@
         "shortDesc": "按拍摄日期整理到 MemBook照片整理/年/月 目录"
       },
       "exif": {
-        "title": "Exif修改",
-        "desc": "修改照片的拍摄时间、GPS 等元数据",
-        "shortDesc": "修改拍摄日期 / 添加 GPS 位置"
+        "title": "修改拍摄信息",
+        "desc": "修改照片的拍摄时间、拍摄位置等信息",
+        "shortDesc": "修改拍摄日期 / 添加位置信息"
       },
       "convert": {
         "title": "格式转换",
@@ -833,7 +833,7 @@
       "noDuplicates": "未发现重复照片",
       "deleteDuplicates": "删除重复项",
       "keepBest": "保留最佳质量",
-      "hashing": "正在计算哈希..."
+      "hashing": "正在比对照片..."
     },
     "organize": {
       "previewing": "正在预览归类结果...",
