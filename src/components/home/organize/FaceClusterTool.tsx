@@ -379,7 +379,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             value={threshold}
             onChange={(e) => setThreshold(parseFloat(e.target.value))}
             disabled={running}
-            className="flex-1 accent-[#8B6BB0] cursor-pointer"
+            className="face-sensitivity-range flex-1"
           />
           <span className="text-xs font-mono text-[var(--color-gray-600)] w-10 text-right">
             {threshold.toFixed(2)}
