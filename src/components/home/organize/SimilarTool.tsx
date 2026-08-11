@@ -21,8 +21,9 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, CancelButton, PrimaryButton, DualRangeSlider, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, DualRangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
+import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
 export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode }: ToolProps) {
   const { t } = useTranslation();
@@ -33,6 +34,8 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
   const [scanned, setScanned] = useState(false);
   const [minDistance, setMinDistance] = useState(6);
   const [maxDistance, setMaxDistance] = useState(15);
+  // 加入相册对话框
+  const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
   // 用户标记删除的索引：groupId → Set<文件索引>
   const [markedDelete, setMarkedDelete] = useState<Record<string, Set<number>>>({});
   const abortRef = useRef<AbortController | null>(null);
@@ -121,6 +124,22 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
     return g.files.filter((_, i) => marks.has(i));
   });
 
+  // 保留的照片列表（未标记删除的，供“加入相册”使用）
+  const keptList: PhotoFileInfo[] = groups.flatMap((g) => {
+    const marks = markedDelete[g.groupId];
+    if (!marks) return g.files;
+    return g.files.filter((_, i) => !marks.has(i));
+  });
+
+  // 加入相册
+  const handleAddToAlbum = () => {
+    if (keptList.length === 0) {
+      addToast({ type: 'warning', message: t('home.organize.albumBridge.selectPhotosFirst') });
+      return;
+    }
+    setAlbumBridgeOpen(true);
+  };
+
   // 统计：总组数 / 涉及照片数 / 已标记删除数
   const totalGroups = groups.length;
   const photosInvolved = groups.reduce((s, g) => s + g.files.length, 0);
@@ -188,15 +207,22 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
         </svg>
       }
     >
+      {/* 固定“加入相册”浮动按钮（与日历/人脸聚类一致：右上角，样式统一） */}
+      {groups.length > 0 && (
+        <div className="absolute top-4 right-4 z-20">
+          <AddToAlbumButton
+            count={keptList.length}
+            onClick={handleAddToAlbum}
+          />
+        </div>
+      )}
+
       {/* 距离范围设置 + 查找按钮（最小/最大距离整合为单个双滑块控件） */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex-1 min-w-[240px]">
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-[var(--color-text-secondary)]">
               {t('home.organize.similar.distanceLabel', '相似距离')}
-            </span>
-            <span className="text-xs font-mono font-[600] text-[var(--color-brand)]">
-              {minDistance} — {maxDistance}
             </span>
           </div>
           <DualRangeSlider
@@ -209,7 +235,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
             onChange={(minV, maxV) => { setMinDistance(minV); setMaxDistance(maxV); }}
             accent="#C95A4D"
           />
-          <p className="text-[11px] text-[var(--color-gray-500)] mt-1.5">
+          <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
             {t('home.organize.similar.distanceHint')}
           </p>
         </div>
@@ -329,6 +355,16 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
           readPhotoData={readPhotoData}
         />
       )}
+
+      {/* 加入相册对话框 */}
+      <AlbumBridgeDialog
+        open={albumBridgeOpen}
+        onClose={() => setAlbumBridgeOpen(false)}
+        photos={keptList}
+        sourceMode={sourceMode}
+        addToast={addToast}
+        readPhotoData={readPhotoData}
+      />
     </ToolCard>
   );
 }

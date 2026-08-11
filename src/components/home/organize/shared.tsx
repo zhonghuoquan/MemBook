@@ -340,7 +340,6 @@ export function DualRangeSlider({
   disabled?: boolean;
   accent?: string;
 }) {
-  const trackRef = useRef<HTMLDivElement | null>(null);
   const range = Math.max(1, max - min);
   const leftPct = ((valueMin - min) / range) * 100;
   const rightPct = ((valueMax - min) / range) * 100;
@@ -355,76 +354,104 @@ export function DualRangeSlider({
   };
 
   // 共享的滑块样式：输入本身不拦截点击（pointer-events-none），仅 thumb 可拖动
+  // 高度 h-6 (24px) 让 thumb 有空间垂直居中于 8px 轨道上，避免圆点偏离
   const baseSlider =
-    'pointer-events-none absolute w-full h-2 rounded-full appearance-none bg-transparent';
+    'pointer-events-none absolute top-0 left-0 w-full h-6 rounded-full appearance-none bg-transparent';
 
   return (
-    <div className={`relative w-full ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      {/* 轨道背景 */}
-      <div ref={trackRef} className="h-2 rounded-full bg-[var(--color-gray-100)] ring-1 ring-inset ring-[var(--color-border)]/40" />
-      {/* 选中区间高亮 */}
-      <div
-        className="absolute top-0 h-2 rounded-full"
-        style={{
-          left: `${leftPct}%`,
-          width: `${rightPct - leftPct}%`,
-          background: `linear-gradient(90deg, ${accent}, ${accent})`,
-          opacity: 0.85,
-        }}
-      />
-      {/* 最小值滑块（下层 thumb 可拖动） */}
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={valueMin}
-        onChange={(e) => handleMinChange(parseFloat(e.target.value))}
-        className={`${baseSlider} left-0 z-20`}
-        style={{
-          ['--range-accent' as string]: accent,
-        }}
-        aria-label="min"
-      />
-      {/* 最大值滑块（上层 thumb 可拖动） */}
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={valueMax}
-        onChange={(e) => handleMaxChange(parseFloat(e.target.value))}
-        className={`${baseSlider} left-0 z-30`}
-        style={{
-          ['--range-accent' as string]: accent,
-        }}
-        aria-label="max"
-      />
+    <div className={`relative w-full pt-5 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* 数值标签：悬浮于对应 thumb 上方，随滑块位置移动，确保数值与调整条位置对应 */}
+      <div className="absolute top-0 left-0 w-full h-5 pointer-events-none">
+        {/* 最小值标签（左对齐避免溢出容器） */}
+        <span
+          className="absolute -translate-x-1/2 text-[11px] font-mono font-[600] text-[var(--color-gray-700)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-1.5 py-0.5 shadow-sm whitespace-nowrap"
+          style={{ left: `clamp(0%, ${leftPct}%, 100%)` }}
+        >
+          {valueMin}
+        </span>
+        {/* 最大值标签（右对齐避免溢出容器） */}
+        <span
+          className="absolute -translate-x-1/2 text-[11px] font-mono font-[600] text-[var(--color-gray-700)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-1.5 py-0.5 shadow-sm whitespace-nowrap"
+          style={{ left: `clamp(0%, ${rightPct}%, 100%)` }}
+        >
+          {valueMax}
+        </span>
+      </div>
+
+      {/* 轨道容器：h-6 与输入等高，轨道垂直居中，保证 thumb 圆点居中在控制条上 */}
+      <div className="relative h-6">
+        {/* 轨道背景 */}
+        <div className="absolute top-1/2 -translate-y-1/2 w-full h-2 rounded-full bg-[var(--color-gray-100)] ring-1 ring-inset ring-[var(--color-border)]/40" />
+        {/* 选中区间高亮 */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full"
+          style={{
+            left: `${leftPct}%`,
+            width: `${rightPct - leftPct}%`,
+            background: `linear-gradient(90deg, ${accent}, ${accent})`,
+            opacity: 0.9,
+          }}
+        />
+        {/* 最小值滑块（下层 thumb 可拖动） */}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={valueMin}
+          onChange={(e) => handleMinChange(parseFloat(e.target.value))}
+          className={`${baseSlider} z-20`}
+          style={{
+            ['--range-accent' as string]: accent,
+          }}
+          aria-label="min"
+        />
+        {/* 最大值滑块（上层 thumb 可拖动） */}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={valueMax}
+          onChange={(e) => handleMaxChange(parseFloat(e.target.value))}
+          className={`${baseSlider} z-30`}
+          style={{
+            ['--range-accent' as string]: accent,
+          }}
+          aria-label="max"
+        />
+      </div>
+
       <style>{`
+        input[type='range']::-webkit-slider-runnable-track {
+          background: transparent;
+          border: none;
+        }
         input[type='range']::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
           width: 18px;
           height: 18px;
+          margin-top: -5px;
           border-radius: 9999px;
           background: #fff;
-          border: 2.5px solid var(--range-accent, var(--color-brand));
-          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          border: 3px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 5px rgba(0,0,0,0.22);
           cursor: grab;
           pointer-events: auto;
           transition: transform 0.12s ease, box-shadow 0.12s ease;
         }
         input[type='range']::-webkit-slider-thumb:hover {
-          transform: scale(1.12);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+          transform: scale(1.15);
+          box-shadow: 0 2px 9px rgba(0,0,0,0.28);
         }
         input[type='range']::-moz-range-thumb {
           width: 18px;
           height: 18px;
           border-radius: 9999px;
           background: #fff;
-          border: 2.5px solid var(--range-accent, var(--color-brand));
-          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          border: 3px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 5px rgba(0,0,0,0.22);
           cursor: grab;
           pointer-events: auto;
         }
@@ -464,6 +491,53 @@ export function PrimaryButton({
                   disabled:opacity-40 disabled:cursor-not-allowed ${colors[variant]}`}
     >
       {loading ? t('home.organize.shared.processing') : children}
+    </button>
+  );
+}
+
+/**
+ * 统一“加入相册”浮动按钮
+ *
+ * 用于各个整理工具（人脸聚类 / 相似分析 / 时间线 / 日历等），
+ * 固定在卡片右上角，样式全局统一。使用品牌色渐变 + 图标 + 计数，
+ * 未选择照片时置灰并禁用。
+ */
+export function AddToAlbumButton({
+  count,
+  disabled,
+  onClick,
+  label,
+}: {
+  count: number;
+  disabled?: boolean;
+  onClick: () => void;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  const text = label ?? t('home.organize.albumBridge.buttonLabel');
+  const canAdd = count > 0 && !disabled;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!canAdd}
+      title={!canAdd ? t('home.organize.albumBridge.selectPhotosFirst') : text}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-[600] transition-all cursor-pointer
+        shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/50 ${
+        canAdd
+          ? 'bg-gradient-to-b from-[var(--color-brand)] to-[var(--color-brand-dark)] text-white hover:shadow-[var(--shadow-md)] hover:brightness-110 active:brightness-95'
+          : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed shadow-none'
+      }`}
+    >
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M8 3v10M3 8h10" />
+      </svg>
+      {text}
+      {canAdd && (
+        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white/25 text-[11px] leading-none">
+          {count}
+        </span>
+      )}
     </button>
   );
 }

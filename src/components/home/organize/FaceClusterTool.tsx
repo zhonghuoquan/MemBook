@@ -30,7 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, CancelButton, PrimaryButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 import { getFaceThumbUrl } from './thumbCache';
 
@@ -285,23 +285,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       {/* 固定“加入相册”浮动按钮（与日历/时间线一致：固定在右上角，样式统一） */}
       {result && (
         <div className="absolute top-4 right-4 z-20">
-          <button
-            type="button"
+          <AddToAlbumButton
+            count={selectedIds.size}
             onClick={handleAddToAlbum}
-            disabled={selectedIds.size === 0}
-            title={selectedIds.size === 0 ? t('home.organize.faceCluster.selectPhotosFirst') : t('home.organize.faceCluster.addToAlbum')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[600] transition-all border-none cursor-pointer shadow-sm ${
-              selectedIds.size > 0
-                ? 'bg-[var(--color-brand)] text-white hover:opacity-90'
-                : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
-            }`}
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-              <path d="M8 3v10M3 8h10" />
-            </svg>
-            {t('home.organize.faceCluster.addToAlbum')}
-            {selectedIds.size > 0 && <span className="opacity-80">· {selectedIds.size}</span>}
-          </button>
+          />
         </div>
       )}
 
