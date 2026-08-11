@@ -320,12 +320,12 @@
         "processing": "Processing..."
       },
       "exif": {
-        "title": "EXIF Edit",
-        "description": "Edit date taken / add GPS (JPEG/PNG/WebP, {{count}} editable)",
-        "sidebarDesc": "Edit date / add GPS",
-        "noWritablePhotos": "No editable photos (JPEG / PNG / WebP supported)",
+        "title": "Edit Photo Info",
+        "description": "Edit capture date or add location (common image formats, {{count}} editable)",
+        "sidebarDesc": "Edit date / add location",
+        "noWritablePhotos": "No editable photos (common image formats supported)",
         "modeDate": "Edit Date",
-        "modeGps": "Add GPS",
+        "modeGps": "Add Location",
         "excludeSorted": "Exclude files already in \"MemBook照片整理\" directory",
         "targetDate": "Target Date",
         "targetDatePlaceholder": "e.g. 2024-01-15 or 2024:01:15 14:30",
@@ -414,8 +414,8 @@
       },
       "dedupe": {
         "title": "Photo Deduplication",
-        "description": "Find and remove duplicate photos (SHA256 exact match + pHash visual similarity)",
-        "sidebarDesc": "Exact + visual match",
+        "description": "Find and remove duplicate photos to free up space",
+        "sidebarDesc": "Identical + look-alike",
         "startScan": "Scan for Duplicates",
         "cancel": "Cancel",
         "noDuplicatesResult": "No duplicates found.",
@@ -436,11 +436,11 @@
         "visualBadge": "Visual {{count}}",
         "exactLabel": "Exact",
         "visualLabel": "Visual",
-        "exactTooltip": "Byte-identical (SHA256 match)",
-        "visualTooltip": "Visually identical but bytes differ (pHash Hamming distance ≤ threshold, e.g. EXIF diff/re-compressed)",
+        "exactTooltip": "The two photos are byte-for-byte identical",
+        "visualTooltip": "Look the same but differ in details (e.g. re-compressed)",
         "hasDateLabel": "Has date",
         "noDateLabel": "No date",
-        "hasDateTooltip": "Has EXIF capture date, prefer to keep",
+        "hasDateTooltip": "Has capture date, prefer to keep",
         "noDateTooltip": "Missing capture date, prefer to delete",
         "willFree": "Delete {{count}} · Free {{size}}",
         "keepAtLeastOne": "Keep at least one per group",
@@ -467,15 +467,15 @@
       },
       "similar": {
         "title": "Similar Photo Analysis",
-        "description": "Find visually similar photos (burst shots / same scene), manually mark for deletion",
+        "description": "Find burst shots / same-scene photos with similar angles, so you can pick the best",
         "sidebarDesc": "Burst / same scene",
         "startScan": "Analyze Similar Photos",
         "rescan": "Re-analyze",
         "cancel": "Cancel",
-        "distanceLabel": "Similarity Distance",
-        "distanceHint": "pHash distance range (6-15 = similar, lower = closer). Drag both thumbs to set min/max together.",
+        "distanceLabel": "Similarity Level",
+        "distanceHint": "Drag the slider to adjust similarity: lower = stricter (only near-identical), higher = looser (burst shots and same scenes also included)",
         "noResult": "No similar photos found.",
-        "groupLabel": "{{count}} photos · avg distance {{avg}}",
+        "groupLabel": "{{count}} photos · avg similarity {{avg}}",
         "suggestKeep": "Suggested Keep",
         "clickToToggle": "Click to toggle mark for deletion",
         "deleteSelected": "Delete {{count}} selected",
@@ -617,8 +617,8 @@
         "title": "Face Recognition",
         "description": "Group photos by person, auto-identifying different photos of the same person, can be added to albums",
         "sidebarDesc": "Auto-group by person",
-        "threshold": "Distance Threshold",
-        "thresholdHint": "Lower = finer split (more groups), Higher = more merging (looser)",
+        "threshold": "Recognition Sensitivity",
+        "thresholdHint": "Lower = stricter (more, finer groups), Higher = looser (the same person is more easily grouped together)",
         "start": "Start Recognition",
         "redetect": "Redetect",
         "cancel": "Cancel",
@@ -677,7 +677,7 @@
       },
       "sidebar": {
         "categorySmart": "Smart Organize",
-        "categoryMetadata": "Metadata",
+        "categoryMetadata": "Photo Info",
         "categoryBrowse": "Browse",
         "timeline": "Timeline",
         "timelineDesc": "Browse by year/month",
@@ -809,8 +809,8 @@
     },
     "tools": {
       "dedupe": {
-        "title": "Deduplicate",
-        "desc": "Detect and remove duplicate photos by file hash",
+        "title": "Remove Duplicates",
+        "desc": "Automatically find and remove duplicate photos to free up space",
         "shortDesc": "Find and remove exact duplicate photos"
       },
       "organize": {
@@ -819,9 +819,9 @@
         "shortDesc": "Organize by capture date into MemBook Photos/Year/Month directories"
       },
       "exif": {
-        "title": "EXIF Edit",
-        "desc": "Edit photo capture time, GPS, and other metadata",
-        "shortDesc": "Edit capture date / add GPS location"
+        "title": "Edit Photo Info",
+        "desc": "Edit photo capture time, location, and other info",
+        "shortDesc": "Edit capture date / add location"
       },
       "faceCluster": {
         "title": "Face Recognition",
@@ -860,7 +860,7 @@
       "noDuplicates": "No duplicates found",
       "deleteDuplicates": "Delete Duplicates",
       "keepBest": "Keep Best Quality",
-      "hashing": "Computing hash..."
+      "hashing": "Comparing photos..."
     },
     "organize": {
       "previewing": "Previewing categorization...",

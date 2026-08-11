@@ -193,7 +193,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
         <div className="flex-1 min-w-[240px]">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs text-[var(--color-text-secondary)]">
-              {t('home.organize.similar.distanceLabel', '相似距离')}
+              {t('home.organize.similar.distanceLabel', '相似程度')}
             </span>
             <span className="text-xs font-mono font-[600] text-[var(--color-brand)]">
               {minDistance} — {maxDistance}
