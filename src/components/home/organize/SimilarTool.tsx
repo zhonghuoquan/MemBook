@@ -21,7 +21,7 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, DualRangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
@@ -32,7 +32,9 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
   const [groups, setGroups] = useState<SimilarGroup[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const [minDistance, setMinDistance] = useState(6);
+  // 相似程度：只用一个滑块调节上限（越严格/越宽松）。
+  // 下限固定为 6（≤6 属于“重复”，交给照片去重功能处理），用户无需调节。
+  const MIN_DISTANCE = 6;
   const [maxDistance, setMaxDistance] = useState(15);
   // 加入相册对话框
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
@@ -60,7 +62,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
       const res = await findSimilarPhotos(photos, {
         signal: abortRef.current.signal,
         onProgress: setProgress,
-        minDistance,
+        minDistance: MIN_DISTANCE,
         maxDistance,
         readData: readPhotoData,
       });
@@ -229,7 +231,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
         </div>
       )}
 
-      {/* 距离范围设置 + 查找按钮（最小/最大距离整合为单个双滑块控件） */}
+      {/* 相似程度设置 + 查找按钮（单滑块调节上限，下限固定为 6，交由去重功能处理重复照片） */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex-1 min-w-[240px]">
           <div className="flex items-center justify-between mb-1">
@@ -237,14 +239,13 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
               {t('home.organize.similar.distanceLabel', '相似程度')}
             </span>
           </div>
-          <DualRangeSlider
-            min={0}
+          <RangeSlider
+            min={6}
             max={30}
-            valueMin={minDistance}
-            valueMax={maxDistance}
+            value={maxDistance}
             step={1}
             disabled={running}
-            onChange={(minV, maxV) => { setMinDistance(minV); setMaxDistance(maxV); }}
+            onChange={(v) => setMaxDistance(v)}
             accent="#C95A4D"
           />
           <p className="text-[11px] text-[var(--color-gray-500)] mt-1">

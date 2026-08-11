@@ -45,6 +45,30 @@ const STAGES: Array<{ phase: string; label: string }> = [
 /** 缩略图网格最多显示数量 */
 const MAX_THUMBS = 6;
 
+/**
+ * 人脸组编号色板 — 每个分组使用独立的高饱和配色，
+ * 与浅色底色形成明显区分，避免色块与底色重合导致不美观。
+ * index 超过色板长度时循环取色。
+ */
+const CLUSTER_COLOR_PALETTE: Array<{ bg: string; fg: string }> = [
+  { bg: '#E74C3C', fg: '#FFFFFF' }, // 红
+  { bg: '#E67E22', fg: '#FFFFFF' }, // 橙
+  { bg: '#27AE60', fg: '#FFFFFF' }, // 绿
+  { bg: '#2980B9', fg: '#FFFFFF' }, // 蓝
+  { bg: '#8E44AD', fg: '#FFFFFF' }, // 紫
+  { bg: '#16A085', fg: '#FFFFFF' }, // 青
+  { bg: '#C0392B', fg: '#FFFFFF' }, // 深红
+  { bg: '#D35400', fg: '#FFFFFF' }, // 深橙
+  { bg: '#2C3E50', fg: '#FFFFFF' }, // 深灰蓝
+  { bg: '#7F8C8D', fg: '#FFFFFF' }, // 灰
+  { bg: '#3498DB', fg: '#FFFFFF' }, // 亮蓝
+  { bg: '#9B59B6', fg: '#FFFFFF' }, // 亮紫
+];
+/** 取指定分组的配色（循环取色） */
+function getClusterColor(index: number) {
+  return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
+}
+
 export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
@@ -86,6 +110,48 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         const n = new Set(prev);
         n.delete(photo.id);
         return n;
+      });
+      // 同步从聚类结果与检测缓存中移除，保证界面显示即时更新
+      setResult((prev) => {
+        if (!prev) return prev;
+        let hasFace = false;
+        const clusters = prev.clusters
+          .map((c) => {
+            const photos = c.photos.filter((p) => p.id !== photo.id);
+            const faces = c.faces.filter((f) => f.photoId !== photo.id);
+            // 照片未命中本组，原样返回
+            if (photos.length === c.photos.length && faces.length === c.faces.length) return c;
+            if (c.faces.length > faces.length) hasFace = true;
+            // 组内照片删光则整组移除
+            if (photos.length === 0) return null;
+            return {
+              ...c,
+              photos,
+              faces,
+              representativeFace: faces.length > 0
+                ? faces.reduce((best, f) => (f.width * f.height * f.score > best.width * best.height * best.score ? f : best), faces[0])
+                : c.representativeFace,
+              photoCount: photos.length,
+            };
+          })
+          .filter((c): c is FaceCluster => c !== null);
+        const noFacePhotos = prev.noFacePhotos.filter((p) => p.id !== photo.id);
+        // 照片整体数量、有人脸照片数、无人脸照片数同步递减
+        const totalPhotos = Math.max(0, prev.totalPhotos - 1);
+        const photosWithFaces = Math.max(0, prev.photosWithFaces - (hasFace ? 1 : 0));
+        return { ...prev, clusters, noFacePhotos, totalPhotos, photosWithFaces };
+      });
+      setDetection((prev) => {
+        if (!prev) return prev;
+        const faces = prev.faces.filter((f) => f.photoId !== photo.id);
+        const nextSet = new Set(prev.photosWithFacesSet);
+        nextSet.delete(photo.id);
+        return {
+          ...prev,
+          faces,
+          photosWithFacesSet: nextSet,
+          totalPhotos: Math.max(0, prev.totalPhotos - 1),
+        };
       });
     },
     [sourceMode, onPhotosUpdate, addToast, t],
@@ -337,7 +403,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             value={threshold}
             onChange={(e) => setThreshold(parseFloat(e.target.value))}
             disabled={running}
-            className="flex-1 accent-[#8B6BB0] cursor-pointer"
+            className="face-sensitivity-range flex-1"
           />
           <span className="text-xs font-mono text-[var(--color-gray-600)] w-10 text-right">
             {threshold.toFixed(2)}
@@ -599,6 +665,9 @@ function FaceClusterGroupItem({
     onRenameCluster(cluster.clusterId, nameInput);
   };
 
+  // 分组配色（每个分组独立色块，与浅色底色明显区分）
+  const clusterColor = getClusterColor(index);
+
   return (
     <div className={`rounded-lg border overflow-hidden transition-all ${
       isClusterSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]/30' : 'border-[var(--color-border)]'
@@ -631,7 +700,10 @@ function FaceClusterGroupItem({
               onClick={() => { setNameInput(clusterName ?? ''); onSetEditingName(cluster.clusterId); }}
               className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer hover:opacity-70"
             >
-              <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#D7C5EC] text-[#8B6BB0] text-xs font-bold">
+              <span
+                className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shadow-sm"
+                style={{ backgroundColor: clusterColor.bg, color: clusterColor.fg }}
+              >
                 {index + 1}
               </span>
               <span className="text-sm text-[var(--color-gray-800)] font-medium">
@@ -670,16 +742,16 @@ function FaceClusterGroupItem({
         </button>
       </div>
 
-      {/* 缩略图网格（折叠 6 列 / 展开更多列） */}
+      {/* 缩略图网格（折叠与展开统一为 6 列，照片尺寸保持一致） */}
       <div className="px-3 pb-3 pt-2">
-        <div className="grid gap-1.5" style={{ gridTemplateColumns: expanded ? 'repeat(auto-fill, minmax(96px, 1fr))' : 'repeat(6, minmax(0, 1fr))' }}>
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
           {displayPhotos.map((photo, i) => {
             const isSelected = selectedIds.has(photo.id);
             const showExtraOverlay = !expanded && i === MAX_THUMBS - 1 && extraCount > 0;
             const face = faceByPhoto.get(photo.id);
             const thumbNode = face
               ? <FaceCropThumb photo={photo} face={face} readPhotoData={readPhotoData} />
-              : <ThumbImage photo={photo} readPhotoData={readPhotoData} size={expanded ? 'medium' : 'small'} />;
+              : <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />;
             return (
               <ThumbWithMenu
                 key={photo.id}

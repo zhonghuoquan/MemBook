@@ -18,6 +18,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo } from '../../../photo-tools';
 import { formatBytes } from '../../../photo-tools';
+import { isHeicFile } from '../../../engine/storage/utils';
+import { ensureSupportedFormat } from '../../../engine/storage/heic-converter';
 
 interface PhotoQuickViewProps {
   /** 当前组的所有照片 */
@@ -68,7 +70,8 @@ export function PhotoQuickView({
   /** 获取照片 URL（带缓存，避免重复 IPC 读取 + 重复创建 Blob URL） */
   const getPhotoUrl = useCallback(async (p: PhotoFileInfo): Promise<string | null> => {
     // 优先用 thumbUrl（Web 模式有值，免重复读取，不入缓存）
-    if (p.thumbUrl) return p.thumbUrl;
+    // 注意：HEIC/HEIF 浏览器无法原生解码，thumbUrl 指向原始 HEIC 文件时不可直接用，需走转换逻辑
+    if (p.thumbUrl && !isHeicFile(p.name)) return p.thumbUrl;
     // 查缓存
     const cached = urlCacheRef.current.get(p.id);
     if (cached) return cached;
@@ -78,8 +81,20 @@ export function PhotoQuickView({
     // await 期间可能已被其他并发调用填充，再次检查避免重复创建
     const cached2 = urlCacheRef.current.get(p.id);
     if (cached2) return cached2;
-    // 创建 Blob URL 并缓存
-    const blob = new Blob([buf], { type: p.mimeType || 'image/jpeg' });
+    // 创建 Blob URL 并缓存（HEIC 需先转换为浏览器可解码的 JPEG，否则大图无法加载）
+    let blob: Blob;
+    if (isHeicFile(p.name)) {
+      try {
+        const file = new File([buf], p.name, { type: p.mimeType || 'image/heic' });
+        const jpegFile = await ensureSupportedFormat(file, undefined, p.path);
+        blob = new Blob([await jpegFile.arrayBuffer()], { type: 'image/jpeg' });
+      } catch {
+        // 转换失败则回退到原格式 Blob（若浏览器仍无法解码，缩略图预览可正常显示）
+        blob = new Blob([buf], { type: p.mimeType || 'image/jpeg' });
+      }
+    } else {
+      blob = new Blob([buf], { type: p.mimeType || 'image/jpeg' });
+    }
     const objectUrl = URL.createObjectURL(blob);
     urlCacheRef.current.set(p.id, objectUrl);
     return objectUrl;
@@ -90,7 +105,11 @@ export function PhotoQuickView({
     let cancelled = false;
 
     // 查缓存，命中则秒切（不显示 loading，无闪烁）
-    const cachedUrl = photo.thumbUrl ?? urlCacheRef.current.get(photo.id) ?? null;
+    // HEIC 的 thumbUrl 是原始 HEIC 文件（浏览器无法解码），不能用，需走 getPhotoUrl 的转换逻辑
+    const cachedUrl =
+      (photo.thumbUrl && !isHeicFile(photo.name) ? photo.thumbUrl : null) ??
+      urlCacheRef.current.get(photo.id) ??
+      null;
 
     // 重置变换状态（每次切换都重置缩放/旋转）
     setScale(1);
@@ -137,8 +156,8 @@ export function PhotoQuickView({
     for (const i of [nextIdx, prevIdx]) {
       if (i < 0 || i >= photos.length || i === index) continue;
       const p = photos[i];
-      // 有 thumbUrl 或已在缓存中的跳过
-      if (p.thumbUrl || urlCacheRef.current.has(p.id)) continue;
+      // 有 thumbUrl（非 HEIC）或已在缓存中的跳过
+      if ((p.thumbUrl && !isHeicFile(p.name)) || urlCacheRef.current.has(p.id)) continue;
       // 异步预读，不阻塞 UI，错误静默
       getPhotoUrl(p).catch(() => {});
     }

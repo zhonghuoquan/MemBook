@@ -480,7 +480,7 @@
         "rescan": "Re-analyze",
         "cancel": "Cancel",
         "distanceLabel": "Similarity Level",
-        "distanceHint": "Drag the slider to adjust similarity: lower = stricter (only near-identical), higher = looser (burst shots and same scenes also included)",
+        "distanceHint": "Drag the slider to adjust similarity: lower = stricter (only near-identical), higher = looser (burst shots and same scenes also included). Exact duplicates (below 6) are handled by the Deduplicate tool.",
         "noResult": "No similar photos found.",
         "groupLabel": "{{count}} photos · avg similarity {{avg}}",
         "suggestKeep": "Suggested Keep",

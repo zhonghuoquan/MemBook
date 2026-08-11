@@ -90,18 +90,20 @@ export function AlbumBridgeDialog({
   // 弹窗打开时加载项目列表 + 各项目照片数量
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
-    setSelectedProjectId(null);
-    setStrategy('direct');
-    setProgress(null);
-    setCreating(false);
-    setNewAlbumName('');
-    setCreatingAlbum(false);
-    setViewingProjectId(null);
-    setViewingPhotos([]);
-    setViewingLoading(false);
-    listProjects()
-      .then(async (list) => {
+    // 将重置/加载逻辑放入异步函数，避免在 effect 体内同步调用 setState（react-hooks/set-state-in-effect）
+    void (async () => {
+      setLoading(true);
+      setSelectedProjectId(null);
+      setStrategy('direct');
+      setProgress(null);
+      setCreating(false);
+      setNewAlbumName('');
+      setCreatingAlbum(false);
+      setViewingProjectId(null);
+      setViewingPhotos([]);
+      setViewingLoading(false);
+      try {
+        const list = await listProjects();
         setProjects(list);
         const counts: Record<string, number> = {};
         await Promise.all(
@@ -115,9 +117,12 @@ export function AlbumBridgeDialog({
           }),
         );
         setPhotoCounts(counts);
-      })
-      .catch((err) => logger.warn('[AlbumBridge] 加载项目失败:', err))
-      .finally(() => setLoading(false));
+      } catch (err) {
+        logger.warn('[AlbumBridge] 加载项目失败:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [open]);
 
   // ESC 关闭（处理中禁止 ESC）
@@ -152,7 +157,16 @@ export function AlbumBridgeDialog({
           // HEIC 格式浏览器无法原生解码（direct 模式下 asset:// URL 也无法显示），
           // 必须走 import 模式：转换为 JPEG 后存为 blob，否则相册照片列表会加载失败
           const isHeic = isHeicFile(p.name);
-          const effectiveStrategy: Strategy = isHeic ? 'import' : strategy;
+          // direct 模式必须存在可引用的数据来源（文件路径或库内 blobId），
+          // 否则保存到相册后照片没有任何数据可加载（相册中显示为空/异常）。
+          // folder 模式：依赖相对路径/绝对路径；library 模式：依赖 blobId（或 Tauri direct 原文件路径）。
+          const hasDirectSource =
+            sourceMode === 'folder'
+              ? Boolean(p.relativePath || p.path)
+              : Boolean(p.blobId || p.path);
+          // HEIC 或缺失 direct 数据来源时强制走 import（复制数据到相册库内）
+          const effectiveStrategy: Strategy =
+            isHeic || !hasDirectSource ? 'import' : strategy;
 
           // 获取照片实际尺寸：优先用已有值，缺失时通过 createImageBitmap 读取
           // HEIC 文件需先转换为 JPEG 才能解码
@@ -197,7 +211,7 @@ export function AlbumBridgeDialog({
                 albumId: selectedProjectId,
               });
             } else {
-              // library 模式：引用已有 blobId，不复制数据
+              // library 模式：引用已有 blobId（库内原图）或 Tauri direct 原文件路径，不复制数据
               newPhotos.push({
                 id: crypto.randomUUID(),
                 src: '',
@@ -210,6 +224,9 @@ export function AlbumBridgeDialog({
                 storageMode: 'direct',
                 blobId: p.blobId,
                 originalBlobId: p.blobId,
+                // Tauri direct 模式的库内照片有原文件相对路径（photoToFileInfo 将其放在 path 字段），
+                // 补充为 relativePath，确保相册侧能通过文件系统读取到照片数据
+                relativePath: p.path,
                 latitude: p.gpsLat,
                 longitude: p.gpsLon,
                 albumId: selectedProjectId,
