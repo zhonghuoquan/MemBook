@@ -670,16 +670,16 @@ function FaceClusterGroupItem({
         </button>
       </div>
 
-      {/* 缩略图网格（折叠 6 列 / 展开更多列） */}
+      {/* 缩略图网格（折叠与展开统一为 6 列，照片尺寸保持一致） */}
       <div className="px-3 pb-3 pt-2">
-        <div className="grid gap-1.5" style={{ gridTemplateColumns: expanded ? 'repeat(auto-fill, minmax(96px, 1fr))' : 'repeat(6, minmax(0, 1fr))' }}>
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
           {displayPhotos.map((photo, i) => {
             const isSelected = selectedIds.has(photo.id);
             const showExtraOverlay = !expanded && i === MAX_THUMBS - 1 && extraCount > 0;
             const face = faceByPhoto.get(photo.id);
             const thumbNode = face
               ? <FaceCropThumb photo={photo} face={face} readPhotoData={readPhotoData} />
-              : <ThumbImage photo={photo} readPhotoData={readPhotoData} size={expanded ? 'medium' : 'small'} />;
+              : <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />;
             return (
               <ThumbWithMenu
                 key={photo.id}
