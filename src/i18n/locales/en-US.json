@@ -692,7 +692,12 @@
         "createNew": "New Album",
         "confirmCreate": "Create",
         "albumCreated": "Album \"{{name}}\" created",
-        "createFailed": "Failed to create album: {{message}}"
+        "createFailed": "Failed to create album: {{message}}",
+        "viewPhotos": "View photos in album",
+        "loadingPhotos": "Loading photos…",
+        "noPhotosInAlbum": "This album has no photos yet",
+        "photosInAlbum": "{{count}} photos in this album",
+        "viewPhotosFailed": "Failed to view album photos"
       },
       "viewMode": {
         "tools": "Tools",

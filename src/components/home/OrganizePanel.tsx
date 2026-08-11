@@ -1355,10 +1355,12 @@ export function OrganizePanel() {
                 </>
               ) : (
                 <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="M21 21l-4.35-4.35" />
-                    <path d="M11 8v6M8 11h6" />
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    {/* 主体四角星（自动分析） */}
+                    <path d="M12 2.5c.45 3.8 1.7 5.05 5.5 5.5-3.8.45-5.05 1.7-5.5 5.5-.45-3.8-1.7-5.05-5.5-5.5 3.8-.45 5.05-1.7 5.5-5.5z" />
+                    {/* 辅助小星点 */}
+                    <path d="M19.5 13c.28 2.4 1.1 3.22 3.5 3.5-2.4.28-3.22 1.1-3.5 3.5-.28-2.4-1.1-3.22-3.5-3.5 2.4-.28 3.22-1.1 3.5-3.5z" />
+                    <path d="M4.8 15.2c.22 1.9.88 2.56 2.8 2.8-1.92.24-2.58.9-2.8 2.8-.22-1.9-.88-2.56-2.8-2.8 1.92-.24 2.58-.9 2.8-2.8z" />
                   </svg>
                   {t('organize.autoAnalyze.title', '一键分析')}
                 </>
