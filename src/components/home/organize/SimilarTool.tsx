@@ -21,7 +21,7 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, CancelButton, PrimaryButton, DualRangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, DualRangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
@@ -258,13 +258,10 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
         )}
       </div>
 
-      {/* 进度条 + 取消按钮 */}
+      {/* 进度条 + 取消按钮（取消按钮统一放进度条右侧） */}
       {running && (
         <div className="mt-3">
-          <ProgressBar progress={progress} />
-          <div className="mt-2 flex justify-end">
-            <CancelButton onClick={handleCancel} label={t('home.organize.similar.cancel')} />
-          </div>
+          <ProgressBar progress={progress} onCancel={handleCancel} cancelLabel={t('home.organize.similar.cancel')} />
         </div>
       )}
 

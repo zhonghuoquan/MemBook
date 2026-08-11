@@ -177,6 +177,7 @@ function PhotoRow({
   onView,
   onDelete,
   hasMoreButton,
+  collapsed = false,
 }: {
   items: PhotoFileInfo[];
   selected: Set<string>;
@@ -189,6 +190,8 @@ function PhotoRow({
   onView: (index: number) => void;
   onDelete: (photo: PhotoFileInfo) => void;
   hasMoreButton: boolean;
+  /** 分组折叠时仅显示一行预览：不展开网格、不参与多选点击 */
+  collapsed?: boolean;
 }) {
   const { t } = useTranslation();
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -210,18 +213,23 @@ function PhotoRow({
     return () => window.removeEventListener('resize', update);
   }, []);
 
+  // 折叠时强制单行预览：不展开网格、不显示更多按钮、照片不参与多选
+  const showAllMode = collapsed ? false : isShowAll;
+  const hasMoreBtn = hasMoreButton && !collapsed;
+  const handleThumbClick = collapsed ? undefined : onClickThumb;
+
   // 单行能容纳的缩略图数量 = floor((宽度 - 间隙) / (缩略图+间隙))
   const fitCount = Math.max(1, Math.floor((rowWidth - THUMB_GAP) / (THUMB_SIZE + THUMB_GAP)));
   // 收起时最多展示 fitCount 张，剩余张数用于渐变"更多"色块
   const collapsedCount = Math.min(items.length, fitCount);
   const overflow = items.length - collapsedCount;
-  // 收起时是否把最后一张位置让给"更多"色块（有溢出且未展开时）
-  const showMoreBlock = !isShowAll && overflow > 0;
+  // 收起时是否把最后一张位置让给"更多"色块（有溢出且未展开时；折叠态不显示更多色块）
+  const showMoreBlock = !showAllMode && overflow > 0 && !collapsed;
   // 单行实际展示的缩略图数量（若放"更多"色块，则少展示一张）
   const visibleCount = showMoreBlock ? Math.max(0, collapsedCount - 1) : collapsedCount;
   const visible = items.slice(0, visibleCount);
 
-  if (isShowAll) {
+  if (showAllMode) {
     return (
       <>
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}>
@@ -233,19 +241,19 @@ function PhotoRow({
               anomaly={anomalyIds.has(p.id)}
               anomalyLabel={anomalyLabel}
               readPhotoData={readPhotoData}
-              onClick={() => onClickThumb(p.id)}
+              onClick={() => handleThumbClick?.(p.id)}
               onView={() => onView(i)}
               onDelete={() => onDelete(p)}
             />
           ))}
         </div>
-        {hasMoreButton && (
+        {hasMoreBtn && (
           <button
             type="button"
             onClick={onToggleShowAll}
             className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
           >
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${showAllMode ? 'rotate-180' : ''}`}>
               <path d="M2 4l4 4 4-4" />
             </svg>
             {t('home.organize.timeline.collapseAll', '收起全部')}
@@ -266,7 +274,7 @@ function PhotoRow({
               anomaly={anomalyIds.has(p.id)}
               anomalyLabel={anomalyLabel}
               readPhotoData={readPhotoData}
-              onClick={() => onClickThumb(p.id)}
+              onClick={() => handleThumbClick?.(p.id)}
               onView={() => onView(i)}
               onDelete={() => onDelete(p)}
             />
@@ -289,13 +297,13 @@ function PhotoRow({
           </div>
         )}
       </div>
-      {hasMoreButton && items.length > fitCount && (
+      {hasMoreBtn && items.length > fitCount && (
         <button
           type="button"
           onClick={onToggleShowAll}
           className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
         >
-          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${showAllMode ? 'rotate-180' : ''}`}>
             <path d="M2 4l4 4 4-4" />
           </svg>
           {t('home.organize.timeline.viewAll', { count: items.length, defaultValue: '查看全部 {{count}} 张' })}
@@ -524,24 +532,24 @@ export function TimelineView({
           </div>
         </div>
 
-        {/* 缩略图列表（单行自适应，更多收起 + 末尾主体渐变色块） */}
-        {!isCollapsed && (
-          <div className="px-4 pb-3 bg-white">
-            <PhotoRow
-              items={items}
-              selected={selected}
-              anomalyIds={anomalyIds}
-              anomalyLabel={anomalyLabel}
-              readPhotoData={readPhotoData}
-              isShowAll={isShowAll}
-              onToggleShowAll={() => toggleShowAll(key)}
-              onClickThumb={toggleSelect}
-              onView={(i) => openPreview(items, i)}
-              onDelete={handleDeletePhoto}
-              hasMoreButton={items.length > 12}
-            />
-          </div>
-        )}
+        {/* 缩略图列表（单行自适应，更多收起 + 末尾主体渐变色块）
+            全部收起后仍显示一行照片预览，便于快速浏览 */}
+        <div className="px-4 pb-3 bg-white">
+          <PhotoRow
+            items={items}
+            selected={selected}
+            anomalyIds={anomalyIds}
+            anomalyLabel={anomalyLabel}
+            readPhotoData={readPhotoData}
+            isShowAll={isShowAll}
+            onToggleShowAll={() => toggleShowAll(key)}
+            onClickThumb={toggleSelect}
+            onView={(i) => openPreview(items, i)}
+            onDelete={handleDeletePhoto}
+            hasMoreButton={items.length > 12}
+            collapsed={isCollapsed}
+          />
+        </div>
       </div>
     );
   };
@@ -601,23 +609,22 @@ export function TimelineView({
           </div>
         </div>
 
-        {!isCollapsed && (
-          <div className="px-4 pb-3">
-            <PhotoRow
-              items={g.photos}
-              selected={selected}
-              anomalyIds={anomalyIds}
-              anomalyLabel={anomalyLabel}
-              readPhotoData={readPhotoData}
-              isShowAll={isShowAll}
-              onToggleShowAll={() => toggleShowAll(key)}
-              onClickThumb={toggleSelect}
-              onView={(i) => openPreview(g.photos, i)}
-              onDelete={handleDeletePhoto}
-              hasMoreButton={g.photos.length > 12}
-            />
-          </div>
-        )}
+        <div className="px-4 pb-3">
+          <PhotoRow
+            items={g.photos}
+            selected={selected}
+            anomalyIds={anomalyIds}
+            anomalyLabel={anomalyLabel}
+            readPhotoData={readPhotoData}
+            isShowAll={isShowAll}
+            onToggleShowAll={() => toggleShowAll(key)}
+            onClickThumb={toggleSelect}
+            onView={(i) => openPreview(g.photos, i)}
+            onDelete={handleDeletePhoto}
+            hasMoreButton={g.photos.length > 12}
+            collapsed={isCollapsed}
+          />
+        </div>
       </div>
     );
   };

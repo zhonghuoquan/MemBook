@@ -640,6 +640,7 @@
         "start": "开始识别",
         "redetect": "重新检测",
         "cancel": "取消",
+        "running": "识别中...",
         "statTotal": "总照片",
         "statWithFaces": "有人脸",
         "statClusters": "人脸组",

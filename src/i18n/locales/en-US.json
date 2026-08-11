@@ -639,6 +639,7 @@
         "start": "Start Recognition",
         "redetect": "Redetect",
         "cancel": "Cancel",
+        "running": "Analyzing...",
         "statTotal": "Total",
         "statWithFaces": "With Faces",
         "statClusters": "Face Groups",

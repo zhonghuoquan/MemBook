@@ -106,20 +106,6 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
         ),
       },
       {
-        id: 'organize',
-        color: 'blue',
-        titleKey: 'home.organize.organize.title',
-        descKey: 'home.organize.organize.sidebarDesc',
-        icon: (
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-            <rect x="3" y="4" width="14" height="13" rx="1" />
-            <line x1="3" y1="8" x2="17" y2="8" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="12" y1="2" x2="12" y2="6" />
-          </svg>
-        ),
-      },
-      {
         id: 'faceCluster',
         color: 'violet',
         titleKey: 'home.organize.faceCluster.title',
@@ -142,6 +128,20 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
             <rect x="2" y="4" width="11" height="11" rx="2" />
             <rect x="7" y="7" width="11" height="11" rx="2" />
+          </svg>
+        ),
+      },
+      {
+        id: 'organize',
+        color: 'blue',
+        titleKey: 'home.organize.organize.title',
+        descKey: 'home.organize.organize.sidebarDesc',
+        icon: (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <rect x="3" y="4" width="14" height="13" rx="1" />
+            <line x1="3" y1="8" x2="17" y2="8" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="12" y1="2" x2="12" y2="6" />
           </svg>
         ),
       },
