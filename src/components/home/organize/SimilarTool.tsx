@@ -21,7 +21,7 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, DualRangeSlider, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 
 export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode }: ToolProps) {
@@ -188,27 +188,31 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
         </svg>
       }
     >
-      {/* 距离范围设置 + 查找按钮 */}
+      {/* 距离范围设置 + 查找按钮（最小/最大距离整合为单个双滑块控件） */}
       <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-[var(--color-text-secondary)] whitespace-nowrap">{t('home.organize.similar.minDistance')}</span>
-          <input
-            type="range" min={0} max={20} value={minDistance}
-            onChange={(e) => setMinDistance(Math.min(Number(e.target.value), maxDistance - 1))}
-            className="w-24"
+        <div className="flex-1 min-w-[240px]">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-[var(--color-text-secondary)]">
+              {t('home.organize.similar.distanceLabel', '相似距离')}
+            </span>
+            <span className="text-xs font-mono font-[600] text-[var(--color-brand)]">
+              {minDistance} — {maxDistance}
+            </span>
+          </div>
+          <DualRangeSlider
+            min={0}
+            max={30}
+            valueMin={minDistance}
+            valueMax={maxDistance}
+            step={1}
+            disabled={running}
+            onChange={(minV, maxV) => { setMinDistance(minV); setMaxDistance(maxV); }}
+            accent="#C95A4D"
           />
-          <span className="text-xs font-mono w-5 text-[var(--color-gray-600)]">{minDistance}</span>
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-[var(--color-text-secondary)] whitespace-nowrap">{t('home.organize.similar.maxDistance')}</span>
-          <input
-            type="range" min={1} max={30} value={maxDistance}
-            onChange={(e) => setMaxDistance(Math.max(Number(e.target.value), minDistance + 1))}
-            className="w-24"
-          />
-          <span className="text-xs font-mono w-5 text-[var(--color-gray-600)]">{maxDistance}</span>
-        </label>
-        <span className="text-xs text-[var(--color-text-secondary)]">{t('home.organize.similar.distanceHint')}</span>
+          <p className="text-[11px] text-[var(--color-gray-500)] mt-1.5">
+            {t('home.organize.similar.distanceHint')}
+          </p>
+        </div>
         {!running && (
           <PrimaryButton onClick={handleStart} disabled={photos.length < 2}>
             {groups.length > 0 ? t('home.organize.similar.rescan') : t('home.organize.similar.startScan')}
@@ -218,11 +222,11 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
 
       {/* 进度条 + 取消按钮 */}
       {running && (
-        <div>
+        <div className="mt-3">
           <ProgressBar progress={progress} />
-          <button onClick={handleCancel} className="mt-2 px-3 py-1.5 rounded text-xs border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
-            {t('home.organize.similar.cancel')}
-          </button>
+          <div className="mt-2 flex justify-end">
+            <CancelButton onClick={handleCancel} label={t('home.organize.similar.cancel')} />
+          </div>
         </div>
       )}
 
