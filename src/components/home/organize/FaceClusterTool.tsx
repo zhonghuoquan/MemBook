@@ -45,6 +45,30 @@ const STAGES: Array<{ phase: string; label: string }> = [
 /** 缩略图网格最多显示数量 */
 const MAX_THUMBS = 6;
 
+/**
+ * 人脸组编号色板 — 每个分组使用独立的高饱和配色，
+ * 与浅色底色形成明显区分，避免色块与底色重合导致不美观。
+ * index 超过色板长度时循环取色。
+ */
+const CLUSTER_COLOR_PALETTE: Array<{ bg: string; fg: string }> = [
+  { bg: '#E74C3C', fg: '#FFFFFF' }, // 红
+  { bg: '#E67E22', fg: '#FFFFFF' }, // 橙
+  { bg: '#27AE60', fg: '#FFFFFF' }, // 绿
+  { bg: '#2980B9', fg: '#FFFFFF' }, // 蓝
+  { bg: '#8E44AD', fg: '#FFFFFF' }, // 紫
+  { bg: '#16A085', fg: '#FFFFFF' }, // 青
+  { bg: '#C0392B', fg: '#FFFFFF' }, // 深红
+  { bg: '#D35400', fg: '#FFFFFF' }, // 深橙
+  { bg: '#2C3E50', fg: '#FFFFFF' }, // 深灰蓝
+  { bg: '#7F8C8D', fg: '#FFFFFF' }, // 灰
+  { bg: '#3498DB', fg: '#FFFFFF' }, // 亮蓝
+  { bg: '#9B59B6', fg: '#FFFFFF' }, // 亮紫
+];
+/** 取指定分组的配色（循环取色） */
+function getClusterColor(index: number) {
+  return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
+}
+
 export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
@@ -641,6 +665,9 @@ function FaceClusterGroupItem({
     onRenameCluster(cluster.clusterId, nameInput);
   };
 
+  // 分组配色（每个分组独立色块，与浅色底色明显区分）
+  const clusterColor = getClusterColor(index);
+
   return (
     <div className={`rounded-lg border overflow-hidden transition-all ${
       isClusterSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]/30' : 'border-[var(--color-border)]'
@@ -673,7 +700,10 @@ function FaceClusterGroupItem({
               onClick={() => { setNameInput(clusterName ?? ''); onSetEditingName(cluster.clusterId); }}
               className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer hover:opacity-70"
             >
-              <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#D7C5EC] text-[#8B6BB0] text-xs font-bold">
+              <span
+                className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shadow-sm"
+                style={{ backgroundColor: clusterColor.bg, color: clusterColor.fg }}
+              >
                 {index + 1}
               </span>
               <span className="text-sm text-[var(--color-gray-800)] font-medium">
