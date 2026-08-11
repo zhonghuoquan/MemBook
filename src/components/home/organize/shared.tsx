@@ -537,6 +537,112 @@ export function DualRangeSlider({
   );
 }
 
+/**
+ * 单值滑块（RangeSlider）
+ *
+ * 用于只需要设置一个阈值/程度的场景（如相似照片分析的“相似程度”）。
+ * 数值气泡悬浮于圆点正上方，随滑块移动实时对齐；
+ * 样式与 DualRangeSlider 保持一致的圆点/轨道风格。
+ */
+export function RangeSlider({
+  min,
+  max,
+  value,
+  onChange,
+  step = 1,
+  disabled = false,
+  accent = 'var(--color-brand)',
+}: {
+  min: number;
+  max: number;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  disabled?: boolean;
+  accent?: string;
+}) {
+  const range = Math.max(1, max - min);
+  const pct = ((value - min) / range) * 100;
+
+  return (
+    <div className={`relative w-full pt-5 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* 数值标签：悬浮于圆点正上方，随滑块位置移动，确保数值与调整条位置对应 */}
+      <div className="absolute top-0 left-0 w-full h-5 pointer-events-none">
+        <span
+          className="absolute -translate-x-1/2 text-[11px] font-mono font-[600] text-[var(--color-gray-700)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-1.5 py-0.5 shadow-sm whitespace-nowrap"
+          style={{ left: `clamp(0%, ${pct}%, 100%)` }}
+        >
+          {value}
+        </span>
+      </div>
+
+      {/* 轨道容器 */}
+      <div className="relative h-6">
+        <div className="absolute top-1/2 -translate-y-1/2 w-full h-2 rounded-full bg-[var(--color-gray-100)] ring-1 ring-inset ring-[var(--color-border)]/40" />
+        {/* 已选进度高亮 */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-2 rounded-full"
+          style={{
+            left: 0,
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${accent}, ${accent})`,
+            opacity: 0.9,
+          }}
+        />
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="pointer-events-none absolute top-0 left-0 w-full h-6 rounded-full appearance-none bg-transparent"
+          style={{ ['--range-accent' as string]: accent }}
+          aria-label="similarity"
+        />
+      </div>
+
+      <style>{`
+        input[type='range']::-webkit-slider-runnable-track {
+          background: transparent;
+          border: none;
+        }
+        input[type='range']::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          margin-top: -5px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 3px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 5px rgba(0,0,0,0.22);
+          cursor: grab;
+          pointer-events: auto;
+          transition: transform 0.12s ease, box-shadow 0.12s ease;
+        }
+        input[type='range']::-webkit-slider-thumb:hover {
+          transform: scale(1.15);
+          box-shadow: 0 2px 9px rgba(0,0,0,0.28);
+        }
+        input[type='range']::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 3px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 5px rgba(0,0,0,0.22);
+          cursor: grab;
+          pointer-events: auto;
+        }
+        input[type='range']::-moz-range-track {
+          background: transparent;
+        }
+      `}</style>
+    </div>
+  );
+}
+
 /** 主操作按钮 */
 export function PrimaryButton({
   children,
