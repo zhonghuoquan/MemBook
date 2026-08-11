@@ -131,8 +131,8 @@ async function loadFaceApiForClustering(): Promise<FaceApiModule | null> {
       // 必须检查返回值，否则 backend 未就绪会导致后续操作崩溃
       logger.info('[face-cluster] 正在初始化 TF.js backend...');
 
-      // 尝试顺序：cpu → webgl（CPU 更稳定，WebGL 在 Tauri WebView2 中不可靠）
-      const candidates = ['cpu', 'webgl'];
+      // 尝试顺序：webgl → cpu（GPU 推理比 CPU 快 5-10 倍；推理已串行化，无并发竞态，WebGL 稳定可用）
+      const candidates = ['webgl', 'cpu'];
       let backendReady = false;
       let lastError: unknown = null;
 
@@ -188,19 +188,19 @@ async function loadFaceApiForClustering(): Promise<FaceApiModule | null> {
         await mod.nets.tinyFaceDetector.loadFromUri(detectionUrl);
         logger.info('[face-cluster] TinyFaceDetector 模型加载成功');
       } catch (e) {
-        throw new Error(`加载 TinyFaceDetector 模型失败: ${(e as Error).message}`);
+        throw new Error(`加载 TinyFaceDetector 模型失败: ${(e as Error).message}`, { cause: e });
       }
       try {
         await mod.nets.faceLandmark68Net.loadFromUri(recognitionUrl);
         logger.info('[face-cluster] FaceLandmark68 模型加载成功');
       } catch (e) {
-        throw new Error(`加载 FaceLandmark68 模型失败: ${(e as Error).message}`);
+        throw new Error(`加载 FaceLandmark68 模型失败: ${(e as Error).message}`, { cause: e });
       }
       try {
         await mod.nets.faceRecognitionNet.loadFromUri(recognitionUrl);
         logger.info('[face-cluster] FaceRecognition 模型加载成功');
       } catch (e) {
-        throw new Error(`加载 FaceRecognition 模型失败: ${(e as Error).message}`);
+        throw new Error(`加载 FaceRecognition 模型失败: ${(e as Error).message}`, { cause: e });
       }
       faceApiModule = mod;
       recognitionModelLoaded = true;
@@ -273,7 +273,7 @@ export interface FaceClusterOptions {
    * 值越小越严格（分出更多组），值越大越宽松（合并更多）
    */
   similarityThreshold?: number;
-  /** TinyFaceDetector 输入尺寸，默认 416 */
+  /** TinyFaceDetector 输入尺寸，默认 320（TinyFaceDetector 支持的档位之一，速度/精度平衡） */
   inputSize?: number;
   /** 检测置信度阈值，默认 0.4 */
   scoreThreshold?: number;
@@ -286,7 +286,7 @@ export interface FaceClusterOptions {
 export async function extractFaceDescriptors(
   photo: PhotoFileInfo,
   readData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>,
-  inputSize = 416,
+  inputSize = 320,
   scoreThreshold = 0.4,
 ): Promise<FaceRecord[]> {
   const mod = await loadFaceApiForClustering();
@@ -305,8 +305,9 @@ export async function extractFaceDescriptors(
   try {
     const imgW = img.naturalWidth || img.width;
     const imgH = img.naturalHeight || img.height;
-    // 限制输入图片尺寸，防止超大图导致 WebGL 纹理溢出或 OOM
-    const MAX_DIM = 1600;
+    // 限制输入图片尺寸，防止超大图导致 WebGL 纹理溢出或 OOM，同时加快 CPU 解码与绘制
+    // 人脸识别对分辨率不敏感（descriptor 由 128 维特征决定），800px 足够且大幅提速
+    const MAX_DIM = 800;
     let scale = 1;
     if (imgW > MAX_DIM || imgH > MAX_DIM) {
       scale = MAX_DIM / Math.max(imgW, imgH);
@@ -516,7 +517,7 @@ export async function detectFaces(
   options: FaceClusterOptions = {},
 ): Promise<FaceDetectionResult> {
   const { onProgress, signal } = options;
-  const inputSize = options.inputSize ?? 416;
+  const inputSize = options.inputSize ?? 320;
   const scoreThreshold = options.scoreThreshold ?? 0.4;
   const readData = options.readData;
 
@@ -536,40 +537,43 @@ export async function detectFaces(
       return { faces: [], photosWithFacesSet: new Set(), failedCount: 0, modelLoadFailed: true, totalPhotos: photos.length, loadErrorMessage: lastLoadError ?? '未知错误' };
     }
 
-    // 并发提取 descriptor
+    // 顺序提取 descriptor（串行）
+    //
+    // 为什么必须串行：face-api.js 0.22 依赖的 tfjs-core 1.7 推理**不是线程安全的**，
+    // 它依赖全局可变执行状态（graph runner、当前 tensor、内存管理器）。
+    // 若并发执行 detectAllFaces→withFaceLandmarks→withFaceDescriptors，多个推理任务
+    // 会通过 await 交错执行，互相污染共享状态，导致
+    //   “Cannot set properties of undefined (setting 'o')”
+    // 这类随机 TypeError（WebGL 与 CPU 后端均会出现）。
+    //
+    // 且 JS 为单线程：CPU 后端下“并发”只是时间片切换，无真实并行，反而因状态竞争更慢；
+    // WebGL 后端也是通过主线程串行提交到 GPU。因此串行既不损失速度，又彻底消除竞态。
     onProgress?.({ phase: 'detecting', current: 0, total: photos.length, message: '检测人脸...' });
     const allFaces: FaceRecord[] = [];
     const photosWithFacesSet = new Set<string>();
     let failedCount = 0;
     let doneCount = 0;
-    const CONCURRENCY = 4;
 
-    const queue = [...photos.map((p) => ({ photo: p }))];
-    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      while (queue.length > 0) {
-        if (signal?.aborted) return;
-        const item = queue.shift();
-        if (!item) break;
-        try {
-          const faces = await extractFaceDescriptors(item.photo, readData, inputSize, scoreThreshold);
-          if (faces.length > 0) {
-            allFaces.push(...faces);
-            photosWithFacesSet.add(item.photo.id);
-          }
-        } catch (err) {
-          logger.warn(`[face-cluster] 处理失败 ${item.photo.name}:`, err);
-          failedCount++;
+    for (const photo of photos) {
+      if (signal?.aborted) break;
+      try {
+        const faces = await extractFaceDescriptors(photo, readData, inputSize, scoreThreshold);
+        if (faces.length > 0) {
+          allFaces.push(...faces);
+          photosWithFacesSet.add(photo.id);
         }
-        doneCount++;
-        onProgress?.({
-          phase: 'detecting',
-          current: doneCount,
-          total: photos.length,
-          message: `检测人脸 ${doneCount}/${photos.length}`,
-        });
+      } catch (err) {
+        logger.warn(`[face-cluster] 处理失败 ${photo.name}:`, err);
+        failedCount++;
       }
-    });
-    await Promise.all(workers);
+      doneCount++;
+      onProgress?.({
+        phase: 'detecting',
+        current: doneCount,
+        total: photos.length,
+        message: `检测人脸 ${doneCount}/${photos.length}`,
+      });
+    }
 
     if (signal?.aborted) {
       throw new DOMException('已取消', 'AbortError');
