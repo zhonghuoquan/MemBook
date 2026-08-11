@@ -28,7 +28,7 @@ import {
   type DedupeResult,
 } from '../../photo-tools';
 import { useUIStore } from '../../store';
-import { ProgressBar, ToolCard, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
+import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
 import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
 import { ExifTool } from './organize/ExifTool';
@@ -1272,8 +1272,8 @@ export function OrganizePanel() {
             {/* 加入相册浮动按钮（仅 timeline/calendar 显示，固定在右上角） */}
             {showAlbumButton && (
               <div className="absolute top-2 right-3 z-20">
-                <button
-                  type="button"
+                <AddToAlbumButton
+                  count={selectedPhotoIds.size}
                   onClick={() => {
                     if (selectedPhotoIds.size === 0) {
                       addToast({
@@ -1286,28 +1286,7 @@ export function OrganizePanel() {
                     }
                     setAlbumBridgeOpen(true);
                   }}
-                  disabled={selectedPhotoIds.size === 0}
-                  title={
-                    selectedPhotoIds.size === 0
-                      ? t('home.organize.albumBridge.selectPhotosFirst', { defaultValue: '请先选择照片' })
-                      : t('home.organize.albumBridge.buttonLabel')
-                  }
-                  className={`group inline-flex items-center gap-2 pl-2.5 pr-3.5 py-1.5 rounded-xl text-sm font-[600] transition-all border-none cursor-pointer ${
-                    selectedPhotoIds.size > 0
-                      ? 'bg-[var(--color-brand)] text-white shadow-[0_2px_10px_rgba(108,99,255,0.3)] hover:shadow-[0_4px_16px_rgba(108,99,255,0.42)] hover:brightness-105 hover:-translate-y-px'
-                      : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
-                  }`}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 ${selectedPhotoIds.size > 0 ? 'group-hover:rotate-90 transition-transform duration-200' : ''}`}>
-                    <path d="M8 3v10M3 8h10" />
-                  </svg>
-                  {t('home.organize.albumBridge.buttonLabel')}
-                  {selectedPhotoIds.size > 0 && (
-                    <span className="shrink-0 min-w-[1.25rem] h-5 px-1 rounded-full bg-white/20 text-[11px] font-[700] inline-flex items-center justify-center">
-                      {selectedPhotoIds.size}
-                    </span>
-                  )}
-                </button>
+                />
               </div>
             )}
             {/* 工作区内容：每个工具独立滚动容器，hidden 隐藏非活跃工具以保留状态 */}
