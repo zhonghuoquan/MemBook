@@ -790,7 +790,10 @@
       "openButton": "打开",
       "removeFromHistory": "从历史移除",
       "projectBadge": "相册",
-      "dataSourceHint": "选择数据源后，下方工具会自动激活 · 可同时打开多个路径分别操作"
+      "dataSourceHint": "选择数据源后，下方工具会自动激活 · 可同时打开多个路径分别操作",
+      "categorySmart": "智能整理",
+      "categoryMetadata": "元数据",
+      "categoryBrowse": "浏览查看"
     },
     "tabs": {
       "addPath": "添加路径",
@@ -820,6 +823,31 @@
         "title": "Exif修改",
         "desc": "修改照片的拍摄时间、GPS 等元数据",
         "shortDesc": "修改拍摄日期 / 添加 GPS 位置"
+      },
+      "faceCluster": {
+        "title": "人脸识别",
+        "desc": "按人物自动归类照片，可逐张选择并加入相册",
+        "shortDesc": "按人物自动分类照片"
+      },
+      "similar": {
+        "title": "相似照片分析",
+        "desc": "查找连拍、同场景等视觉相似照片",
+        "shortDesc": "找出连拍/同场景相似照片"
+      },
+      "rename": {
+        "title": "批量重命名",
+        "desc": "按模板批量重命名照片文件名",
+        "shortDesc": "按日期/地点/序号模板批量改名"
+      },
+      "timeline": {
+        "title": "时间线",
+        "desc": "按月份或路径分组浏览照片",
+        "shortDesc": "按月份/路径浏览照片"
+      },
+      "calendar": {
+        "title": "日历",
+        "desc": "按日期在日历中浏览照片",
+        "shortDesc": "按日期查看照片"
       },
       "convert": {
         "title": "格式转换",

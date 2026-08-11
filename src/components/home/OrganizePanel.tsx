@@ -1112,24 +1112,28 @@ export function OrganizePanel() {
 
               {tabs.length < MAX_TABS ? (
                 <>
+                  {/* 「添加路径」主按钮：品牌色实底，突出主操作 */}
                   <button
                     onClick={handleSelectFolder}
                     disabled={scanningAny}
-                    className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-[var(--color-border)]
-                               text-[var(--color-gray-500)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]
-                               text-sm font-[600] cursor-pointer transition-colors disabled:opacity-50"
+                    className="group shrink-0 flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-lg border-none
+                               bg-[var(--color-brand)] text-white shadow-[0_2px_8px_rgba(108,99,255,0.22)]
+                               hover:shadow-[0_4px_14px_rgba(108,99,255,0.35)] hover:brightness-105
+                               text-sm font-[600] cursor-pointer transition-all disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed"
                   >
-                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-3.5 h-3.5">
+                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-200">
                       <path d="M7 3v8M3 7h8" />
                     </svg>
                     {t('organize.tabs.addPath')}
                   </button>
+                  {/* 「项目库」次按钮：浅色底 + 图标色块 */}
                   <button
                     onClick={handleScanLibrary}
                     disabled={scanningAny}
-                    className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-[var(--color-border)]
-                               text-[var(--color-gray-500)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]
-                               text-sm font-[600] cursor-pointer transition-colors disabled:opacity-50"
+                    className="group shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border)]
+                               bg-white text-[var(--color-gray-600)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]
+                               hover:shadow-[0_2px_10px_rgba(108,99,255,0.12)]
+                               text-sm font-[600] cursor-pointer transition-all disabled:opacity-50 disabled:hover:shadow-none"
                   >
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                       <rect x="2" y="2" width="12" height="12" rx="1" />
@@ -1288,17 +1292,21 @@ export function OrganizePanel() {
                       ? t('home.organize.albumBridge.selectPhotosFirst', { defaultValue: '请先选择照片' })
                       : t('home.organize.albumBridge.buttonLabel')
                   }
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-[600] transition-all border-none cursor-pointer shadow-sm ${
+                  className={`group inline-flex items-center gap-2 pl-2.5 pr-3.5 py-1.5 rounded-xl text-sm font-[600] transition-all border-none cursor-pointer ${
                     selectedPhotoIds.size > 0
-                      ? 'bg-[var(--color-brand)] text-white hover:opacity-90'
+                      ? 'bg-[var(--color-brand)] text-white shadow-[0_2px_10px_rgba(108,99,255,0.3)] hover:shadow-[0_4px_16px_rgba(108,99,255,0.42)] hover:brightness-105 hover:-translate-y-px'
                       : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
                   }`}
                 >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 ${selectedPhotoIds.size > 0 ? 'group-hover:rotate-90 transition-transform duration-200' : ''}`}>
                     <path d="M8 3v10M3 8h10" />
                   </svg>
                   {t('home.organize.albumBridge.buttonLabel')}
-                  {selectedPhotoIds.size > 0 && <span className="opacity-80">· {selectedPhotoIds.size}</span>}
+                  {selectedPhotoIds.size > 0 && (
+                    <span className="shrink-0 min-w-[1.25rem] h-5 px-1 rounded-full bg-white/20 text-[11px] font-[700] inline-flex items-center justify-center">
+                      {selectedPhotoIds.size}
+                    </span>
+                  )}
                 </button>
               </div>
             )}
@@ -1533,58 +1541,49 @@ function EmptyState({
         <span>{t('organize.emptyState.dataSourceHint')}</span>
       </div>
 
-      {/* 4 个功能卡（马卡龙色） */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <FeatureCard
-          color="peach"
-          title={t('organize.tools.dedupe.title')}
-          desc={t('organize.tools.dedupe.shortDesc')}
-          icon={
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-              <path d="M9 2a7 7 0 105.293 11.707l3.707 3.707" />
-              <path d="M15 15l3 3" />
-              <line x1="18" y1="9" x2="12" y2="15" />
-            </svg>
-          }
-        />
-        <FeatureCard
-          color="sky"
-          title={t('organize.tools.organize.title')}
-          desc={t('organize.tools.organize.shortDesc')}
-          icon={
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-              <rect x="3" y="4" width="14" height="13" rx="1" />
-              <line x1="3" y1="8" x2="17" y2="8" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="12" y1="2" x2="12" y2="6" />
-            </svg>
-          }
-        />
-        <FeatureCard
-          color="mint"
-          title={t('organize.tools.exif.title')}
-          desc={t('organize.tools.exif.shortDesc')}
-          icon={
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-              <rect x="3" y="3" width="14" height="14" rx="2" />
-              <line x1="3" y1="9" x2="17" y2="9" />
-              <line x1="10" y1="6" x2="10" y2="9" />
-              <circle cx="10" cy="12" r="0.6" fill="currentColor" />
-            </svg>
-          }
-        />
-        <FeatureCard
-          color="lavender"
-          title={t('organize.tools.convert.title')}
-          desc={t('organize.tools.convert.shortDesc')}
-          icon={
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-              <path d="M4 4h12v12H4z" />
-              <path d="M7 9l3 3 3-3" />
-              <line x1="10" y1="6" x2="10" y2="12" />
-            </svg>
-          }
-        />
+      {/* 全部功能卡：按分类分组展示（对齐左侧导航栏的最新工具列表） */}
+      <div className="space-y-4 mb-6">
+        {[
+          {
+            key: 'smart',
+            label: t('organize.emptyState.categorySmart'),
+            tools: [
+              { color: 'peach' as const, title: t('organize.tools.dedupe.title'), desc: t('organize.tools.dedupe.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M9 2a7 7 0 105.293 11.707l3.707 3.707" /><path d="M15 15l3 3" /><line x1="18" y1="9" x2="12" y2="15" /></svg> },
+              { color: 'sky' as const, title: t('organize.tools.organize.title'), desc: t('organize.tools.organize.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="12" y1="2" x2="12" y2="6" /></svg> },
+              { color: 'grape' as const, title: t('organize.tools.faceCluster.title'), desc: t('organize.tools.faceCluster.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><circle cx="10" cy="10" r="8" /><circle cx="7.5" cy="8.5" r="0.8" fill="currentColor" /><circle cx="12.5" cy="8.5" r="0.8" fill="currentColor" /><path d="M6.5 12.5c1 1 2.3 1.5 3.5 1.5s2.5-.5 3.5-1.5" /></svg> },
+              { color: 'amber' as const, title: t('organize.tools.similar.title'), desc: t('organize.tools.similar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="2" y="4" width="11" height="11" rx="2" /><rect x="7" y="7" width="11" height="11" rx="2" /></svg> },
+            ],
+          },
+          {
+            key: 'metadata',
+            label: t('organize.emptyState.categoryMetadata'),
+            tools: [
+              { color: 'mint' as const, title: t('organize.tools.exif.title'), desc: t('organize.tools.exif.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="3" width="14" height="14" rx="2" /><line x1="7" y1="7" x2="13" y2="7" /><line x1="7" y1="10" x2="13" y2="10" /><line x1="7" y1="13" x2="10" y2="13" /></svg> },
+              { color: 'teal' as const, title: t('organize.tools.rename.title'), desc: t('organize.tools.rename.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M3 14l5-5 3 3-5 5H3v-3z" /><path d="M13 4l2-2 3 3-2 2" /><line x1="11" y1="6" x2="14" y2="9" /></svg> },
+              { color: 'lavender' as const, title: t('organize.tools.convert.title'), desc: t('organize.tools.convert.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M4 4h12v12H4z" /><path d="M4 14l4-4 3 3 5-5" /></svg> },
+            ],
+          },
+          {
+            key: 'browse',
+            label: t('organize.emptyState.categoryBrowse'),
+            tools: [
+              { color: 'indigo' as const, title: t('organize.tools.timeline.title'), desc: t('organize.tools.timeline.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><line x1="4" y1="4" x2="4" y2="16" /><circle cx="4" cy="6" r="1.5" fill="currentColor" /><circle cx="4" cy="11" r="1.5" fill="currentColor" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="11" x2="14" y2="11" /><line x1="8" y1="14" x2="12" y2="14" /></svg> },
+              { color: 'cyan' as const, title: t('organize.tools.calendar.title'), desc: t('organize.tools.calendar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="7" y1="2" x2="7" y2="6" /><line x1="13" y1="2" x2="13" y2="6" /></svg> },
+            ],
+          },
+        ].map((group) => (
+          <div key={group.key}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[11px] font-[700] uppercase tracking-wider text-[var(--color-text-tertiary)]">{group.label}</span>
+              <span className="flex-1 h-px bg-[var(--color-border)]/60" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              {group.tools.map((tool) => (
+                <FeatureCard key={tool.title} color={tool.color} title={tool.title} desc={tool.desc} icon={tool.icon} />
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* 最近打开的路径（快捷重开） */}

@@ -789,7 +789,10 @@
       "openButton": "Open",
       "removeFromHistory": "Remove from history",
       "projectBadge": "Album",
-      "dataSourceHint": "After selecting a data source, the tools below will activate · Multiple paths can be open simultaneously"
+      "dataSourceHint": "After selecting a data source, the tools below will activate · Multiple paths can be open simultaneously",
+      "categorySmart": "Smart Organizing",
+      "categoryMetadata": "Metadata",
+      "categoryBrowse": "Browse & View"
     },
     "tabs": {
       "addPath": "Add Path",
@@ -819,6 +822,31 @@
         "title": "EXIF Edit",
         "desc": "Edit photo capture time, GPS, and other metadata",
         "shortDesc": "Edit capture date / add GPS location"
+      },
+      "faceCluster": {
+        "title": "Face Recognition",
+        "desc": "Auto-group photos by person, select individually and add to album",
+        "shortDesc": "Auto-classify photos by person"
+      },
+      "similar": {
+        "title": "Similar Photo Analysis",
+        "desc": "Find visually similar photos (burst / same scene)",
+        "shortDesc": "Find burst/same-scene similar photos"
+      },
+      "rename": {
+        "title": "Batch Rename",
+        "desc": "Batch rename photo filenames by template",
+        "shortDesc": "Rename by date/location/sequence template"
+      },
+      "timeline": {
+        "title": "Timeline",
+        "desc": "Browse photos grouped by month or path",
+        "shortDesc": "Browse by month/path"
+      },
+      "calendar": {
+        "title": "Calendar",
+        "desc": "Browse photos by date in a calendar",
+        "shortDesc": "View photos by date"
       },
       "convert": {
         "title": "Format Convert",
