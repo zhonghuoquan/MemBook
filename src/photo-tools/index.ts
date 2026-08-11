@@ -24,6 +24,7 @@ export type {
   FaceRecord,
   FaceCluster,
   FaceClusterResult,
+  FaceDetectionResult,
   TimelineGroup,
   CalendarDay,
 } from './types';
@@ -79,5 +80,5 @@ export { previewRename, executeRename, buildRenameVars } from './rename';
 export type { RenameOptions } from './rename';
 
 // 人脸聚类
-export { extractFaceDescriptors, clusterFaces, findFaceClusters } from './face-cluster';
+export { extractFaceDescriptors, detectFaces, recluster, clusterFaces, findFaceClusters } from './face-cluster';
 export type { FaceClusterOptions } from './face-cluster';

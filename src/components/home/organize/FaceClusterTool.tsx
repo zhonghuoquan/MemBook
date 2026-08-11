@@ -4,13 +4,15 @@
  * 基于 face-api.js 的人脸检测 + 128维 descriptor + 层次聚类：
  *   1. 加载模型（TinyFaceDetector + FaceLandmark68 + FaceRecognition）
  *   2. 检测每张照片中的人脸并提取 descriptor
- *   3. 余弦相似度 + 层次聚类，将同一人的照片归为一组
+ *   3. 欧氏距离 + complete linkage 层次聚类
  *
- * 用户交互：
- * - 调节相似度阈值滑块（值越低分越细，越高合越多）
- * - 查看聚类分组，每组显示缩略图网格（最多 6 张，超出显示 "+N"）
- * - "全选"按钮一键选中该组所有照片
- * - 无人脸照片折叠显示
+ * 关键优化：
+ *   - 检测与聚类分离：调阈值时仅重跑 recluster（毫秒级），无需重新检测
+ *   - 阈值使用欧氏距离（与 face-api.js FaceMatcher 一致），默认 0.6
+ *   - 模型加载失败时显示明确 toast，不再误报"未检测到人脸"
+ *   - 支持手动合并聚类组
+ *   - 支持组命名
+ *   - 人脸裁剪预览（Canvas 按坐标裁剪代表性人脸）
  *
  * 全平台可用（纯前端 face-api，不限 Tauri/folder）
  */
@@ -18,10 +20,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  clusterFaces,
+  detectFaces,
+  recluster,
   type PhotoFileInfo,
   type FaceCluster,
   type FaceClusterResult,
+  type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
 import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
@@ -42,39 +46,72 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
   const [result, setResult] = useState<FaceClusterResult | null>(null);
-  // 相似度阈值：0.3-0.8，默认 0.6（值越低分越细，越高合越多）
+  /**
+   * 距离阈值（欧氏距离）：值越小越严格（分出更多组），值越大越宽松（合并更多）
+   * 默认 0.6，与 face-api.js FaceMatcher 一致
+   */
   const [threshold, setThreshold] = useState(0.6);
-  // 选中的照片 ID 集合（通过"全选"按钮加入）
+  // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测
+  const [detection, setDetection] = useState<FaceDetectionResult | null>(null);
+  // 选中的照片 ID 集合
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 无人脸照片区域折叠状态
   const [noFaceExpanded, setNoFaceExpanded] = useState(false);
   // 加入相册对话框
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
+  // 选中的聚类组（用于合并操作）
+  const [selectedClusters, setSelectedClusters] = useState<Set<string>>(new Set());
+  // 组名映射（clusterId → 用户输入的名称）
+  const [clusterNames, setClusterNames] = useState<Map<string, string>>(new Map());
+  // 正在编辑名称的组 ID
+  const [editingNameClusterId, setEditingNameClusterId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 通知父组件工具执行状态，用于禁用标签切换
+  // 通知父组件工具执行状态
   useEffect(() => {
     onBusyChange?.('faceCluster', running);
     return () => { onBusyChange?.('faceCluster', false); };
   }, [running, onBusyChange]);
 
-  /** 开始人脸聚类分析 */
+  /** 开始人脸检测（只检测，不聚类） */
   const handleStart = async () => {
     if (photos.length === 0) return;
     abortRef.current = new AbortController();
     setRunning(true);
     setResult(null);
+    setDetection(null);
     setSelectedIds(new Set());
+    setSelectedClusters(new Set());
     setNoFaceExpanded(false);
 
     try {
-      const res = await clusterFaces(photos, {
+      const det = await detectFaces(photos, {
         signal: abortRef.current.signal,
         onProgress: setProgress,
-        similarityThreshold: threshold,
         readData: readPhotoData,
       });
+
+      setDetection(det);
+
+      // 模型加载失败
+      if (det.modelLoadFailed) {
+        const errMsg = det.loadErrorMessage
+          ? t('home.organize.faceCluster.toastModelFailedDetail', {
+              message: det.loadErrorMessage,
+              defaultValue: '人脸识别初始化失败：{{message}}',
+            })
+          : t('home.organize.faceCluster.toastModelFailed', {
+              defaultValue: '人脸识别模型加载失败，请确认模型文件存在后重试',
+            });
+        addToast({ type: 'error', message: errMsg });
+        return;
+      }
+
+      // 检测完成，立即聚类
+      setProgress({ phase: 'clustering', current: 0, total: det.faces.length, message: `聚类 ${det.faces.length} 个人脸...` });
+      const res = recluster(det, threshold, photos);
       setResult(res);
+
       if (res.clusters.length > 0) {
         addToast({
           type: 'info',
@@ -109,6 +146,22 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 取消分析 */
   const handleCancel = () => abortRef.current?.abort();
 
+  /** 调整阈值后即时重聚类（使用缓存的检测结果，毫秒级） */
+  const handleRecluster = useCallback(() => {
+    if (!detection) return;
+    const res = recluster(detection, threshold, photos);
+    setResult(res);
+    setSelectedIds(new Set());
+    setSelectedClusters(new Set());
+  }, [detection, threshold, photos]);
+
+  /** 阈值滑块变化时自动重聚类（仅在有检测结果时） */
+  useEffect(() => {
+    if (detection && !running) {
+      handleRecluster();
+    }
+  }, [threshold]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** 全选/取消全选某个人脸分组 */
   const toggleSelectGroup = useCallback((cluster: FaceCluster) => {
     setSelectedIds((prev) => {
@@ -116,17 +169,73 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       const groupIds = cluster.photos.map((p) => p.id);
       const allSelected = groupIds.every((id) => next.has(id));
       if (allSelected) {
-        // 已全选 → 取消全选
         groupIds.forEach((id) => next.delete(id));
       } else {
-        // 未全选 → 全选
         groupIds.forEach((id) => next.add(id));
       }
       return next;
     });
   }, []);
 
-  /** 选中的照片列表（从 result.clusters 中按 selectedIds 过滤） */
+  /** 切换聚类组选中（用于合并操作） */
+  const toggleSelectCluster = useCallback((clusterId: string) => {
+    setSelectedClusters((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) next.delete(clusterId);
+      else next.add(clusterId);
+      return next;
+    });
+  }, []);
+
+  /** 合并选中的聚类组 */
+  const handleMergeClusters = useCallback(() => {
+    if (selectedClusters.size < 2 || !result) return;
+    setResult((prev) => {
+      if (!prev) return prev;
+      // 合并所有选中组的 faces 和 photos
+      const mergedFaces: typeof prev.clusters[0]['faces'] = [];
+      const mergedPhotoIds = new Set<string>();
+      for (const c of prev.clusters) {
+        if (selectedClusters.has(c.clusterId)) {
+          mergedFaces.push(...c.faces);
+          c.photos.forEach((p) => mergedPhotoIds.add(p.id));
+        }
+      }
+      const photoById = new Map<string, PhotoFileInfo>();
+      for (const p of photos) photoById.set(p.id, p);
+      const mergedPhotos = [...mergedPhotoIds].map((id) => photoById.get(id)).filter((p): p is PhotoFileInfo => !!p);
+      const representativeFace = mergedFaces.reduce((best, f) => {
+        const bestScore = best.width * best.height * best.score;
+        const fScore = f.width * f.height * f.score;
+        return fScore > bestScore ? f : best;
+      });
+      const mergedCluster: FaceCluster = {
+        clusterId: `face-merged-${Date.now()}`,
+        faces: mergedFaces,
+        photos: mergedPhotos,
+        representativeFace,
+        photoCount: mergedPhotos.length,
+      };
+      // 移除被合并的组，添加合并后的组
+      const remaining = prev.clusters.filter((c) => !selectedClusters.has(c.clusterId));
+      return { ...prev, clusters: [mergedCluster, ...remaining] };
+    });
+    setSelectedClusters(new Set());
+    addToast({ type: 'success', message: t('home.organize.faceCluster.toastMerged', { defaultValue: '已合并 {{count}} 个人脸组', count: selectedClusters.size }) });
+  }, [selectedClusters, result, photos, addToast, t]);
+
+  /** 设置组名 */
+  const handleRenameCluster = useCallback((clusterId: string, name: string) => {
+    setClusterNames((prev) => {
+      const next = new Map(prev);
+      if (name.trim()) next.set(clusterId, name.trim());
+      else next.delete(clusterId);
+      return next;
+    });
+    setEditingNameClusterId(null);
+  }, []);
+
+  /** 选中的照片列表 */
   const selectedPhotos = useMemo<PhotoFileInfo[]>(() => {
     if (!result || selectedIds.size === 0) return [];
     const out: PhotoFileInfo[] = [];
@@ -138,7 +247,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     return out;
   }, [result, selectedIds]);
 
-  /** 加入相册：无选中时提示，有选中时打开对话框 */
+  /** 加入相册 */
   const handleAddToAlbum = () => {
     if (selectedIds.size === 0) {
       addToast({ type: 'warning', message: t('home.organize.faceCluster.selectPhotosFirst') });
@@ -147,7 +256,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     setAlbumBridgeOpen(true);
   };
 
-  /** 当前阶段索引（-1 表示未开始/未知阶段） */
+  /** 当前阶段索引 */
   const currentStageIdx = progress
     ? STAGES.findIndex((s) => s.phase === progress.phase)
     : -1;
@@ -166,16 +275,16 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         </svg>
       }
     >
-      {/* ── 顶部：相似度阈值滑块 + 操作按钮 ── */}
+      {/* ── 顶部：距离阈值滑块 + 操作按钮 ── */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <label className="text-xs text-[var(--color-text-secondary)] whitespace-nowrap">
-            {t('home.organize.faceCluster.threshold', '相似度阈值')}
+            {t('home.organize.faceCluster.threshold', '距离阈值')}
           </label>
           <input
             type="range"
             min={0.3}
-            max={0.8}
+            max={0.9}
             step={0.05}
             value={threshold}
             onChange={(e) => setThreshold(parseFloat(e.target.value))}
@@ -188,7 +297,9 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         </div>
         {!running ? (
           <PrimaryButton onClick={handleStart} disabled={photos.length === 0}>
-            {t('home.organize.faceCluster.start', '开始分析')}
+            {detection
+              ? t('home.organize.faceCluster.redetect', '重新检测')
+              : t('home.organize.faceCluster.start', '开始分析')}
           </PrimaryButton>
         ) : (
           <button
@@ -200,13 +311,12 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         )}
       </div>
       <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
-        {t('home.organize.faceCluster.thresholdHint', '值越低分越细，越高合越多')}
+        {t('home.organize.faceCluster.thresholdHint', '值越小分越细（更多人脸组），值越大合越多（更宽松）')}
       </p>
 
       {/* ── 中部：进度条 + 三阶段指示 ── */}
       {running && (
         <div className="mt-3">
-          {/* 三阶段指示器：加载模型 → 检测人脸 → 聚类 */}
           <div className="flex items-center gap-2 mb-2">
             {STAGES.map((stage, i) => {
               const isActive = i === currentStageIdx;
@@ -234,48 +344,41 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       {/* ── 底部：统计信息 + 分组列表 ── */}
       {result && (
         <>
-          {/* 统计信息：总照片 / 有人脸 / 人脸组 / 无人脸 / 失败 */}
+          {/* 统计信息 */}
           <div className="mt-3 flex gap-2 flex-wrap">
-            <StatCard
-              label={t('home.organize.faceCluster.statTotal', '总照片')}
-              value={result.totalPhotos}
-              color="gray"
-            />
-            <StatCard
-              label={t('home.organize.faceCluster.statWithFaces', '有人脸')}
-              value={result.photosWithFaces}
-              color="green"
-            />
-            <StatCard
-              label={t('home.organize.faceCluster.statClusters', '人脸组')}
-              value={result.clusters.length}
-              color="purple"
-            />
-            <StatCard
-              label={t('home.organize.faceCluster.statNoFace', '无人脸')}
-              value={result.noFacePhotos.length}
-              color="gray"
-            />
+            <StatCard label={t('home.organize.faceCluster.statTotal', '总照片')} value={result.totalPhotos} color="gray" />
+            <StatCard label={t('home.organize.faceCluster.statWithFaces', '有人脸')} value={result.photosWithFaces} color="green" />
+            <StatCard label={t('home.organize.faceCluster.statClusters', '人脸组')} value={result.clusters.length} color="purple" />
+            <StatCard label={t('home.organize.faceCluster.statNoFace', '无人脸')} value={result.noFacePhotos.length} color="gray" />
             {(result.failedPhotos ?? 0) > 0 && (
-              <StatCard
-                label={t('home.organize.faceCluster.statFailed', '失败')}
-                value={result.failedPhotos}
-                color="red"
-              />
+              <StatCard label={t('home.organize.faceCluster.statFailed', '失败')} value={result.failedPhotos} color="red" />
             )}
           </div>
+
+          {/* 合并操作栏 */}
+          {selectedClusters.size >= 2 && (
+            <div className="mt-2 px-3 py-2 rounded-lg bg-[#F1E9F8] border border-[#C4A5E0] flex items-center justify-between">
+              <span className="text-xs text-[#8B6BB0]">
+                {t('home.organize.faceCluster.mergeSelected', { count: selectedClusters.size, defaultValue: '已选 {{count}} 个组' })}
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => setSelectedClusters(new Set())} className="text-xs text-[var(--color-gray-500)] hover:text-[var(--color-gray-700)] cursor-pointer bg-transparent border-none">
+                  {t('home.organize.faceCluster.cancelMerge', '取消')}
+                </button>
+                <button onClick={handleMergeClusters} className="text-xs text-white bg-[#8B6BB0] hover:opacity-90 px-3 py-1 rounded cursor-pointer border-none">
+                  {t('home.organize.faceCluster.confirmMerge', '合并')}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 选中计数 + 加入相册按钮 */}
           <div className="mt-2 flex items-center gap-3 flex-wrap">
             {selectedIds.size > 0 && (
               <span className="text-xs text-[var(--color-gray-500)]">
-                {t('home.organize.faceCluster.selectedCount', {
-                  count: selectedIds.size,
-                  defaultValue: '已选中 {{count}} 张照片',
-                })}
+                {t('home.organize.faceCluster.selectedCount', { count: selectedIds.size, defaultValue: '已选中 {{count}} 张照片' })}
               </span>
             )}
-            {/* 加入相册按钮：未选照片时置灰，点击提示 */}
             <button
               type="button"
               onClick={handleAddToAlbum}
@@ -304,14 +407,20 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
                   cluster={cluster}
                   index={idx}
                   selectedIds={selectedIds}
+                  selectedClusters={selectedClusters}
                   onToggleSelect={toggleSelectGroup}
+                  onToggleClusterSelect={toggleSelectCluster}
+                  onRenameCluster={handleRenameCluster}
+                  clusterName={clusterNames.get(cluster.clusterId)}
+                  editingName={editingNameClusterId === cluster.clusterId}
+                  onSetEditingName={setEditingNameClusterId}
                   readPhotoData={readPhotoData}
                 />
               ))}
             </div>
           )}
 
-          {/* 无人脸照片（折叠显示） */}
+          {/* 无人脸照片 */}
           {result.noFacePhotos.length > 0 && (
             <div className="mt-3">
               <button
@@ -321,16 +430,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
                 <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${noFaceExpanded ? 'rotate-90' : ''}`}>
                   <path d="M4 2l4 4-4 4" />
                 </svg>
-                {t('home.organize.faceCluster.noFacePhotos', {
-                  count: result.noFacePhotos.length,
-                  defaultValue: '无人脸照片 ({{count}})',
-                })}
+                {t('home.organize.faceCluster.noFacePhotos', { count: result.noFacePhotos.length, defaultValue: '无人脸照片 ({{count}})' })}
               </button>
               {noFaceExpanded && (
-                <div
-                  className="grid gap-1.5 mt-2"
-                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }}
-                >
+                <div className="grid gap-1.5 mt-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }}>
                   {result.noFacePhotos.map((p) => (
                     <div key={p.id} className="aspect-square rounded-md overflow-hidden">
                       <ThumbImage photo={p} readPhotoData={readPhotoData} size="small" />
@@ -343,7 +446,6 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         </>
       )}
 
-      {/* 加入相册对话框 */}
       <AlbumBridgeDialog
         open={albumBridgeOpen}
         onClose={() => setAlbumBridgeOpen(false)}
@@ -359,15 +461,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
 // ── 子组件 ────────────────────────────────────────────────
 
 /** 统计卡片 */
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: 'gray' | 'green' | 'purple' | 'red';
-}) {
+function StatCard({ label, value, color }: { label: string; value: number; color: 'gray' | 'green' | 'purple' | 'red' }) {
   const colors = {
     gray: 'bg-[var(--color-gray-50)] text-[var(--color-gray-700)]',
     green: 'bg-green-50 text-green-700',
@@ -382,65 +476,103 @@ function StatCard({
   );
 }
 
-/** 人脸分组项：编号 + 照片数 + 缩略图网格 + 全选按钮 */
+/** 人脸分组项 */
 function FaceClusterGroupItem({
   cluster,
   index,
   selectedIds,
+  selectedClusters,
   onToggleSelect,
+  onToggleClusterSelect,
+  onRenameCluster,
+  clusterName,
+  editingName,
+  onSetEditingName,
   readPhotoData,
 }: {
   cluster: FaceCluster;
   index: number;
   selectedIds: Set<string>;
+  selectedClusters: Set<string>;
   onToggleSelect: (cluster: FaceCluster) => void;
+  onToggleClusterSelect: (clusterId: string) => void;
+  onRenameCluster: (clusterId: string, name: string) => void;
+  clusterName?: string;
+  editingName: boolean;
+  onSetEditingName: (id: string | null) => void;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
 }) {
   const { t } = useTranslation();
+  const [nameInput, setNameInput] = useState('');
   const groupIds = cluster.photos.map((p) => p.id);
   const selectedCount = groupIds.filter((id) => selectedIds.has(id)).length;
   const allSelected = selectedCount === groupIds.length;
+  const isClusterSelected = selectedClusters.has(cluster.clusterId);
 
-  // 最多显示 MAX_THUMBS 张缩略图，超出在第 6 张上叠加 "+N"
   const visiblePhotos = cluster.photos.slice(0, MAX_THUMBS);
   const extraCount = cluster.photos.length - MAX_THUMBS;
 
+  const handleNameSubmit = () => {
+    onRenameCluster(cluster.clusterId, nameInput);
+  };
+
   return (
-    <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
-      {/* 组头：编号 + 照片数 + 全选按钮 */}
+    <div className={`rounded-lg border overflow-hidden transition-all ${
+      isClusterSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]/30' : 'border-[var(--color-border)]'
+    }`}>
+      {/* 组头 */}
       <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-surface)]">
         <div className="flex items-center gap-2 min-w-0">
-          {/* 组编号徽章 */}
-          <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#D7C5EC] text-[#8B6BB0] text-xs font-bold">
-            {index + 1}
-          </span>
-          <span className="text-sm text-[var(--color-gray-800)] font-medium">
-            {t('home.organize.faceCluster.groupTitle', {
-              index: index + 1,
-              defaultValue: '人物 {{index}}',
-            })}
-          </span>
-          <span className="text-xs text-[var(--color-gray-500)]">
-            {t('home.organize.faceCluster.photosCount', {
-              count: cluster.photoCount,
-              defaultValue: '{{count}} 张照片',
-            })}
-            {cluster.faces.length > cluster.photoCount && (
-              <span className="ml-1 text-[var(--color-gray-400)]">
-                · {cluster.faces.length} 个人脸
+          {/* 合并选择复选框 */}
+          <input
+            type="checkbox"
+            checked={isClusterSelected}
+            onChange={() => onToggleClusterSelect(cluster.clusterId)}
+            className="shrink-0 w-3.5 h-3.5 accent-[#8B6BB0] cursor-pointer"
+            title={t('home.organize.faceCluster.selectForMerge', '选择用于合并')}
+          />
+          {/* 组编号/名称 */}
+          {editingName ? (
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onBlur={handleNameSubmit}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleNameSubmit(); if (e.key === 'Escape') onSetEditingName(null); }}
+              placeholder={t('home.organize.faceCluster.namePlaceholder', '输入名称')}
+              autoFocus
+              className="text-sm px-2 py-0.5 rounded border border-[#C4A5E0] outline-none bg-white text-[var(--color-gray-800)] w-32"
+            />
+          ) : (
+            <button
+              onClick={() => { setNameInput(clusterName ?? ''); onSetEditingName(cluster.clusterId); }}
+              className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer hover:opacity-70"
+            >
+              <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#D7C5EC] text-[#8B6BB0] text-xs font-bold">
+                {index + 1}
               </span>
+              <span className="text-sm text-[var(--color-gray-800)] font-medium">
+                {clusterName ?? t('home.organize.faceCluster.groupTitle', { index: index + 1, defaultValue: '人物 {{index}}' })}
+              </span>
+              {!clusterName && (
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 text-[var(--color-gray-400)]">
+                  <path d="M8 1.5l2.5 2.5L4.5 10H2V7.5L8 1.5z" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          )}
+          <span className="text-xs text-[var(--color-gray-500)]">
+            {t('home.organize.faceCluster.photosCount', { count: cluster.photoCount, defaultValue: '{{count}} 张照片' })}
+            {cluster.faces.length > cluster.photoCount && (
+              <span className="ml-1 text-[var(--color-gray-400)]">· {cluster.faces.length} 个人脸</span>
             )}
           </span>
           {selectedCount > 0 && (
             <span className="shrink-0 text-[10px] text-[#8B6BB0] font-medium px-1.5 py-0.5 rounded bg-[#F1E9F8]">
-              {t('home.organize.faceCluster.selectedInGroup', {
-                count: selectedCount,
-                defaultValue: '已选 {{count}}',
-              })}
+              {t('home.organize.faceCluster.selectedInGroup', { count: selectedCount, defaultValue: '已选 {{count}}' })}
             </span>
           )}
         </div>
-        {/* 全选按钮 */}
         <button
           onClick={() => onToggleSelect(cluster)}
           className={`shrink-0 text-[11px] px-2.5 py-1 rounded border cursor-pointer transition-all ${
@@ -455,12 +587,9 @@ function FaceClusterGroupItem({
         </button>
       </div>
 
-      {/* 缩略图网格：最多 6 张，超出在第 6 张叠加 "+N" */}
+      {/* 缩略图网格 */}
       <div className="px-3 pb-3 pt-2">
-        <div
-          className="grid gap-1.5"
-          style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}
-        >
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
           {visiblePhotos.map((photo, i) => {
             const isSelected = selectedIds.has(photo.id);
             const showExtraOverlay = i === MAX_THUMBS - 1 && extraCount > 0;
@@ -473,13 +602,11 @@ function FaceClusterGroupItem({
                 title={photo.name}
               >
                 <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
-                {/* 超出数量叠加层 */}
                 {showExtraOverlay && (
                   <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-mono font-bold">
                     +{extraCount}
                   </div>
                 )}
-                {/* 选中标记 */}
                 {isSelected && (
                   <div className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-[#8B6BB0] flex items-center justify-center text-white text-[10px] font-bold shadow-sm">
                     ✓
@@ -493,5 +620,3 @@ function FaceClusterGroupItem({
     </div>
   );
 }
-
-

@@ -201,6 +201,8 @@ export interface FaceCluster {
   representativeFace: FaceRecord;
   /** 组内照片数 */
   photoCount: number;
+  /** 用户自定义组名（可选，如"妈妈"） */
+  customName?: string;
 }
 
 /** 人脸聚类结果 */
@@ -214,6 +216,24 @@ export interface FaceClusterResult {
   photosWithFaces: number;
   /** 处理失败的照片数（模型加载失败/读取异常等） */
   failedPhotos: number;
+  /** 模型是否加载失败（区分"模型未加载"与"未检测到人脸"） */
+  modelLoadFailed?: boolean;
+}
+
+/** 人脸检测中间结果（用于分离检测与聚类，支持调阈值即时重聚类） */
+export interface FaceDetectionResult {
+  /** 所有检测到的人脸记录 */
+  faces: FaceRecord[];
+  /** 检测到人脸的照片 ID 集合 */
+  photosWithFacesSet: Set<string>;
+  /** 处理失败的照片数 */
+  failedCount: number;
+  /** 模型是否加载失败 */
+  modelLoadFailed: boolean;
+  /** 总照片数 */
+  totalPhotos: number;
+  /** 模型加载失败的具体原因（modelLoadFailed=true 时有值） */
+  loadErrorMessage?: string;
 }
 
 // ══════════════════════════════════════════════════════════

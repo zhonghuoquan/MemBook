@@ -196,12 +196,18 @@ const CATEGORY_TITLE_KEY: Record<ToolCategory, string> = {
   browse: 'home.organize.sidebar.categoryBrowse',
 };
 
+/** 工具运行状态 */
+export type ToolStatus = 'idle' | 'running' | 'done';
+
 export function ToolSidebar({
   activeTool,
   onSelect,
+  toolStatuses,
 }: {
   activeTool: ToolId;
   onSelect: (id: ToolId) => void;
+  /** 各工具的运行状态（由父组件追踪，用于按钮上显示状态指示） */
+  toolStatuses?: Map<ToolId, ToolStatus>;
 }) {
   const { t } = useTranslation();
 
@@ -217,6 +223,7 @@ export function ToolSidebar({
           {tools.map((tool) => {
             const isActive = tool.id === activeTool;
             const cb = COLOR_BLOCK[tool.color];
+            const status = toolStatuses?.get(tool.id) ?? 'idle';
             return (
               <button
                 key={tool.id}
@@ -233,9 +240,27 @@ export function ToolSidebar({
                 {isActive && (
                   <span className={`absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full ${cb.activeBar}`} />
                 )}
-                {/* 色块图标 */}
-                <span className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${cb.iconBg} ${cb.iconText}`}>
-                  {tool.icon}
+                {/* 色块图标 + 状态指示 */}
+                <span className="relative shrink-0">
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${cb.iconBg} ${cb.iconText}`}>
+                    {tool.icon}
+                  </span>
+                  {/* 状态指示徽章：右上角小圆点 */}
+                  {status === 'running' && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
+                      <svg className="w-2 h-2 animate-spin text-white" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="4" />
+                        <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                      </svg>
+                    </span>
+                  )}
+                  {status === 'done' && !isActive && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white flex items-center justify-center">
+                      <svg viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-2 h-2">
+                        <path d="M2 6l3 3 5-6" />
+                      </svg>
+                    </span>
+                  )}
                 </span>
                 {/* 标题 + 简要说明 */}
                 <span className="flex-1 min-w-0 pt-0.5">
@@ -245,7 +270,11 @@ export function ToolSidebar({
                     {t(tool.titleKey)}
                   </span>
                   <span className="block text-[11px] text-[var(--color-gray-500)] leading-tight mt-0.5 line-clamp-2">
-                    {t(tool.descKey)}
+                    {status === 'running'
+                      ? t('home.organize.sidebar.statusRunning', '扫描中...')
+                      : status === 'done' && !isActive
+                        ? t('home.organize.sidebar.statusDone', '已完成，点击查看')
+                        : t(tool.descKey)}
                   </span>
                 </span>
               </button>
