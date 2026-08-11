@@ -10,11 +10,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AlbumProject, Photo } from '../../../types';
-import { listProjects, loadPhotos, savePhotoChanges } from '../../../db';
+import { listProjects, loadPhotos, savePhotoChanges, createAndSaveProject } from '../../../db';
 import { importPhotoToDB } from '../../../engine/storage/import-store';
 import { ensureSupportedFormat } from '../../../engine/storage/heic-converter';
 import { isHeicFile } from '../../../engine/storage/utils';
 import type { PhotoFileInfo, ToolProgress } from '../../../photo-tools';
+import { ALBUM_SIZES, PAGE_MARGIN_PRESETS } from '../../../types';
 import { ProgressBar } from './shared';
 import { logger } from '../../../utils/logger';
 
@@ -72,6 +73,10 @@ export function AlbumBridgeDialog({
   const [strategy, setStrategy] = useState<Strategy>('direct');
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
+  // 新建相册表单
+  const [creating, setCreating] = useState(false);
+  const [newAlbumName, setNewAlbumName] = useState('');
+  const [creatingAlbum, setCreatingAlbum] = useState(false);
 
   // 防止并发触发（按钮 disabled 在同一 tick 内可能尚未生效）
   const processingRef = useRef(false);
@@ -83,6 +88,9 @@ export function AlbumBridgeDialog({
     setSelectedProjectId(null);
     setStrategy('direct');
     setProgress(null);
+    setCreating(false);
+    setNewAlbumName('');
+    setCreatingAlbum(false);
     listProjects()
       .then(async (list) => {
         setProjects(list);
@@ -267,6 +275,38 @@ export function AlbumBridgeDialog({
     }
   }
 
+  /** 快速创建新相册（无相册时可直接创建，也可手动新建） */
+  const handleCreateAlbum = async () => {
+    const name = newAlbumName.trim() || t('home.createDialog.unnamedAlbum', '未命名相册');
+    setCreatingAlbum(true);
+    try {
+      const defaultSize = ALBUM_SIZES[0];
+      const defaultMargin = { margin: PAGE_MARGIN_PRESETS[2].margin, gap: PAGE_MARGIN_PRESETS[2].gap };
+      const projectId = await createAndSaveProject(name, defaultSize, [], defaultMargin, undefined, '');
+      // 重新加载项目列表并自动选中新相册
+      const list = await listProjects();
+      setProjects(list);
+      const counts: Record<string, number> = {};
+      for (const p of list) counts[p.id] = 0;
+      setPhotoCounts(counts);
+      setSelectedProjectId(projectId);
+      setCreating(false);
+      setNewAlbumName('');
+      addToast({ type: 'success', message: t('home.organize.albumBridge.albumCreated', { name, defaultValue: '已创建相册「{{name}}」' }) });
+    } catch (err) {
+      logger.warn('[AlbumBridge] 创建相册失败:', err);
+      addToast({
+        type: 'error',
+        message: t('home.organize.albumBridge.createFailed', {
+          message: err instanceof Error ? err.message : String(err),
+          defaultValue: '创建相册失败：{{message}}',
+        }),
+      });
+    } finally {
+      setCreatingAlbum(false);
+    }
+  };
+
   if (!open) return null;
 
   const canConfirm = selectedProjectId !== null && !processing && photos.length > 0;
@@ -366,25 +406,56 @@ export function AlbumBridgeDialog({
                 </span>
               </div>
             ) : projects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-[var(--color-gray-100)] flex items-center justify-center mb-3">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-7 h-7 text-[var(--color-gray-400)]"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <path d="M21 15l-5-5L5 21" />
-                  </svg>
+              <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-panel)] p-4">
+                <div className="flex flex-col items-center text-center mb-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[var(--color-gray-100)] flex items-center justify-center mb-2">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-6 h-6 text-[var(--color-gray-400)]"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-[var(--color-text-secondary)]">
+                    {t('home.organize.albumBridge.noProject')}
+                  </p>
                 </div>
-                <p className="text-sm text-[var(--color-text-secondary)]">
-                  {t('home.organize.albumBridge.noProject')}
-                </p>
+                {/* 快速创建新相册 */}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newAlbumName}
+                    onChange={(e) => setNewAlbumName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateAlbum(); }}
+                    placeholder={t('home.organize.albumBridge.newAlbumPlaceholder', '输入相册名称')}
+                    disabled={creatingAlbum}
+                    className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-white text-sm outline-none focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand)]/20 disabled:opacity-50"
+                  />
+                  <button
+                    onClick={handleCreateAlbum}
+                    disabled={creatingAlbum}
+                    className="shrink-0 px-3 py-2 rounded-lg text-sm font-[600] border-none cursor-pointer bg-[var(--color-brand)] text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                  >
+                    {creatingAlbum ? (
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                        <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                        <path d="M8 3v10M3 8h10" />
+                      </svg>
+                    )}
+                    {t('home.organize.albumBridge.createNow', '快速创建')}
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -419,6 +490,60 @@ export function AlbumBridgeDialog({
                     </button>
                   );
                 })}
+              </div>
+            )}
+
+            {/* 有相册时也支持新建相册 */}
+            {!loading && projects.length > 0 && (
+              <div className="mt-2">
+                {creating ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newAlbumName}
+                      onChange={(e) => setNewAlbumName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateAlbum(); }}
+                      placeholder={t('home.organize.albumBridge.newAlbumPlaceholder', '输入相册名称')}
+                      disabled={creatingAlbum}
+                      autoFocus
+                      className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-white text-sm outline-none focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand)]/20 disabled:opacity-50"
+                    />
+                    <button
+                      onClick={handleCreateAlbum}
+                      disabled={creatingAlbum}
+                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-[600] border-none cursor-pointer bg-[var(--color-brand)] text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                    >
+                      {creatingAlbum ? (
+                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                          <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                          <path d="M8 3v10M3 8h10" />
+                        </svg>
+                      )}
+                      {t('home.organize.albumBridge.confirmCreate', '创建')}
+                    </button>
+                    <button
+                      onClick={() => { setCreating(false); setNewAlbumName(''); }}
+                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-[600] border border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+                    >
+                      {t('home.organize.albumBridge.cancel', '取消')}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setCreating(true); setNewAlbumName(''); }}
+                    disabled={processing}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-[600] border border-dashed border-[var(--color-border)] bg-white text-[var(--color-brand)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand-bg)]/40 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                      <path d="M8 3v10M3 8h10" />
+                    </svg>
+                    {t('home.organize.albumBridge.createNew', '新建相册')}
+                  </button>
+                )}
               </div>
             )}
           </div>

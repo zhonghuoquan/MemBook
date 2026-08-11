@@ -6,8 +6,8 @@ import { useState, useEffect, useRef } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo, ToolProgress, DataSourceMode } from '../../../photo-tools';
-import { formatBytes } from '../../../photo-tools';
-import { getThumbUrl, type ThumbSize } from './thumbCache';
+import { formatBytes, isTauri } from '../../../photo-tools';
+import { getThumbUrl, evictFromCache, type ThumbSize } from './thumbCache';
 
 // ── 常量 ────────────────────────────────────────────────
 
@@ -703,6 +703,231 @@ export function ThumbImage({
         </svg>
       )}
       {previewOverlay}
+    </div>
+  );
+}
+
+// ── 共享删除逻辑 ────────────────────────────────────────
+
+/**
+ * 删除一张或多张照片（统一入口，时间线/日历/人脸识别等浏览工具共用）
+ * - folder + Tauri：移入系统回收站（可恢复），非物理删除
+ * - library / Web：从列表移除并清理缩略图缓存
+ * @returns 成功删除数量
+ */
+export async function deletePhotos(
+  target: PhotoFileInfo[],
+  sourceMode: DataSourceMode,
+  onPhotosUpdate: (updater: (prev: PhotoFileInfo[]) => PhotoFileInfo[]) => void,
+  addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): Promise<number> {
+  if (target.length === 0) return 0;
+  let ok = 0, fail = 0;
+  try {
+    if (sourceMode === 'library') {
+      // 库内模式：从列表移除并清理缩略图缓存
+      for (const f of target) {
+        if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
+        evictFromCache(f.id);
+        ok++;
+      }
+    } else if (isTauri()) {
+      // folder + Tauri：移入系统回收站（可恢复）
+      const { invoke } = await import('@tauri-apps/api/core');
+      const paths = target.map((f) => f.path).filter((p): p is string => Boolean(p));
+      if (paths.length > 0) {
+        try {
+          await invoke('trash_files', { paths });
+          ok = paths.length;
+          fail = target.length - paths.length;
+        } catch {
+          // 批量失败时逐个尝试，定位失败文件
+          for (const f of target) {
+            try {
+              if (f.path) { await invoke('trash_files', { paths: [f.path] }); ok++; } else fail++;
+            } catch { fail++; }
+          }
+        }
+      } else {
+        fail = target.length;
+      }
+    } else {
+      // Web folder：无文件系统权限，仅从列表移除
+      for (const f of target) {
+        if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
+        ok++;
+      }
+    }
+
+    const deleteIds = new Set(target.map((f) => f.id));
+    onPhotosUpdate((prev) => prev.filter((p) => !deleteIds.has(p.id)));
+
+    addToast({
+      type: fail > 0 ? 'warning' : 'success',
+      message: fail > 0
+        ? t('home.organize.shared.toastDeletedWithFail', { ok, fail })
+        : t('home.organize.shared.toastDeleted', { ok }),
+    });
+  } catch (err) {
+    addToast({
+      type: 'error',
+      message: t('home.organize.shared.toastDeleteFailed', { message: (err as Error).message }),
+    });
+    ok = 0;
+  }
+  return ok;
+}
+
+// ── 带操作菜单的缩略图组件 ──────────────────────────────
+
+/**
+ * 缩略图 + 右上角三点操作菜单（查看 / 删除）
+ *
+ * 鼠标悬浮在缩略图右上角显示“⋯”三点按钮，点击展开下拉菜单。
+ * 供时间线 / 日历 / 人脸识别等浏览类工具的缩略图统一使用。
+ */
+export function ThumbWithMenu({
+  photo,
+  readPhotoData,
+  onView,
+  onDelete,
+  selected = false,
+  anomaly = false,
+  anomalyLabel,
+  onClick,
+  thumb,
+  confirmDelete = true,
+}: {
+  photo: PhotoFileInfo;
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  onView: () => void;
+  onDelete: () => void;
+  selected?: boolean;
+  anomaly?: boolean;
+  anomalyLabel?: string;
+  onClick?: () => void;
+  /** 自定义缩略图内容（默认 ThumbImage small） */
+  thumb?: React.ReactNode;
+  confirmDelete?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [menuOpen]);
+
+  const closeMenu = () => setMenuOpen(false);
+
+  const handleView = () => {
+    closeMenu();
+    onView();
+  };
+
+  const handleDelete = () => {
+    closeMenu();
+    if (confirmDelete) {
+      if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
+        onDelete();
+      }
+    } else {
+      onDelete();
+    }
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      className={`relative group rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+        selected
+          ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
+          : anomaly
+            ? 'border-red-300'
+            : 'border-transparent hover:border-[var(--color-border)]'
+      }`}
+      title={photo.name}
+    >
+      {thumb ?? (
+        <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
+      )}
+
+      {/* 选中标记（左上角） */}
+      <span
+        className={`absolute top-1 left-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-sm transition-all ${
+          selected ? 'opacity-100 bg-[var(--color-brand)]' : 'opacity-0 bg-black/40'
+        }`}
+      >
+        ✓
+      </span>
+
+      {/* 异常日期标签（右下角） */}
+      {anomaly && anomalyLabel && (
+        <span className="absolute bottom-0.5 right-0.5 z-10 text-[8px] leading-none px-1 py-0.5 rounded bg-red-500 text-white font-[600]">
+          {anomalyLabel}
+        </span>
+      )}
+
+      {/* 右上角三点菜单 */}
+      <div className="absolute top-0.5 right-0.5 z-20">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          className="w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-black/60 transition-all cursor-pointer border-none"
+          title={t('home.organize.shared.moreActions')}
+        >
+          <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
+            <circle cx="8" cy="3" r="1.4" />
+            <circle cx="8" cy="8" r="1.4" />
+            <circle cx="8" cy="13" r="1.4" />
+          </svg>
+        </button>
+
+        {/* 下拉菜单 */}
+        {menuOpen && (
+          <div
+            className="absolute right-0 top-6 z-30 min-w-[110px] rounded-lg border border-[var(--color-border)] bg-white shadow-lg py-1 animate-[fadeIn_120ms_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={handleView}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors border-none bg-transparent"
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-[var(--color-gray-400)]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+              </svg>
+              {t('home.organize.shared.view')}
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 cursor-pointer transition-colors border-none bg-transparent"
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7h16" />
+                <path d="M9 7V4h6v3" />
+                <path d="M6 7l1 13h10l1-13" />
+                <path d="M10 11v5M14 11v5" />
+              </svg>
+              {t('home.organize.shared.delete')}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

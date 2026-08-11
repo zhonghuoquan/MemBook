@@ -317,7 +317,14 @@
     },
     "organize": {
       "shared": {
-        "processing": "Processing..."
+        "processing": "Processing...",
+        "view": "View",
+        "delete": "Delete",
+        "moreActions": "More actions",
+        "deleteConfirm": "Delete \"{{name}}\"?",
+        "toastDeleted": "Deleted {{ok}} photo(s)",
+        "toastDeletedWithFail": "Deleted {{ok}}, failed {{fail}}",
+        "toastDeleteFailed": "Delete failed: {{message}}"
       },
       "exif": {
         "title": "Edit Photo Info",
@@ -594,7 +601,9 @@
         "collapse": "Collapse",
         "unknownDate": "Unknown date",
         "overflowSuffix": "",
-        "empty": "No photos with recognizable dates"
+        "empty": "No photos with recognizable dates",
+        "viewAll": "View all {{count}}",
+        "collapseAll": "Collapse all"
       },
       "calendar": {
         "prevMonth": "Previous",
@@ -606,7 +615,15 @@
         "noPhotos": "No photos",
         "anomalyLabel": "Anomaly",
         "selectDayHint": "Click a date to view photos",
-        "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "weekdays": [
+          "Mon",
+          "Tue",
+          "Wed",
+          "Thu",
+          "Fri",
+          "Sat",
+          "Sun"
+        ],
         "empty": "No photos with recognizable dates",
         "selectAllDay": "Select all day",
         "deselectDay": "Deselect day",
@@ -668,7 +685,13 @@
         "selectPhotosFirst": "Please select photos first",
         "buttonLabel": "Add to Album",
         "loadingProjects": "Loading projects...",
-        "libraryDirectWarning": "Library photos will be added by reference. If you delete these photos from the library later, they will become unavailable in this album. Consider using \"Copy to Library\" instead."
+        "libraryDirectWarning": "Library photos will be added by reference. If you delete these photos from the library later, they will become unavailable in this album. Consider using \"Copy to Library\" instead.",
+        "newAlbumPlaceholder": "Enter album name",
+        "createNow": "Create",
+        "createNew": "New Album",
+        "confirmCreate": "Create",
+        "albumCreated": "Album \"{{name}}\" created",
+        "createFailed": "Failed to create album: {{message}}"
       },
       "viewMode": {
         "tools": "Tools",
@@ -1042,7 +1065,6 @@
       "textDirection": "Direction",
       "horizontal": "Horizontal",
       "vertical": "Vertical",
-      "stickySection": "Sticky Notes",
       "addSticky": "Add Sticky Note",
       "defaultSize": "Default Size",
       "sizeSmall": "Small",

@@ -15,7 +15,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolvePhotoDate, type PhotoFileInfo, type TimelineGroup } from '../../../photo-tools';
-import { ThumbImage } from './shared';
+import { ThumbWithMenu, deletePhotos } from './shared';
+import { PhotoQuickView } from './PhotoQuickView';
 
 /** 当前年份（用于异常日期判断，模块级常量避免每次渲染重算） */
 const CURRENT_YEAR = new Date().getFullYear();
@@ -112,9 +113,10 @@ function groupByPath(photos: PhotoFileInfo[]): PathGroup[] {
 }
 
 /**
- * 缩略图组件（使用共享 ThumbImage 异步加载）
+ * 缩略图组件（使用共享 ThumbWithMenu：查看/删除三点菜单）
  * - 点击切换选中状态；选中时显示勾选标记
  * - 异常日期照片红框 + "日期异常"小标签
+ * - 鼠标悬浮右上角显示三点菜单，可查看 / 删除
  */
 function Thumb({
   photo,
@@ -123,6 +125,8 @@ function Thumb({
   anomalyLabel,
   readPhotoData,
   onClick,
+  onView,
+  onDelete,
 }: {
   photo: PhotoFileInfo;
   selected: boolean;
@@ -130,39 +134,20 @@ function Thumb({
   anomalyLabel: string;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
   onClick: () => void;
+  onView: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <div
+    <ThumbWithMenu
+      photo={photo}
+      readPhotoData={readPhotoData}
+      selected={selected}
+      anomaly={anomaly}
+      anomalyLabel={anomalyLabel}
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      className={`relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
-        selected
-          ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
-          : anomaly
-            ? 'border-red-300'
-            : 'border-transparent hover:border-[var(--color-border)]'
-      }`}
-      title={photo.name}
-    >
-      <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
-
-      {/* 选中标记（左上角） */}
-      <span
-        className={`absolute top-1 left-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-sm transition-all ${
-          selected ? 'opacity-100 bg-[var(--color-brand)]' : 'opacity-0 bg-black/40'
-        }`}
-      >
-        ✓
-      </span>
-
-      {/* 异常日期标签（右下角） */}
-      {anomaly && (
-        <span className="absolute bottom-0.5 right-0.5 z-10 text-[8px] leading-none px-1 py-0.5 rounded bg-red-500 text-white font-[600]">
-          {anomalyLabel}
-        </span>
-      )}
-    </div>
+      onView={onView}
+      onDelete={onDelete}
+    />
   );
 }
 
@@ -171,6 +156,9 @@ export function TimelineView({
   readPhotoData,
   onSelectionChange,
   onViewInCalendar,
+  sourceMode,
+  onPhotosUpdate,
+  addToast,
 }: {
   photos: PhotoFileInfo[];
   /** 读取照片数据（统一入口，用于缩略图异步加载） */
@@ -179,6 +167,12 @@ export function TimelineView({
   onSelectionChange?: (selectedIds: Set<string>) => void;
   /** 在日历中查看指定月份（year, month 1-12），跳转到日历视图 */
   onViewInCalendar?: (year: number, month: number) => void;
+  /** 数据来源模式（删除照片时区分 library / folder） */
+  sourceMode: 'folder' | 'library';
+  /** 更新照片列表（删除后刷新） */
+  onPhotosUpdate: (updater: (prev: PhotoFileInfo[]) => PhotoFileInfo[]) => void;
+  /** 全局 toast 提示 */
+  addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void;
 }) {
   const { t } = useTranslation();
 
@@ -189,6 +183,21 @@ export function TimelineView({
   const { groups, undated, anomalyIds, anomalyCount } = useMemo(() => groupByMonth(photos), [photos]);
   // 按路径分组
   const pathGroups = useMemo(() => groupByPath(photos), [photos]);
+
+  // 照片大图预览
+  const [previewGroup, setPreviewGroup] = useState<PhotoFileInfo[] | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+
+  // 组内"查看全部"展开状态（key → 是否展开，默认收起只显示前 N 张）
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
+  const toggleShowAll = useCallback((key: string) => {
+    setShowAll((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  }, []);
 
   // 折叠状态：默认全部展开
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -224,6 +233,29 @@ export function TimelineView({
   );
   const clearSelection = useCallback(() => syncSelection(new Set()), [syncSelection]);
 
+  /** 打开大图预览 */
+  const openPreview = useCallback((group: PhotoFileInfo[], index: number) => {
+    setPreviewGroup(group);
+    setPreviewIndex(index);
+  }, []);
+
+  /** 删除单张照片（共享逻辑，含确认弹窗由 ThumbWithMenu 处理） */
+  const handleDeletePhoto = useCallback(
+    (photo: PhotoFileInfo) => {
+      void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
+      // 同步从选中集合中移除
+      setSelected((prev) => {
+        if (!prev.has(photo.id)) return prev;
+        const n = new Set(prev);
+        n.delete(photo.id);
+        onSelectionChange?.(n);
+        return n;
+      });
+    },
+    [sourceMode, onPhotosUpdate, addToast, t, onSelectionChange],
+  );
+
+
   /** 全选/取消全选一组照片 */
   const toggleSelectGroup = useCallback(
     (groupPhotoIds: string[]) => {
@@ -255,7 +287,8 @@ export function TimelineView({
     month?: number,
   ) => {
     const isCollapsed = collapsed.has(key);
-    const shown = items.slice(0, 12);
+    const isShowAll = showAll.has(key);
+    const shown = isShowAll ? items : items.slice(0, 12);
     const overflow = items.length - shown.length;
     const groupIds = items.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
@@ -344,9 +377,9 @@ export function TimelineView({
           <div className="px-4 pb-3 bg-white">
             <div
               className="grid gap-2"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }}
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
             >
-              {shown.map((p) => (
+              {shown.map((p, i) => (
                 <Thumb
                   key={p.id}
                   photo={p}
@@ -355,15 +388,32 @@ export function TimelineView({
                   anomalyLabel={anomalyLabel}
                   readPhotoData={readPhotoData}
                   onClick={() => toggleSelect(p.id)}
+                  onView={() => openPreview(items, i)}
+                  onDelete={() => handleDeletePhoto(p)}
                 />
               ))}
-              {overflow > 0 && (
+              {overflow > 0 && !isShowAll && (
                 <div className="aspect-square rounded-lg bg-[var(--color-gray-100)] flex items-center justify-center text-[var(--color-gray-500)] text-sm font-[600]">
                   +{overflow}
                   {t('home.organize.timeline.overflowSuffix')}
                 </div>
               )}
             </div>
+            {/* 查看全部 / 收起全部 */}
+            {items.length > 12 && (
+              <button
+                type="button"
+                onClick={() => toggleShowAll(key)}
+                className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
+              >
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+                  <path d="M2 4l4 4 4-4" />
+                </svg>
+                {isShowAll
+                  ? t('home.organize.timeline.collapseAll', '收起全部')
+                  : t('home.organize.timeline.viewAll', { count: items.length, defaultValue: '查看全部 {{count}} 张' })}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -374,7 +424,8 @@ export function TimelineView({
   const renderPathGroup = (g: PathGroup) => {
     const key = g.key;
     const isCollapsed = collapsed.has(key);
-    const shown = g.photos.slice(0, 12);
+    const isShowAll = showAll.has(key);
+    const shown = isShowAll ? g.photos : g.photos.slice(0, 12);
     const overflow = g.photos.length - shown.length;
     const groupIds = g.photos.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
@@ -430,9 +481,9 @@ export function TimelineView({
           <div className="px-4 pb-3">
             <div
               className="grid gap-2"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }}
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
             >
-              {shown.map((p) => (
+              {shown.map((p, i) => (
                 <Thumb
                   key={p.id}
                   photo={p}
@@ -441,15 +492,32 @@ export function TimelineView({
                   anomalyLabel={anomalyLabel}
                   readPhotoData={readPhotoData}
                   onClick={() => toggleSelect(p.id)}
+                  onView={() => openPreview(g.photos, i)}
+                  onDelete={() => handleDeletePhoto(p)}
                 />
               ))}
-              {overflow > 0 && (
+              {overflow > 0 && !isShowAll && (
                 <div className="aspect-square rounded-lg bg-[var(--color-gray-100)] flex items-center justify-center text-[var(--color-gray-500)] text-sm font-[600]">
                   +{overflow}
                   {t('home.organize.timeline.overflowSuffix')}
                 </div>
               )}
             </div>
+            {/* 查看全部 / 收起全部 */}
+            {g.photos.length > 12 && (
+              <button
+                type="button"
+                onClick={() => toggleShowAll(key)}
+                className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
+              >
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+                  <path d="M2 4l4 4 4-4" />
+                </svg>
+                {isShowAll
+                  ? t('home.organize.timeline.collapseAll', '收起全部')
+                  : t('home.organize.timeline.viewAll', { count: g.photos.length, defaultValue: '查看全部 {{count}} 张' })}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -554,6 +622,16 @@ export function TimelineView({
         <div className="text-center py-8 text-[var(--color-gray-400)] text-sm">
           {t('home.organize.timeline.empty')}
         </div>
+      )}
+
+      {/* 大图预览 */}
+      {previewGroup && previewGroup.length > 0 && (
+        <PhotoQuickView
+          photos={previewGroup}
+          initialIndex={previewIndex}
+          onClose={() => setPreviewGroup(null)}
+          readPhotoData={readPhotoData}
+        />
       )}
     </div>
   );
