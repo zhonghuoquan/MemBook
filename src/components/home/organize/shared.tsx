@@ -276,7 +276,17 @@ export const FEATURE_COLORS: Record<ToolColor, { cardBg: string; iconBg: string;
   cyan:   { cardBg: 'bg-[#E3F7F8]', iconBg: 'bg-[#B8E8EA]', text: 'text-[#178A9C]' },
 };
 
-export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
+export function ProgressBar({
+  progress,
+  onCancel,
+  cancelLabel,
+}: {
+  progress: ToolProgress | null;
+  /** 提供后会在进度条右侧显示一个放大的取消按钮 */
+  onCancel?: () => void;
+  cancelLabel?: string;
+}) {
+  const { t } = useTranslation();
   if (!progress) return null;
   const totalUnknown = !progress.total || progress.total === 0;
   const pct = totalUnknown ? 0 : Math.min(100, Math.round((progress.current / progress.total) * 100));
@@ -294,7 +304,9 @@ export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
           {totalUnknown ? progress.current : `${pct}%`}
         </span>
       </div>
-      <div className="h-2.5 bg-[var(--color-gray-100)] rounded-full overflow-hidden relative ring-1 ring-inset ring-[var(--color-border)]/40">
+      {/* 进度条轨道 + 取消按钮：取消按钮统一放在进度条右侧并放大 */}
+      <div className="flex items-center gap-2.5">
+      <div className="flex-1 h-2.5 bg-[var(--color-gray-100)] rounded-full overflow-hidden relative ring-1 ring-inset ring-[var(--color-border)]/40">
         {totalUnknown ? (
           // 不确定进度：渐变光带（透明边缘）从左滑入、柔和扫过、右侧淡出
           <div
@@ -320,6 +332,22 @@ export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
             </div>
           </>
         )}
+      </div>
+      {onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-[600] cursor-pointer
+            border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-gray-600)]
+            hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-800)] hover:border-[var(--color-brand)]/50
+            active:scale-95 transition-all shadow-sm"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+          {cancelLabel ?? t('common.cancel', '取消')}
+        </button>
+      )}
       </div>
       {/* 细粒度格点刻度（仅确定进度时显示） */}
       {!totalUnknown && (
@@ -852,6 +880,8 @@ export function ThumbWithMenu({
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // 三点按钮引用，用于把菜单定位到按钮旁边
+  const btnRef = useRef<HTMLButtonElement | null>(null);
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -925,22 +955,23 @@ export function ThumbWithMenu({
       {/* 右上角三点菜单（高 z-index，确保展开后悬浮在内容最上层） */}
       <div className="absolute top-0.5 right-0.5 z-50">
         <button
+          ref={btnRef}
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
-          className="w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-black/60 transition-all cursor-pointer border-none"
+          className="w-6 h-6 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-black/60 transition-all cursor-pointer border-none"
           title={t('home.organize.shared.moreActions')}
         >
-          <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
+          <svg viewBox="0 0 16 16" className="w-4 h-4" fill="currentColor">
             <circle cx="8" cy="3" r="1.4" />
             <circle cx="8" cy="8" r="1.4" />
             <circle cx="8" cy="13" r="1.4" />
           </svg>
         </button>
 
-        {/* 下拉菜单：fixed 定位，避免被父级 overflow 裁剪，悬浮在最上层 */}
+        {/* 下拉菜单：fixed 定位到三点按钮旁边，悬浮在最上层 */}
         {menuOpen && (
           <DropdownMenu
-            triggerRef={menuRef}
+            triggerRef={btnRef}
             onView={handleView}
             onDelete={handleDelete}
             closeMenu={closeMenu}
@@ -961,7 +992,7 @@ function DropdownMenu({
   onDelete,
   closeMenu,
 }: {
-  triggerRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLElement | null>;
   onView: () => void;
   onDelete: () => void;
   closeMenu: () => void;
@@ -969,14 +1000,15 @@ function DropdownMenu({
   const { t } = useTranslation();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  // 根据三点按钮位置计算菜单固定定位（右上角对齐按钮），并限制不超出视口
+  // 根据三点按钮位置计算菜单固定定位（按钮旁边/下方，紧贴按钮便于操作），并限制不超出视口
   useLayoutEffect(() => {
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const menuW = 110;
     const menuH = 88;
-    let left = rect.right - menuW;
+    // 左对齐按钮左侧、向下展开，紧贴按钮旁边
+    let left = rect.left;
     let top = rect.bottom + 4;
     // 防止超出视口右/下边缘
     if (left + menuW > window.innerWidth) left = window.innerWidth - menuW - 8;

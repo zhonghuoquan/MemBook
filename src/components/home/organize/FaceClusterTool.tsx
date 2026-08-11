@@ -30,7 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, CancelButton, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
@@ -350,7 +350,9 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
               : t('home.organize.faceCluster.start', '开始分析')}
           </PrimaryButton>
         ) : (
-          <CancelButton onClick={handleCancel} label={t('home.organize.faceCluster.cancel', '取消')} />
+          <PrimaryButton onClick={handleStart} disabled>
+            {t('home.organize.faceCluster.running', '分析中...')}
+          </PrimaryButton>
         )}
       </div>
       <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
@@ -380,7 +382,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
               );
             })}
           </div>
-          <ProgressBar progress={progress} />
+          <ProgressBar progress={progress} onCancel={handleCancel} cancelLabel={t('home.organize.faceCluster.cancel', '取消')} />
         </div>
       )}
 
