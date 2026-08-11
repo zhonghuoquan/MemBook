@@ -317,7 +317,14 @@
     },
     "organize": {
       "shared": {
-        "processing": "处理中..."
+        "processing": "处理中...",
+        "view": "查看",
+        "delete": "删除",
+        "moreActions": "更多操作",
+        "deleteConfirm": "确定要删除「{{name}}」吗？",
+        "toastDeleted": "已删除 {{ok}} 张照片",
+        "toastDeletedWithFail": "已删除 {{ok}} 张，失败 {{fail}} 张",
+        "toastDeleteFailed": "删除失败：{{message}}"
       },
       "exif": {
         "title": "修改拍摄信息",
@@ -595,7 +602,9 @@
         "collapse": "收起",
         "unknownDate": "未知日期",
         "overflowSuffix": "张",
-        "empty": "暂无可识别日期的照片"
+        "empty": "暂无可识别日期的照片",
+        "viewAll": "查看全部 {{count}} 张",
+        "collapseAll": "收起全部"
       },
       "calendar": {
         "prevMonth": "上一月",
@@ -607,7 +616,15 @@
         "noPhotos": "当天无照片",
         "anomalyLabel": "日期异常",
         "selectDayHint": "点击日期查看当天照片",
-        "weekdays": ["一", "二", "三", "四", "五", "六", "日"],
+        "weekdays": [
+          "一",
+          "二",
+          "三",
+          "四",
+          "五",
+          "六",
+          "日"
+        ],
         "empty": "暂无可识别日期的照片",
         "selectAllDay": "全选当天",
         "deselectDay": "取消当天",
@@ -669,7 +686,13 @@
         "selectPhotosFirst": "请先选择照片",
         "buttonLabel": "加入相册",
         "loadingProjects": "加载项目中...",
-        "libraryDirectWarning": "库内照片将以引用方式加入目标相册。若之后在照片库中删除这些照片，本相册中的照片将无法显示，建议改用「复制到库内」。"
+        "libraryDirectWarning": "库内照片将以引用方式加入目标相册。若之后在照片库中删除这些照片，本相册中的照片将无法显示，建议改用「复制到库内」。",
+        "newAlbumPlaceholder": "输入相册名称",
+        "createNow": "快速创建",
+        "createNew": "新建相册",
+        "confirmCreate": "创建",
+        "albumCreated": "已创建相册「{{name}}」",
+        "createFailed": "创建相册失败：{{message}}"
       },
       "viewMode": {
         "tools": "工具",
@@ -1043,7 +1066,6 @@
       "textDirection": "文字方向",
       "horizontal": "横向",
       "vertical": "竖向",
-      "stickySection": "便利贴",
       "addSticky": "添加便利贴",
       "defaultSize": "默认大小",
       "sizeSmall": "小",

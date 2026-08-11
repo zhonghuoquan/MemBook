@@ -30,8 +30,9 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, CancelButton, PrimaryButton, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
+import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
 
 /** 聚类阶段定义（对应 progress.phase） */
@@ -44,7 +45,7 @@ const STAGES: Array<{ phase: string; label: string }> = [
 /** 缩略图网格最多显示数量 */
 const MAX_THUMBS = 6;
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode }: ToolProps) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate }: ToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -71,6 +72,24 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   // 正在编辑名称的组 ID
   const [editingNameClusterId, setEditingNameClusterId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 大图预览（预览当前分组内的照片）
+  const [previewGroup, setPreviewGroup] = useState<PhotoFileInfo[] | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+
+  /** 删除单张照片（共享逻辑，含确认弹窗由 ThumbWithMenu 处理） */
+  const handleDeletePhoto = useCallback(
+    (photo: PhotoFileInfo) => {
+      void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
+      // 同步从选中集合中移除
+      setSelectedIds((prev) => {
+        if (!prev.has(photo.id)) return prev;
+        const n = new Set(prev);
+        n.delete(photo.id);
+        return n;
+      });
+    },
+    [sourceMode, onPhotosUpdate, addToast, t],
+  );
 
   // 通知父组件工具执行状态
   useEffect(() => {
@@ -425,6 +444,11 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
                       return next;
                     });
                   }}
+                  onViewPhoto={(group, index) => {
+                    setPreviewGroup(group);
+                    setPreviewIndex(index);
+                  }}
+                  onDeletePhoto={handleDeletePhoto}
                 />
               ))}
             </div>
@@ -464,6 +488,16 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         addToast={addToast}
         readPhotoData={readPhotoData}
       />
+
+      {/* 大图预览 */}
+      {previewGroup && previewGroup.length > 0 && (
+        <PhotoQuickView
+          photos={previewGroup}
+          initialIndex={previewIndex}
+          onClose={() => setPreviewGroup(null)}
+          readPhotoData={readPhotoData}
+        />
+      )}
     </ToolCard>
   );
 }
@@ -502,6 +536,8 @@ function FaceClusterGroupItem({
   expanded,
   onToggleExpand,
   onToggleSingle,
+  onViewPhoto,
+  onDeletePhoto,
 }: {
   cluster: FaceCluster;
   index: number;
@@ -518,6 +554,10 @@ function FaceClusterGroupItem({
   /** 组内照片是否展开（展开后查看全部并支持单张选择） */
   expanded: boolean;
   onToggleExpand: (clusterId: string) => void;
+  /** 查看某张照片大图（需传当前组全部照片与索引） */
+  onViewPhoto: (group: PhotoFileInfo[], index: number) => void;
+  /** 删除某张照片 */
+  onDeletePhoto: (photo: PhotoFileInfo) => void;
 }) {
   const { t } = useTranslation();
   const [nameInput, setNameInput] = useState('');
@@ -623,33 +663,32 @@ function FaceClusterGroupItem({
             const isSelected = selectedIds.has(photo.id);
             const showExtraOverlay = !expanded && i === MAX_THUMBS - 1 && extraCount > 0;
             const face = faceByPhoto.get(photo.id);
+            const thumbNode = face
+              ? <FaceCropThumb photo={photo} face={face} readPhotoData={readPhotoData} />
+              : <ThumbImage photo={photo} readPhotoData={readPhotoData} size={expanded ? 'medium' : 'small'} />;
             return (
-              <div
+              <ThumbWithMenu
                 key={photo.id}
-                className={`relative aspect-square rounded-md overflow-hidden border-2 transition-all cursor-pointer ${
-                  isSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]' : 'border-transparent hover:border-[#C4A5E0]'
-                }`}
-                title={photo.name}
-                onClick={(e) => {
-                  e.stopPropagation();
+                photo={photo}
+                readPhotoData={readPhotoData}
+                selected={isSelected}
+                onClick={() => {
                   // 组内单张选择
                   onToggleSingle(photo.id);
                 }}
-              >
-                {face
-                  ? <FaceCropThumb photo={photo} face={face} readPhotoData={readPhotoData} />
-                  : <ThumbImage photo={photo} readPhotoData={readPhotoData} size={expanded ? 'medium' : 'small'} />}
-                {showExtraOverlay && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-mono font-bold">
-                    +{extraCount}
+                onView={() => onViewPhoto(cluster.photos, i)}
+                onDelete={() => onDeletePhoto(photo)}
+                thumb={
+                  <div className="relative aspect-square w-full h-full">
+                    {thumbNode}
+                    {showExtraOverlay && (
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-mono font-bold">
+                        +{extraCount}
+                      </div>
+                    )}
                   </div>
-                )}
-                {isSelected && (
-                  <div className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-[#8B6BB0] flex items-center justify-center text-white text-[10px] font-bold shadow-sm">
-                    ✓
-                  </div>
-                )}
-              </div>
+                }
+              />
             );
           })}
         </div>

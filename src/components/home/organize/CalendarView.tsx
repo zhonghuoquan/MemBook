@@ -11,10 +11,11 @@
  * 顶部用按月分组（TimelineGroup）统计当月照片数，作为月份切换栏的辅助信息。
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolvePhotoDate, type PhotoFileInfo, type TimelineGroup } from '../../../photo-tools';
-import { ThumbImage } from './shared';
+import { ThumbImage, ThumbWithMenu, deletePhotos } from './shared';
+import { PhotoQuickView } from './PhotoQuickView';
 
 /** 当前年份（用于异常日期判断） */
 const CURRENT_YEAR = new Date().getFullYear();
@@ -81,7 +82,7 @@ function groupByDay(photos: PhotoFileInfo[]): Map<string, PhotoFileInfo[]> {
 }
 
 /**
- * 日历格子内的小缩略图（1-3 张叠加，使用 ThumbImage 异步加载）
+ * 日历格子内的小缩略图（最多 5 张，照片间留间隙、尺寸更大）
  */
 function StackedThumb({
   photo,
@@ -91,13 +92,13 @@ function StackedThumb({
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
 }) {
   return (
-    <div className="w-7 h-7 rounded shrink-0 overflow-hidden border border-white shadow-sm bg-[var(--color-gray-200)]">
-      <ThumbImage photo={photo} readPhotoData={readPhotoData} size="tiny" />
+    <div className="w-9 h-9 rounded-md shrink-0 overflow-hidden border border-white shadow-sm bg-[var(--color-gray-200)]">
+      <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
     </div>
   );
 }
 
-/** 选中日期展开列表中的缩略图（较大，可点击选中） */
+/** 选中日期展开列表中的缩略图（较大，可点击选中；支持查看/删除） */
 function DayGridThumb({
   photo,
   anomaly,
@@ -105,6 +106,8 @@ function DayGridThumb({
   selected,
   readPhotoData,
   onClick,
+  onView,
+  onDelete,
 }: {
   photo: PhotoFileInfo;
   anomaly: boolean;
@@ -112,36 +115,20 @@ function DayGridThumb({
   selected: boolean;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
   onClick: () => void;
+  onView: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <div
+    <ThumbWithMenu
+      photo={photo}
+      readPhotoData={readPhotoData}
+      selected={selected}
+      anomaly={anomaly}
+      anomalyLabel={anomalyLabel}
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      className={`relative aspect-square rounded-lg overflow-hidden border-2 cursor-pointer transition-all ${
-        selected
-          ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
-          : anomaly
-            ? 'border-red-300'
-            : 'border-transparent hover:border-[var(--color-border)]'
-      }`}
-      title={photo.name}
-    >
-      <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
-      {/* 选中标记 */}
-      <span
-        className={`absolute top-1 left-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-sm transition-all ${
-          selected ? 'opacity-100 bg-[var(--color-brand)]' : 'opacity-0 bg-black/40'
-        }`}
-      >
-        ✓
-      </span>
-      {anomaly && (
-        <span className="absolute bottom-0.5 right-0.5 z-10 text-[8px] leading-none px-1 py-0.5 rounded bg-red-500 text-white font-[600]">
-          {anomalyLabel}
-        </span>
-      )}
-    </div>
+      onView={onView}
+      onDelete={onDelete}
+    />
   );
 }
 
@@ -151,6 +138,9 @@ export function CalendarView({
   selectedIds,
   onSelectionChange,
   initialView,
+  sourceMode,
+  onPhotosUpdate,
+  addToast,
 }: {
   photos: PhotoFileInfo[];
   /** 读取照片数据（统一入口，用于缩略图异步加载） */
@@ -161,6 +151,12 @@ export function CalendarView({
   onSelectionChange?: (selectedIds: Set<string>) => void;
   /** 初始查看的年/月（从时间线"在日历中查看"跳转） */
   initialView?: { year: number; month: number };
+  /** 数据来源模式（删除照片时区分 library / folder） */
+  sourceMode: 'folder' | 'library';
+  /** 更新照片列表（删除后刷新） */
+  onPhotosUpdate: (updater: (prev: PhotoFileInfo[]) => PhotoFileInfo[]) => void;
+  /** 全局 toast 提示 */
+  addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void;
 }) {
   const { t } = useTranslation();
 
@@ -183,6 +179,13 @@ export function CalendarView({
   );
   // 选中的日期
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+
+  // 响应 initialView 变化：从时间线“在日历中查看”跳转后，即使日历已挂载也能重新定位到目标月份
+  useEffect(() => {
+    if (!initialView) return;
+    setView({ year: initialView.year, month: initialView.month - 1 });
+    setSelectedDay(null);
+  }, [initialView]);
 
   // 上一月 / 下一月
   const goPrevMonth = () => {
@@ -248,6 +251,23 @@ export function CalendarView({
     }
     onSelectionChange?.(next);
   }, [selectedDayPhotos, selectedIds, onSelectionChange]);
+
+  // 大图预览
+  const [previewIndex, setPreviewIndex] = useState(-1);
+
+  /** 删除单张照片（共享逻辑，含确认弹窗由 ThumbWithMenu 处理） */
+  const handleDeletePhoto = useCallback(
+    (photo: PhotoFileInfo) => {
+      void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
+      // 同步从选中集合中移除
+      if (selectedIds.has(photo.id)) {
+        const next = new Set(selectedIds);
+        next.delete(photo.id);
+        onSelectionChange?.(next);
+      }
+    },
+    [sourceMode, onPhotosUpdate, addToast, t, selectedIds, onSelectionChange],
+  );
 
   const monthTitle = t('home.organize.calendar.monthTitle', {
     year: view.year,
@@ -326,7 +346,7 @@ export function CalendarView({
                 key={idx}
                 type="button"
                 onClick={() => setSelectedDay(new Date(cell.date))}
-                className={`relative min-h-[64px] p-1.5 text-left transition-colors flex flex-col gap-0.5 cursor-pointer ${
+                className={`relative min-h-[96px] p-1.5 text-left transition-colors flex flex-col gap-0.5 cursor-pointer ${
                   isSelected
                     ? 'bg-[var(--color-brand-bg)] ring-1 ring-inset ring-[var(--color-brand)]'
                     : !cell.isCurrentMonth
@@ -365,10 +385,10 @@ export function CalendarView({
                   )}
                 </div>
 
-                {/* 缩略图叠加（1-3 张，紧凑布局） */}
+                {/* 缩略图（最多 5 张，照片间留间隙，尺寸更大） */}
                 {hasPhotos && (
-                  <div className="flex -space-x-2 mt-auto">
-                    {dayPhotos.slice(0, 3).map((p) => (
+                  <div className="flex flex-wrap gap-1 mt-auto">
+                    {dayPhotos.slice(0, 5).map((p) => (
                       <StackedThumb key={p.id} photo={p} readPhotoData={readPhotoData} />
                     ))}
                   </div>
@@ -431,9 +451,9 @@ export function CalendarView({
           {selectedDayPhotos.length > 0 ? (
             <div
               className="grid gap-1.5"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }}
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
             >
-              {selectedDayPhotos.map((p) => {
+              {selectedDayPhotos.map((p, i) => {
                 const d = resolvePhotoDate(p);
                 const anomaly = d ? isAnomalyYear(d.getFullYear()) : false;
                 return (
@@ -445,6 +465,8 @@ export function CalendarView({
                     selected={selectedIds.has(p.id)}
                     readPhotoData={readPhotoData}
                     onClick={() => toggleSelect(p.id)}
+                    onView={() => setPreviewIndex(i)}
+                    onDelete={() => handleDeletePhoto(p)}
                   />
                 );
               })}
@@ -455,6 +477,16 @@ export function CalendarView({
             </div>
           )}
         </div>
+      )}
+
+      {/* 大图预览 */}
+      {previewIndex >= 0 && selectedDayPhotos.length > 0 && (
+        <PhotoQuickView
+          photos={selectedDayPhotos}
+          initialIndex={previewIndex}
+          onClose={() => setPreviewIndex(-1)}
+          readPhotoData={readPhotoData}
+        />
       )}
 
       {/* 空状态 */}

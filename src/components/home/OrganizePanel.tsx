@@ -1353,6 +1353,9 @@ export function OrganizePanel() {
                     photos={activeTab?.photos ?? []}
                     readPhotoData={readPhotoData}
                     onSelectionChange={setSelectedPhotoIds}
+                    sourceMode={activeTab?.sourceMode ?? 'folder'}
+                    onPhotosUpdate={onPhotosUpdate}
+                    addToast={addToast}
                     onViewInCalendar={(year, month) => {
                       setSelectedPhotoIds(new Set());
                       setCalendarInitialView({ year, month });
@@ -1384,6 +1387,9 @@ export function OrganizePanel() {
                     selectedIds={selectedPhotoIds}
                     onSelectionChange={setSelectedPhotoIds}
                     initialView={calendarInitialView}
+                    sourceMode={activeTab?.sourceMode ?? 'folder'}
+                    onPhotosUpdate={onPhotosUpdate}
+                    addToast={addToast}
                   />
                 </ToolCard>
               </div>
