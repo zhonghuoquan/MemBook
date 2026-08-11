@@ -823,6 +823,14 @@
       "closeTab": "关闭标签",
       "maxTabsReached": "最多同时打开 {{max}} 个路径"
     },
+    "autoAnalyze": {
+      "title": "一键分析",
+      "running": "正在分析…",
+      "empty": "请先添加照片路径",
+      "busy": "已有工具正在运行，请稍候",
+      "start": "开始一键分析：去重 → 人脸识别 → 相似照片",
+      "done": "一键分析完成"
+    },
     "scan": {
       "scanningFolder": "正在扫描文件夹...",
       "photosFound": "已发现 {{count}} 张照片...",

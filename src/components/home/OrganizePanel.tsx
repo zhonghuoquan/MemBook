@@ -300,6 +300,81 @@ export function OrganizePanel() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const scanningAny = tabs.some((t) => t.scanning);
 
+  // ── “一键分析”状态：自动依次运行 去重 → 人脸识别 → 相似照片分析 ──
+  const AUTO_ANALYZE_TOOLS: ToolId[] = ['dedupe', 'faceCluster', 'similar'];
+  // 当前“一键分析”进行到的工具（'idle' 表示未在运行）
+  const [autoAnalyzeStep, setAutoAnalyzeStep] = useState<ToolId | 'idle'>('idle');
+  // 触发令牌：每次推进/启动都递增，各工具据此自动开始
+  const [autoAnalyzeToken, setAutoAnalyzeToken] = useState(0);
+  const [autoAnalyzeRunning, setAutoAnalyzeRunning] = useState(false);
+  // 记录本轮“一键分析”中已真正开始运行的工具（用于区分“尚未开始”与“已完成”）
+  const autoAnalyzeStartedRef = useRef<Set<ToolId>>(new Set());
+
+  /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片分析 */
+  const handleOneClickAnalyze = useCallback(() => {
+    const photos = activeTab?.photos ?? [];
+    if (photos.length === 0) {
+      addToast({ type: 'warning', message: t('organize.autoAnalyze.empty', '请先添加照片路径') });
+      return;
+    }
+    if (autoAnalyzeRunning || isAnyToolBusy) {
+      addToast({ type: 'warning', message: t('organize.autoAnalyze.busy', '已有工具正在运行，请稍候') });
+      return;
+    }
+    autoAnalyzeStartedRef.current = new Set();
+    setAutoAnalyzeRunning(true);
+    setAutoAnalyzeStep('dedupe');
+    setAutoAnalyzeToken((n) => n + 1);
+    setActiveTool('dedupe');
+    addToast({ type: 'info', message: t('organize.autoAnalyze.start', '开始一键分析：去重 → 人脸识别 → 相似照片') });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, autoAnalyzeRunning, isAnyToolBusy, addToast, t]);
+
+  // “一键分析”推进：当前目标工具真正开始并完成后，才自动切到下一个工具
+  useEffect(() => {
+    if (!autoAnalyzeRunning || autoAnalyzeStep === 'idle') return;
+    const current = autoAnalyzeStep;
+    // 当前工具正在运行 → 标记已开始，等待完成
+    if (busyTools.has(current)) {
+      autoAnalyzeStartedRef.current.add(current);
+      return;
+    }
+    // 当前工具尚未真正开始（自动触发有异步延迟）→ 等待它开始；若始终未开始则兜底跳过
+    if (!autoAnalyzeStartedRef.current.has(current)) {
+      const timer = setTimeout(() => {
+        // 4 秒后仍未开始（如照片数量不满足该工具运行条件）→ 视为跳过，继续下一步
+        const idx = AUTO_ANALYZE_TOOLS.indexOf(current);
+        if (idx >= 0 && idx < AUTO_ANALYZE_TOOLS.length - 1) {
+          const next = AUTO_ANALYZE_TOOLS[idx + 1];
+          setAutoAnalyzeStep(next);
+          setAutoAnalyzeToken((n) => n + 1);
+          setActiveTool(next);
+        } else {
+          setAutoAnalyzeRunning(false);
+          setAutoAnalyzeStep('idle');
+          autoAnalyzeStartedRef.current = new Set();
+        }
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+    // 当前工具已完成 → 推进到下一个
+    const idx = AUTO_ANALYZE_TOOLS.indexOf(current);
+    if (idx === -1) return;
+    if (idx >= AUTO_ANALYZE_TOOLS.length - 1) {
+      // 全部完成
+      setAutoAnalyzeRunning(false);
+      setAutoAnalyzeStep('idle');
+      autoAnalyzeStartedRef.current = new Set();
+      addToast({ type: 'success', message: t('organize.autoAnalyze.done', '一键分析完成') });
+      return;
+    }
+    const next = AUTO_ANALYZE_TOOLS[idx + 1];
+    setAutoAnalyzeStep(next);
+    setAutoAnalyzeToken((n) => n + 1);
+    setActiveTool(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAnalyzeRunning, autoAnalyzeStep, busyTools, addToast, t]);
+
   // 选中照片列表（从 activeTab.photos 中按 ID 过滤，用于一键成册联动）
   const selectedPhotos = useMemo(() => {
     if (selectedPhotoIds.size === 0 || !activeTab) return [];
@@ -1112,13 +1187,13 @@ export function OrganizePanel() {
 
               {tabs.length < MAX_TABS ? (
                 <>
-                  {/* 「添加路径」主按钮：品牌色实底，突出主操作 */}
+                  {/* 「添加路径」浅色主按钮：浅品牌底 + 品牌色文字，区别于“选中”实底颜色 */}
                   <button
                     onClick={handleSelectFolder}
                     disabled={scanningAny}
-                    className="group shrink-0 flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-lg border-none
-                               bg-[var(--color-brand)] text-white shadow-[0_2px_8px_rgba(108,99,255,0.22)]
-                               hover:shadow-[0_4px_14px_rgba(108,99,255,0.35)] hover:brightness-105
+                    className="group shrink-0 flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-lg border border-[var(--color-brand)]/30
+                               bg-[var(--color-brand-bg)] text-[var(--color-brand)]
+                               hover:bg-white hover:border-[var(--color-brand)]/60 hover:shadow-[0_2px_10px_rgba(108,99,255,0.14)]
                                text-sm font-[600] cursor-pointer transition-all disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed"
                   >
                     <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-200">
@@ -1126,13 +1201,13 @@ export function OrganizePanel() {
                     </svg>
                     {t('organize.tabs.addPath')}
                   </button>
-                  {/* 「项目库」次按钮：浅色底 + 图标色块 */}
+                  {/* 「项目库」浅色次按钮：浅灰底 + 图标色块，区别于“选中”实底颜色 */}
                   <button
                     onClick={handleScanLibrary}
                     disabled={scanningAny}
                     className="group shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border)]
-                               bg-white text-[var(--color-gray-600)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]
-                               hover:shadow-[0_2px_10px_rgba(108,99,255,0.12)]
+                               bg-[var(--color-surface-panel)] text-[var(--color-gray-600)] hover:border-[var(--color-brand)]/40 hover:text-[var(--color-brand)]
+                               hover:bg-white hover:shadow-[0_2px_10px_rgba(108,99,255,0.10)]
                                text-sm font-[600] cursor-pointer transition-all disabled:opacity-50 disabled:hover:shadow-none"
                   >
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
@@ -1256,16 +1331,49 @@ export function OrganizePanel() {
       {/* 左侧功能导航 + 右侧工作区（操作当前激活路径） */}
       {hasData && hasActiveTab && (
         <div className="flex-1 min-h-0 flex gap-4">
-          {/* 左侧功能导航栏 */}
-          <ToolSidebar
-            activeTool={activeTool}
-            toolStatuses={toolStatuses}
-            onSelect={(id) => {
-              setActiveTool(id);
-              // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
-              setSelectedPhotoIds(new Set());
-            }}
-          />
+          {/* 左侧功能导航栏：一键分析按钮 + 工具列表 */}
+          <div className="w-[210px] shrink-0 flex flex-col gap-3 min-h-0">
+            {/* 一键分析：自动依次运行 去重 → 人脸识别 → 相似照片分析 */}
+            <button
+              type="button"
+              onClick={handleOneClickAnalyze}
+              disabled={autoAnalyzeRunning || isAnyToolBusy || (activeTab?.photos.length ?? 0) === 0}
+              className={`group shrink-0 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-[700] transition-all border-none cursor-pointer ${
+                autoAnalyzeRunning
+                  ? 'bg-[var(--color-brand-bg)] text-[var(--color-brand)]'
+                  : 'bg-gradient-to-br from-[var(--color-brand)] to-[#8b5cf6] text-white shadow-[0_3px_12px_rgba(108,99,255,0.28)] hover:shadow-[0_5px_18px_rgba(108,99,255,0.38)] hover:brightness-110'
+              } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none`}
+              title={t('organize.autoAnalyze.title', '一键分析：自动运行 去重 → 人脸识别 → 相似照片分析')}
+            >
+              {autoAnalyzeRunning ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                    <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                  {t('organize.autoAnalyze.running', '正在分析…')}
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.35-4.35" />
+                    <path d="M11 8v6M8 11h6" />
+                  </svg>
+                  {t('organize.autoAnalyze.title', '一键分析')}
+                </>
+              )}
+            </button>
+            <ToolSidebar
+              activeTool={activeTool}
+              toolStatuses={toolStatuses}
+              onSelect={(id) => {
+                setActiveTool(id);
+                // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
+                setSelectedPhotoIds(new Set());
+              }}
+            />
+          </div>
 
           {/* 右侧工作区：无外层标题框，直接渲染工具内容（ToolCard 自带色块标题） */}
           <div className="flex-1 min-w-0 flex flex-col relative">
@@ -1298,6 +1406,8 @@ export function OrganizePanel() {
                   dedupeResult={activeDedupeState.result}
                   dedupeOverrides={activeDedupeState.overrides}
                   onDedupeStateChange={(result, overrides) => { if (activeTabId) setDedupeState(activeTabId, result, overrides); }}
+                  autoRunToken={autoAnalyzeToken}
+                  isAutoRunTarget={autoAnalyzeStep === 'dedupe'}
                 />
               </div>
             )}
@@ -1308,12 +1418,12 @@ export function OrganizePanel() {
             )}
             {visitedTools.has('faceCluster') && (
               <div className={activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key={`faceCluster-${activeTabId}`} {...toolProps} />
+                <FaceClusterTool key={`faceCluster-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
               <div className={activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <SimilarTool key={`similar-${activeTabId}`} {...toolProps} />
+                <SimilarTool key={`similar-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('exif') && (
@@ -1336,7 +1446,7 @@ export function OrganizePanel() {
                 <ToolCard
                   title={t('home.organize.sidebar.timeline', '时间线')}
                   description={t('home.organize.sidebar.timelineDesc', '按月份或路径分组浏览照片')}
-                  color="blue"
+                  color="indigo"
                   icon={
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
                       <line x1="4" y1="4" x2="4" y2="16" />
@@ -1370,7 +1480,7 @@ export function OrganizePanel() {
                 <ToolCard
                   title={t('home.organize.sidebar.calendar', '日历')}
                   description={t('home.organize.sidebar.calendarDesc', '按日期浏览照片')}
-                  color="blue"
+                  color="cyan"
                   icon={
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
                       <rect x="3" y="4" width="14" height="13" rx="1" />
@@ -1530,12 +1640,20 @@ function EmptyState({
       <div className="space-y-4 mb-6">
         {[
           {
+            key: 'browse',
+            label: t('organize.emptyState.categoryBrowse'),
+            tools: [
+              { color: 'indigo' as const, title: t('organize.tools.timeline.title'), desc: t('organize.tools.timeline.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><line x1="4" y1="4" x2="4" y2="16" /><circle cx="4" cy="6" r="1.5" fill="currentColor" /><circle cx="4" cy="11" r="1.5" fill="currentColor" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="11" x2="14" y2="11" /><line x1="8" y1="14" x2="12" y2="14" /></svg> },
+              { color: 'cyan' as const, title: t('organize.tools.calendar.title'), desc: t('organize.tools.calendar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="7" y1="2" x2="7" y2="6" /><line x1="13" y1="2" x2="13" y2="6" /></svg> },
+            ],
+          },
+          {
             key: 'smart',
             label: t('organize.emptyState.categorySmart'),
             tools: [
-              { color: 'peach' as const, title: t('organize.tools.dedupe.title'), desc: t('organize.tools.dedupe.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M9 2a7 7 0 105.293 11.707l3.707 3.707" /><path d="M15 15l3 3" /><line x1="18" y1="9" x2="12" y2="15" /></svg> },
-              { color: 'sky' as const, title: t('organize.tools.organize.title'), desc: t('organize.tools.organize.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="12" y1="2" x2="12" y2="6" /></svg> },
-              { color: 'grape' as const, title: t('organize.tools.faceCluster.title'), desc: t('organize.tools.faceCluster.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><circle cx="10" cy="10" r="8" /><circle cx="7.5" cy="8.5" r="0.8" fill="currentColor" /><circle cx="12.5" cy="8.5" r="0.8" fill="currentColor" /><path d="M6.5 12.5c1 1 2.3 1.5 3.5 1.5s2.5-.5 3.5-1.5" /></svg> },
+              { color: 'coral' as const, title: t('organize.tools.dedupe.title'), desc: t('organize.tools.dedupe.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M9 2a7 7 0 105.293 11.707l3.707 3.707" /><path d="M15 15l3 3" /><line x1="18" y1="9" x2="12" y2="15" /></svg> },
+              { color: 'blue' as const, title: t('organize.tools.organize.title'), desc: t('organize.tools.organize.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="12" y1="2" x2="12" y2="6" /></svg> },
+              { color: 'violet' as const, title: t('organize.tools.faceCluster.title'), desc: t('organize.tools.faceCluster.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><circle cx="10" cy="10" r="8" /><circle cx="7.5" cy="8.5" r="0.8" fill="currentColor" /><circle cx="12.5" cy="8.5" r="0.8" fill="currentColor" /><path d="M6.5 12.5c1 1 2.3 1.5 3.5 1.5s2.5-.5 3.5-1.5" /></svg> },
               { color: 'amber' as const, title: t('organize.tools.similar.title'), desc: t('organize.tools.similar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="2" y="4" width="11" height="11" rx="2" /><rect x="7" y="7" width="11" height="11" rx="2" /></svg> },
             ],
           },
@@ -1543,17 +1661,9 @@ function EmptyState({
             key: 'metadata',
             label: t('organize.emptyState.categoryMetadata'),
             tools: [
-              { color: 'mint' as const, title: t('organize.tools.exif.title'), desc: t('organize.tools.exif.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="3" width="14" height="14" rx="2" /><line x1="7" y1="7" x2="13" y2="7" /><line x1="7" y1="10" x2="13" y2="10" /><line x1="7" y1="13" x2="10" y2="13" /></svg> },
+              { color: 'green' as const, title: t('organize.tools.exif.title'), desc: t('organize.tools.exif.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="3" width="14" height="14" rx="2" /><line x1="7" y1="7" x2="13" y2="7" /><line x1="7" y1="10" x2="13" y2="10" /><line x1="7" y1="13" x2="10" y2="13" /></svg> },
               { color: 'teal' as const, title: t('organize.tools.rename.title'), desc: t('organize.tools.rename.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M3 14l5-5 3 3-5 5H3v-3z" /><path d="M13 4l2-2 3 3-2 2" /><line x1="11" y1="6" x2="14" y2="9" /></svg> },
-              { color: 'lavender' as const, title: t('organize.tools.convert.title'), desc: t('organize.tools.convert.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M4 4h12v12H4z" /><path d="M4 14l4-4 3 3 5-5" /></svg> },
-            ],
-          },
-          {
-            key: 'browse',
-            label: t('organize.emptyState.categoryBrowse'),
-            tools: [
-              { color: 'indigo' as const, title: t('organize.tools.timeline.title'), desc: t('organize.tools.timeline.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><line x1="4" y1="4" x2="4" y2="16" /><circle cx="4" cy="6" r="1.5" fill="currentColor" /><circle cx="4" cy="11" r="1.5" fill="currentColor" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="11" x2="14" y2="11" /><line x1="8" y1="14" x2="12" y2="14" /></svg> },
-              { color: 'cyan' as const, title: t('organize.tools.calendar.title'), desc: t('organize.tools.calendar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="7" y1="2" x2="7" y2="6" /><line x1="13" y1="2" x2="13" y2="6" /></svg> },
+              { color: 'pink' as const, title: t('organize.tools.convert.title'), desc: t('organize.tools.convert.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M4 4h12v12H4z" /><path d="M4 14l4-4 3 3 5-5" /></svg> },
             ],
           },
         ].map((group) => (

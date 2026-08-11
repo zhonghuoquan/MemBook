@@ -241,7 +241,7 @@ export function RenameTool({ photos, rootPath, sourceMode, addToast, onRescan, o
     <ToolCard
       title={t('home.organize.rename.title')}
       description={t('home.organize.rename.description')}
-      color="green"
+      color="teal"
       icon={
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
           <path d="M3 14l5-5 3 3-5 5H3v-3z" />

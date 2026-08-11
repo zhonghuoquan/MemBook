@@ -119,7 +119,7 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
     <ToolCard
       title={t('home.organize.convert.title')}
       description={t('home.organize.convert.description', { count: convertiblePhotos.length })}
-      color="purple"
+      color="pink"
       icon={
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
           <path d="M4 4h12v12H4z" />

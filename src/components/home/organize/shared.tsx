@@ -2,7 +2,7 @@
  * 整理工具共享组件与工具函数
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo, ToolProgress, DataSourceMode } from '../../../photo-tools';
@@ -128,49 +128,90 @@ export interface ToolProps {
 
 // ── 共享 UI 组件 ────────────────────────────────────────
 
-export type ToolColor = 'brand' | 'orange' | 'green' | 'blue' | 'purple';
+export type ToolColor =
+  | 'coral' | 'blue' | 'violet' | 'amber' | 'green'
+  | 'teal' | 'pink' | 'indigo' | 'cyan';
 
 /**
- * 马卡龙色系（柔和粉彩）：
- * - peach  桃粉  → 照片去重
- * - sky    天空蓝 → 按时间归类
- * - mint   抹茶绿 → 批量改 EXIF
- * - lavender 薰衣草紫 → 格式转换
+ * 照片整理 9 个功能的统一色块色板（马卡龙柔和粉彩）。
+ *
+ * 每个功能使用**唯一且彼此可清晰区分**的色相，杜绝重复/接近色：
+ * - coral   珊瑚红（红橙） → 照片去重
+ * - blue    天蓝（蓝）     → 照片归类
+ * - violet  葡萄紫（紫）   → 人脸识别
+ * - amber   金黄（黄）     → 相似照片分析
+ * - green   薄荷绿（绿）   → Exif 修改
+ * - teal    青绿（蓝绿）   → 批量重命名
+ * - pink    玫粉（红紫）   → 格式转换
+ * - indigo  靛蓝（蓝紫）   → 时间线
+ * - cyan    青色（青蓝绿） → 日历
+ *
+ * 该色板同时用于：左侧导航（ToolSidebar）、工具卡片头（ToolCard）、
+ * 空状态功能卡（FeatureCard），保证三处颜色一致。
  */
 const COLOR_STYLES: Record<ToolColor, { cardBg: string; bg: string; text: string; ring: string }> = {
-  brand: {
-    cardBg: 'bg-[var(--color-brand-bg)]',
-    bg: 'bg-[var(--color-brand-bg)]',
-    text: 'text-[var(--color-brand)]',
-    ring: 'hover:border-[var(--color-brand)]',
+  // 珊瑚红（红橙）
+  coral: {
+    cardBg: 'bg-[#FFEBE6]',
+    bg: 'bg-[#FFC9BA]',
+    text: 'text-[#D1513B]',
+    ring: 'hover:border-[#F2A08D]',
   },
-  // 桃粉
-  orange: {
-    cardBg: 'bg-[#FFF1EB]',
-    bg: 'bg-[#FFD9C7]',
-    text: 'text-[#C95A4D]',
-    ring: 'hover:border-[#FFB59A]',
-  },
-  // 抹茶绿
-  green: {
-    cardBg: 'bg-[#E9F4ED]',
-    bg: 'bg-[#C5E5CE]',
-    text: 'text-[#4A9C6B]',
-    ring: 'hover:border-[#95D3A4]',
-  },
-  // 天空蓝
+  // 天蓝
   blue: {
-    cardBg: 'bg-[#E9F4FB]',
-    bg: 'bg-[#C5E0F4]',
-    text: 'text-[#4A8FCC]',
-    ring: 'hover:border-[#8FC4ED]',
+    cardBg: 'bg-[#E8F2FC]',
+    bg: 'bg-[#BFD9F3]',
+    text: 'text-[#3C83C7]',
+    ring: 'hover:border-[#8FC2E8]',
   },
-  // 薰衣草紫
-  purple: {
-    cardBg: 'bg-[#F1E9F8]',
-    bg: 'bg-[#D7C5EC]',
-    text: 'text-[#8B6BB0]',
-    ring: 'hover:border-[#C4A5E0]',
+  // 葡萄紫
+  violet: {
+    cardBg: 'bg-[#F1EAFB]',
+    bg: 'bg-[#D8C2F1]',
+    text: 'text-[#8A5FC4]',
+    ring: 'hover:border-[#C5A6E6]',
+  },
+  // 金黄（黄）
+  amber: {
+    cardBg: 'bg-[#FFF6DF]',
+    bg: 'bg-[#FFE6A0]',
+    text: 'text-[#AC8313]',
+    ring: 'hover:border-[#F0CE6E]',
+  },
+  // 薄荷绿
+  green: {
+    cardBg: 'bg-[#E6F5EA]',
+    bg: 'bg-[#BCE4C9]',
+    text: 'text-[#3C9258]',
+    ring: 'hover:border-[#8CCF9E]',
+  },
+  // 青绿（蓝绿）
+  teal: {
+    cardBg: 'bg-[#DFF3F0]',
+    bg: 'bg-[#B4E3DD]',
+    text: 'text-[#23847A]',
+    ring: 'hover:border-[#85CFC6]',
+  },
+  // 玫粉（红紫）
+  pink: {
+    cardBg: 'bg-[#FDEDF4]',
+    bg: 'bg-[#F8C9DC]',
+    text: 'text-[#C04B7C]',
+    ring: 'hover:border-[#EFA8C5]',
+  },
+  // 靛蓝（蓝紫）
+  indigo: {
+    cardBg: 'bg-[#EBEDFC]',
+    bg: 'bg-[#C7CFF5]',
+    text: 'text-[#4B57B8]',
+    ring: 'hover:border-[#A3ACE8]',
+  },
+  // 青色（青蓝绿）
+  cyan: {
+    cardBg: 'bg-[#E3F7F8]',
+    bg: 'bg-[#B8E8EA]',
+    text: 'text-[#178A9C]',
+    ring: 'hover:border-[#8AD6DC]',
   },
 };
 
@@ -181,7 +222,7 @@ export function ToolCard({
   children,
   disabled,
   disabledReason,
-  color = 'brand',
+  color = 'blue',
 }: {
   title: string;
   description: string;
@@ -218,24 +259,21 @@ export function ToolCard({
   );
 }
 
-/** 马卡龙色扩展（含更深一档的图标背景），供空状态特色卡片使用 */
-export const FEATURE_COLORS: Record<
-  | 'peach' | 'sky' | 'mint' | 'lavender'
-  | 'grape' | 'amber' | 'teal' | 'indigo' | 'cyan',
-  {
-  cardBg: string;
-  iconBg: string;
-  text: string;
-}> = {
-  peach:    { cardBg: 'bg-[#FFF1EB]', iconBg: 'bg-[#FFD9C7]', text: 'text-[#C95A4D]' },
-  sky:      { cardBg: 'bg-[#E9F4FB]', iconBg: 'bg-[#C5E0F4]', text: 'text-[#4A8FCC]' },
-  mint:     { cardBg: 'bg-[#E9F4ED]', iconBg: 'bg-[#C5E5CE]', text: 'text-[#4A9C6B]' },
-  lavender: { cardBg: 'bg-[#F1E9F8]', iconBg: 'bg-[#D7C5EC]', text: 'text-[#8B6BB0]' },
-  grape:    { cardBg: 'bg-[#F6EEFC]', iconBg: 'bg-[#E0C9F3]', text: 'text-[#7A4FA3]' },
-  amber:    { cardBg: 'bg-[#FFF7E8]', iconBg: 'bg-[#FFE3A6]', text: 'text-[#B07A1E]' },
-  teal:     { cardBg: 'bg-[#E7F5F4]', iconBg: 'bg-[#BFE4E0]', text: 'text-[#2E8B84]' },
-  indigo:   { cardBg: 'bg-[#EEF0FC]', iconBg: 'bg-[#D4D9F5]', text: 'text-[#5A67B8]' },
-  cyan:     { cardBg: 'bg-[#E8F7FB]', iconBg: 'bg-[#C4ECF6]', text: 'text-[#2E8DB8]' },
+/**
+ * 马卡龙色扩展（含更深一档的图标背景），供空状态特色卡片使用。
+ * 与 COLOR_STYLES / ToolSidebar.COLOR_BLOCK 共用同一套 9 色色板，
+ * 保证每个功能的色块颜色唯一且一致。
+ */
+export const FEATURE_COLORS: Record<ToolColor, { cardBg: string; iconBg: string; text: string }> = {
+  coral:  { cardBg: 'bg-[#FFEBE6]', iconBg: 'bg-[#FFC9BA]', text: 'text-[#D1513B]' },
+  blue:   { cardBg: 'bg-[#E8F2FC]', iconBg: 'bg-[#BFD9F3]', text: 'text-[#3C83C7]' },
+  violet: { cardBg: 'bg-[#F1EAFB]', iconBg: 'bg-[#D8C2F1]', text: 'text-[#8A5FC4]' },
+  amber:  { cardBg: 'bg-[#FFF6DF]', iconBg: 'bg-[#FFE6A0]', text: 'text-[#AC8313]' },
+  green:  { cardBg: 'bg-[#E6F5EA]', iconBg: 'bg-[#BCE4C9]', text: 'text-[#3C9258]' },
+  teal:   { cardBg: 'bg-[#DFF3F0]', iconBg: 'bg-[#B4E3DD]', text: 'text-[#23847A]' },
+  pink:   { cardBg: 'bg-[#FDEDF4]', iconBg: 'bg-[#F8C9DC]', text: 'text-[#C04B7C]' },
+  indigo: { cardBg: 'bg-[#EBEDFC]', iconBg: 'bg-[#C7CFF5]', text: 'text-[#4B57B8]' },
+  cyan:   { cardBg: 'bg-[#E3F7F8]', iconBg: 'bg-[#B8E8EA]', text: 'text-[#178A9C]' },
 };
 
 export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
@@ -851,7 +889,7 @@ export function ThumbWithMenu({
       onClick={onClick}
       role="button"
       tabIndex={0}
-      className={`relative group rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+      className={`relative group rounded-lg border-2 transition-all cursor-pointer ${
         selected
           ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
           : anomaly
@@ -860,9 +898,13 @@ export function ThumbWithMenu({
       }`}
       title={photo.name}
     >
-      {thumb ?? (
-        <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
-      )}
+      {/* 图片单独置于 overflow-hidden 容器内圆角裁剪，外层不再 overflow-hidden，
+          避免裁剪掉下方展开的“查看/删除”菜单 */}
+      <div className="overflow-hidden rounded-lg">
+        {thumb ?? (
+          <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
+        )}
+      </div>
 
       {/* 选中标记（左上角） */}
       <span
@@ -880,8 +922,8 @@ export function ThumbWithMenu({
         </span>
       )}
 
-      {/* 右上角三点菜单 */}
-      <div className="absolute top-0.5 right-0.5 z-20">
+      {/* 右上角三点菜单（高 z-index，确保展开后悬浮在内容最上层） */}
+      <div className="absolute top-0.5 right-0.5 z-50">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
@@ -895,39 +937,94 @@ export function ThumbWithMenu({
           </svg>
         </button>
 
-        {/* 下拉菜单 */}
+        {/* 下拉菜单：fixed 定位，避免被父级 overflow 裁剪，悬浮在最上层 */}
         {menuOpen && (
-          <div
-            className="absolute right-0 top-6 z-30 min-w-[110px] rounded-lg border border-[var(--color-border)] bg-white shadow-lg py-1 animate-[fadeIn_120ms_ease-out]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={handleView}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors border-none bg-transparent"
-            >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-[var(--color-gray-400)]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3.5" />
-                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-              </svg>
-              {t('home.organize.shared.view')}
-            </button>
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 cursor-pointer transition-colors border-none bg-transparent"
-            >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 7h16" />
-                <path d="M9 7V4h6v3" />
-                <path d="M6 7l1 13h10l1-13" />
-                <path d="M10 11v5M14 11v5" />
-              </svg>
-              {t('home.organize.shared.delete')}
-            </button>
-          </div>
+          <DropdownMenu
+            triggerRef={menuRef}
+            onView={handleView}
+            onDelete={handleDelete}
+            closeMenu={closeMenu}
+          />
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 下拉操作菜单（固定定位到三点按钮附近，使用 portal 悬浮在最上层）
+ * 解决原实现中菜单被父级 overflow-hidden 裁剪、且不在最上层展示的问题。
+ */
+function DropdownMenu({
+  triggerRef,
+  onView,
+  onDelete,
+  closeMenu,
+}: {
+  triggerRef: React.RefObject<HTMLDivElement | null>;
+  onView: () => void;
+  onDelete: () => void;
+  closeMenu: () => void;
+}) {
+  const { t } = useTranslation();
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // 根据三点按钮位置计算菜单固定定位（右上角对齐按钮），并限制不超出视口
+  useLayoutEffect(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const menuW = 110;
+    const menuH = 88;
+    let left = rect.right - menuW;
+    let top = rect.bottom + 4;
+    // 防止超出视口右/下边缘
+    if (left + menuW > window.innerWidth) left = window.innerWidth - menuW - 8;
+    if (left < 8) left = 8;
+    if (top + menuH > window.innerHeight) top = Math.max(8, rect.top - menuH - 4);
+    setPos({ top, left });
+  }, [triggerRef]);
+
+  if (!pos) return null;
+
+  return (
+    <>
+      {/* 全屏透明遮罩：点击关闭菜单 */}
+      <div
+        className="fixed inset-0 z-[60]"
+        onClick={closeMenu}
+        style={{ background: 'transparent' }}
+      />
+      <div
+        className="fixed z-[70] min-w-[110px] rounded-lg border border-[var(--color-border)] bg-white shadow-lg py-1 animate-[fadeIn_120ms_ease-out]"
+        style={{ top: pos.top, left: pos.left }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onView}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors border-none bg-transparent"
+        >
+          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-[var(--color-gray-400)]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3.5" />
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+          </svg>
+          {t('home.organize.shared.view')}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 cursor-pointer transition-colors border-none bg-transparent"
+        >
+          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 7h16" />
+            <path d="M9 7V4h6v3" />
+            <path d="M6 7l1 13h10l1-13" />
+            <path d="M10 11v5M14 11v5" />
+          </svg>
+          {t('home.organize.shared.delete')}
+        </button>
+      </div>
+    </>
   );
 }

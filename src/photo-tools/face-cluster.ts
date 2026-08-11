@@ -226,13 +226,19 @@ async function loadFaceApiForClustering(): Promise<FaceApiModule | null> {
 
 // ── 图片加载 ──────────────────────────────────────────────
 
-async function loadImageFromData(data: ArrayBuffer, photoName: string): Promise<{ img: HTMLImageElement; url: string } | null> {
+async function loadImageFromData(
+  data: ArrayBuffer,
+  photoName: string,
+  originalPath?: string,
+): Promise<{ img: HTMLImageElement; url: string } | null> {
   try {
     let blob: Blob;
     if (isHeicFile(photoName)) {
       try {
         const file = new File([data], photoName, { type: 'image/heic' });
-        const jpegFile = await ensureSupportedFormat(file);
+        // 传入原始路径，让 Tauri 桌面端优先走 Rust/WIC、Rust/libheif 原生解码（快、省内存），
+        // 避免回退到 heic2any WASM（主线程解码，又慢又吃内存，是 HEIC 人脸识别“卡住/极慢”的主因）
+        const jpegFile = await ensureSupportedFormat(file, undefined, originalPath);
         blob = new Blob([await jpegFile.arrayBuffer()], { type: 'image/jpeg' });
       } catch (err) {
         logger.warn(`[face-cluster] HEIC 转换失败 ${photoName}:`, err);
@@ -298,7 +304,7 @@ export async function extractFaceDescriptors(
   const data = await readData(photo);
   if (!data) return [];
 
-  const loaded = await loadImageFromData(data, photo.name);
+  const loaded = await loadImageFromData(data, photo.name, photo.path);
   if (!loaded) return [];
   const { img, url } = loaded;
 
