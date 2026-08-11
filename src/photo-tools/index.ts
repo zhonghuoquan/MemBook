@@ -16,14 +16,24 @@ export type {
   ConvertItem,
   ToolProgress,
   ToolResult,
+  OrganizeMode,
+  LocationLevel,
+  SimilarGroup,
+  RenamePreviewItem,
+  RenameTemplateVars,
+  FaceRecord,
+  FaceCluster,
+  FaceClusterResult,
+  TimelineGroup,
+  CalendarDay,
 } from './types';
 
 // 平台
 export { isTauri, getPlatform, supportsFileSystemWrite, supportsShellCommand, getScriptsBasePath } from './platform';
 
 // 哈希去重
-export { deduplicatePhotos, formatBytes } from './hash';
-export type { DedupeOptions } from './hash';
+export { deduplicatePhotos, findSimilarPhotos, formatBytes } from './hash';
+export type { DedupeOptions, FindSimilarOptions } from './hash';
 
 // 感知哈希
 export { computePHash, hammingDistance, DEFAULT_PHASH_THRESHOLD } from './perceptual-hash';
@@ -52,12 +62,22 @@ export type { GeoResult } from './geocode';
 export { convertLivpToJpg, convertHeicToJpg, convertToJpg, isConvertible } from './livp-converter';
 export type { ConvertOptions, ConvertOutput } from './livp-converter';
 
-// 时间归类
+// 时间/地点归类
 export {
   resolvePhotoDate,
   resolvePhotoDateWithData,
   getTargetDir,
+  getTargetDirEx,
+  parseLocationLevel,
   previewOrganize,
   executeOrganize,
 } from './organize';
 export type { PreviewOrganizeOptions, ExecuteOrganizeOptions } from './organize';
+
+// 批量重命名
+export { previewRename, executeRename, buildRenameVars } from './rename';
+export type { RenameOptions } from './rename';
+
+// 人脸聚类
+export { extractFaceDescriptors, clusterFaces, findFaceClusters } from './face-cluster';
+export type { FaceClusterOptions } from './face-cluster';

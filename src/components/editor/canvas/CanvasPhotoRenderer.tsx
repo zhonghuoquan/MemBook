@@ -192,6 +192,7 @@ export function CanvasPhotoRenderer({
   isEditing,
   imageRef,
   coverFitRef,
+  ignoreStoredPan,
   onUpdatePan: _onUpdatePan,
   onRotate90: _onRotate90,
   onFreeRotate: _onFreeRotate,
@@ -203,6 +204,8 @@ export function CanvasPhotoRenderer({
   slotW: number;
   slotH: number;
   isEditing?: boolean;
+  /** 多选缩放预览时忽略存储的 panX/panY，使用默认居中位置确保照片铺满新槽位（提交时由 computePanForResizedSlot 计算最终值） */
+  ignoreStoredPan?: boolean;
   imageRef?: React.MutableRefObject<Konva.Image | null>;
   coverFitRef?: React.MutableRefObject<{ w: number; h: number }>;
   onUpdatePan?: (slotId: string, panX: number, panY: number, panScale?: number) => void;
@@ -379,8 +382,10 @@ export function CanvasPhotoRenderer({
     defaultPx = Math.round((slotW - boundingW) / 2);
     defaultPy = Math.round((slotH - boundingH) / 2);
   }
-  const px = rawPanX !== undefined && Number.isFinite(rawPanX) ? rawPanX : defaultPx;
-  const py = rawPanY !== undefined && Number.isFinite(rawPanY) ? rawPanY : defaultPy;
+  // 多选缩放预览时忽略存储的 panX/panY，使用默认居中位置确保照片铺满新槽位
+  // 提交时由 computePanForResizedSlot 计算最终正确的 pan 值
+  const px = (!ignoreStoredPan && rawPanX !== undefined && Number.isFinite(rawPanX)) ? rawPanX : defaultPx;
+  const py = (!ignoreStoredPan && rawPanY !== undefined && Number.isFinite(rawPanY)) ? rawPanY : defaultPy;
 
   // ── Konva Image 定位 ──
   // 无旋转/无翻转：offset=(0,0)，x/y=可见边界左上角

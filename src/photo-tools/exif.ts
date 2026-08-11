@@ -83,8 +83,8 @@ export async function readExifDate(data: ArrayBuffer | Uint8Array): Promise<Date
         if (d) return d;
       }
     }
-  } catch {
-    // 解析失败静默处理
+  } catch (err) {
+    logger.warn('[exif] readExifDate 解析失败', err);
   }
   return null;
 }
@@ -198,7 +198,8 @@ export async function readExifDateWithFallback(
 export async function readExifFull(data: ArrayBuffer): Promise<Record<string, unknown> | null> {
   try {
     return await exifr.parse(data, true);
-  } catch {
+  } catch (err) {
+    logger.warn('[exif] readExifFull 解析失败', err);
     return null;
   }
 }
@@ -210,8 +211,8 @@ export async function readExifGps(data: ArrayBuffer): Promise<{ lon: number; lat
     if (gps && typeof gps.latitude === 'number' && typeof gps.longitude === 'number') {
       return { lon: gps.longitude, lat: gps.latitude };
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    logger.warn('[exif] readExifGps 解析失败', err);
   }
   return null;
 }

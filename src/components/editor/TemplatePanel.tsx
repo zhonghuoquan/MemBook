@@ -9,6 +9,7 @@ import { SLOT_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalett
 import { useTranslation } from 'react-i18next';
 
 type CountFilter = 'all' | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | '9+';
+type CategoryFilter = 'all' | 'classic' | 'creative' | 'personality' | 'custom';
 
 const COUNT_FILTERS: { labelKey: string; value: CountFilter }[] = [
   { labelKey: 'editor.templatePanel.filterAll', value: 'all' },
@@ -21,6 +22,14 @@ const COUNT_FILTERS: { labelKey: string; value: CountFilter }[] = [
   { labelKey: 'editor.templatePanel.filter7', value: 7 },
   { labelKey: 'editor.templatePanel.filter8', value: 8 },
   { labelKey: 'editor.templatePanel.filter9plus', value: '9+' },
+];
+
+const CATEGORY_FILTERS: { labelKey: string; value: CategoryFilter }[] = [
+  { labelKey: 'editor.templatePanel.catAll', value: 'all' },
+  { labelKey: 'editor.templatePanel.catClassic', value: 'classic' },
+  { labelKey: 'editor.templatePanel.catCreative', value: 'creative' },
+  { labelKey: 'editor.templatePanel.catPersonality', value: 'personality' },
+  { labelKey: 'editor.templatePanel.catCustom', value: 'custom' },
 ];
 
 /** 根据 countFilter 判断模板是否匹配 */
@@ -72,6 +81,8 @@ export function TemplatePanel() {
 
   // 照片数量筛选
   const [countFilter, setCountFilter] = useState<CountFilter>('all');
+  // 分类筛选（与主页 TemplateGallery 一致，支持筛选自定义模板）
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
 
   const currentPage = pages[currentPageIndex];
 
@@ -159,6 +170,12 @@ export function TemplatePanel() {
       .filter((tmpl) => matchCountFilter(tmpl.slots.length, countFilter)),
     [customTemplates, countFilter]);
 
+  // 分类筛选：根据 categoryFilter 决定各分组是否显示
+  const showClassic = categoryFilter === 'all' || categoryFilter === 'classic';
+  const showCreative = categoryFilter === 'all' || categoryFilter === 'creative';
+  const showPersonality = categoryFilter === 'all' || categoryFilter === 'personality';
+  const showCustom = categoryFilter === 'all' || categoryFilter === 'custom';
+
   return (
     <aside className="flex-1 bg-[var(--color-surface)] flex flex-col overflow-hidden">
       {/* Header */}
@@ -168,6 +185,28 @@ export function TemplatePanel() {
 
       {/* Template Grid */}
       <div ref={sb.ref} className={`flex-1 overflow-y-auto ps-scroll pl-3 pr-1 py-3 space-y-5 ${sb.className}`} {...sb.handlers}>
+        {/* Category Filter — 分类筛选（含自定义），与主页 TemplateGallery 一致 */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {CATEGORY_FILTERS.map((f) => {
+            const active = categoryFilter === f.value;
+            return (
+              <button
+                key={f.value}
+                onClick={() => setCategoryFilter(f.value)}
+                className={`
+                  px-2 py-1 rounded-full text-[12px] font-[500]
+                  border cursor-pointer transition-colors duration-150
+                  ${active
+                    ? 'bg-[var(--color-brand)] text-white border-[var(--color-brand)] shadow-[0_1px_3px_rgba(108,99,255,0.2)]'
+                    : 'bg-white border-[var(--color-border)] text-[var(--color-gray-600)] hover:border-[var(--color-primary-300)] hover:text-[var(--color-primary-600)]'
+                  }
+                `}
+              >
+                {t(f.labelKey)}
+              </button>
+            );
+          })}
+        </div>
         {/* Count Filter — 自动换行 Chip 筛选，缩窄面板也能完整显示 */}
         <div className="flex flex-wrap items-center gap-1.5">
           {COUNT_FILTERS.map((f) => {
@@ -192,31 +231,37 @@ export function TemplatePanel() {
             );
           })}
         </div>
-        <TemplateGroup
-          title={t('editor.templatePanel.classicGroup', { count: classicTemplates.length })}
-          templates={classicTemplates}
-          currentPageIndex={currentPageIndex}
-          pages={pages}
-          onSelect={handleSelect}
-          containerWidth={contentWidth}
-        />
-        <TemplateGroup
-          title={t('editor.templatePanel.creativeGroup', { count: creativeTemplates.length })}
-          templates={creativeTemplates}
-          currentPageIndex={currentPageIndex}
-          pages={pages}
-          onSelect={handleSelect}
-          containerWidth={contentWidth}
-        />
-        <TemplateGroup
-          title={t('editor.templatePanel.personalityGroup', { count: personalityTemplates.length })}
-          templates={personalityTemplates}
-          currentPageIndex={currentPageIndex}
-          pages={pages}
-          onSelect={handleSelect}
-          containerWidth={contentWidth}
-        />
-        {customTemplateList.length > 0 && (
+        {showClassic && (
+          <TemplateGroup
+            title={t('editor.templatePanel.classicGroup', { count: classicTemplates.length })}
+            templates={classicTemplates}
+            currentPageIndex={currentPageIndex}
+            pages={pages}
+            onSelect={handleSelect}
+            containerWidth={contentWidth}
+          />
+        )}
+        {showCreative && (
+          <TemplateGroup
+            title={t('editor.templatePanel.creativeGroup', { count: creativeTemplates.length })}
+            templates={creativeTemplates}
+            currentPageIndex={currentPageIndex}
+            pages={pages}
+            onSelect={handleSelect}
+            containerWidth={contentWidth}
+          />
+        )}
+        {showPersonality && (
+          <TemplateGroup
+            title={t('editor.templatePanel.personalityGroup', { count: personalityTemplates.length })}
+            templates={personalityTemplates}
+            currentPageIndex={currentPageIndex}
+            pages={pages}
+            onSelect={handleSelect}
+            containerWidth={contentWidth}
+          />
+        )}
+        {showCustom && customTemplateList.length > 0 && (
           <TemplateGroup
             title={t('editor.templatePanel.customGroup', { count: customTemplateList.length })}
             templates={customTemplateList}

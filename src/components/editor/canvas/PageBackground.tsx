@@ -1,12 +1,19 @@
 /**
- * 页面背景渲染组件：支持纯色 / CSS 渐变 / 纹理
+ * 页面背景渲染组件：支持纯色 / CSS 渐变 / 纹理（图案填充）
  * 从 Canvas.tsx 提取，无共享状态依赖
  */
 import { Rect } from 'react-konva';
-import { parseGradientColors, getTextureBaseColor } from './constants';
+import { useMemo } from 'react';
+import { parseGradientColors, getTextureBaseColor, createTextureCanvas } from './constants';
 
-/** 页面背景渲染组件：支持纯色 / CSS 渐变 / 纹理 */
+/** 页面背景渲染组件：支持纯色 / CSS 渐变 / 纹理（Canvas 图案填充） */
 export function PageBackgroundRect({ bg, w, h }: { bg?: string; w: number; h: number }) {
+  // 纹理 Canvas tile（仅在纹理背景时生成，useMemo 保证 bg 不变时缓存稳定）
+  const textureCanvas = useMemo(() => {
+    if (bg && bg.startsWith('texture-')) return createTextureCanvas(bg);
+    return null;
+  }, [bg]);
+
   if (!bg) {
     return <Rect x={0} y={0} width={w} height={h} fill="#FFFFFF" shadowColor="rgba(0,0,0,0.15)" shadowBlur={16} shadowOffsetY={6} listening={false} />;
   }
@@ -30,10 +37,25 @@ export function PageBackgroundRect({ bg, w, h }: { bg?: string; w: number; h: nu
     }
   }
 
-  // 纹理：用 CSS 背景 + 透明覆盖的方式（Konva 不直接支持 CSS 纹理，使用纯色底 + HTML overlay）
-  if (bg.startsWith('texture-')) {
+  // 纹理：底色 + Canvas 图案填充（fillPatternImage + repeat）
+  // Konva fillPatternImage 运行时接受 HTMLCanvasElement，但 TS 类型只声明了 HTMLImageElement，需断言
+  if (bg.startsWith('texture-') && textureCanvas) {
     const textureBase = getTextureBaseColor(bg);
-    return <Rect x={0} y={0} width={w} height={h} fill={textureBase} shadowColor="rgba(0,0,0,0.15)" shadowBlur={16} shadowOffsetY={6} listening={false} />;
+    return (
+      <Rect
+        x={0} y={0} width={w} height={h}
+        fill={textureBase}
+        fillPatternImage={textureCanvas as unknown as HTMLImageElement}
+        fillPatternRepeat="repeat"
+        shadowColor="rgba(0,0,0,0.15)" shadowBlur={16} shadowOffsetY={6}
+        listening={false}
+      />
+    );
+  }
+
+  // 纹理但 Canvas 生成失败：回退到底色
+  if (bg.startsWith('texture-')) {
+    return <Rect x={0} y={0} width={w} height={h} fill={getTextureBaseColor(bg)} shadowColor="rgba(0,0,0,0.15)" shadowBlur={16} shadowOffsetY={6} listening={false} />;
   }
 
   // 回退：纯白

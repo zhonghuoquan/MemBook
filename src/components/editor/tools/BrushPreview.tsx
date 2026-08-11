@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { BrushType } from '../../../types';
+import { BRUSH_STYLE_MAP } from '../../../types';
 
 /**
  * 画笔实时预览画布
@@ -47,14 +48,12 @@ export function BrushPreview({ brushType, strokeWidth, color, opacity }: BrushPr
     // 清空
     ctx.clearRect(0, 0, PREVIEW_W, PREVIEW_H);
 
-    // 混合模式
-    ctx.globalCompositeOperation = brushType === 'highlighter' ? 'multiply' : 'source-over';
-    ctx.globalAlpha = opacity;
+    // 统一使用 BRUSH_STYLE_MAP 计算样式参数（与 Canvas 持久化/实时渲染保持一致）
+    const bs = BRUSH_STYLE_MAP[brushType] || BRUSH_STYLE_MAP.pencil;
+    ctx.globalCompositeOperation = bs.blendMode;
+    ctx.globalAlpha = opacity * bs.opacityMultiplier;
     ctx.strokeStyle = color;
-    ctx.lineWidth = brushType === 'brush' ? strokeWidth * 2.5
-      : brushType === 'marker' ? strokeWidth * 1.8
-      : brushType === 'highlighter' ? strokeWidth * 4
-      : strokeWidth;
+    ctx.lineWidth = strokeWidth * bs.widthMultiplier;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 

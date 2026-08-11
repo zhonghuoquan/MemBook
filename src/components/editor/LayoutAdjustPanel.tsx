@@ -281,7 +281,7 @@ export function LayoutAdjustPanel({ open, onClose }: LayoutAdjustPanelProps) {
   if (!open) return null;
 
   const panelStyle: React.CSSProperties = {
-    ...(winPos.x >= 0 ? { left: winPos.x, top: winPos.y } : { right: 16, top: 112 }),
+    ...(winPos.x >= 0 ? { left: winPos.x, top: winPos.y } : { right: 16, top: 152 }),
     zIndex: isActive ? 'calc(var(--z-dropdown) + 10)' : 'var(--z-dropdown)',
   };
 

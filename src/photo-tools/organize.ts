@@ -10,7 +10,7 @@
 
 import { readExifDate } from './exif';
 import { parseFilenameDate } from './filename-time';
-import type { PhotoFileInfo, OrganizePreviewItem, ToolProgress } from './types';
+import type { PhotoFileInfo, OrganizePreviewItem, ToolProgress, OrganizeMode, LocationLevel } from './types';
 import { logger } from '../utils/logger';
 
 /**
@@ -51,6 +51,96 @@ export function getTargetDir(date: Date): string {
   return `MemBook照片整理/${year}年/${month}月`;
 }
 
+/**
+ * 从 location 字符串中解析指定层级的地名
+ * location 格式："省-市-区县" 或 "省-市" 或 "市" 等（由 reverse_geocode 生成）
+ *
+ * @param location 完整 location 字符串
+ * @param level 'province'=省级, 'city'=市级, 'district'=区县级, 'full'=省/市/区县三级路径
+ * @returns 地名（如 "上海" / "浦东新区"），full 返回路径（如 "浙江省/杭州市/西湖区"），无 GPS 返回 "未知"
+ */
+export function parseLocationLevel(location: string | undefined, level: LocationLevel = 'city'): string {
+  if (!location || !location.trim()) return '未知';
+  const parts = location.split(/[-—·\s]+/).filter(Boolean);
+  if (parts.length === 0) return '未知';
+
+  // 去除常见的省/市/区/县后缀用于匹配
+  const isProvince = (s: string) => /省$|自治区$|特别行政区$/.test(s) && s.length > 2;
+  const isCity = (s: string) => /市$/.test(s);
+  const isDistrict = (s: string) => /区$|县$|市$|镇$/.test(s);
+
+  // 找省级
+  const provincePart = parts.find((p) => isProvince(p));
+  // 找市级
+  const cityPart = parts.find((p) => isCity(p));
+  // 找区县级（从后往前找）
+  let districtPart: string | undefined;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (isDistrict(parts[i]) && parts[i] !== cityPart) { districtPart = parts[i]; break; }
+  }
+
+  if (level === 'province') {
+    return provincePart || parts[0] || '未知';
+  }
+
+  if (level === 'city') {
+    if (cityPart) return cityPart;
+    // 直辖市场景：第一个就是直辖市名（如 "上海-浦东新区"）
+    return parts[0] || '未知';
+  }
+
+  if (level === 'district') {
+    if (districtPart) return districtPart;
+    // 没有区县后缀，取最后一个
+    return parts[parts.length - 1] || '未知';
+  }
+
+  // full: 省/市/区县 三级完整路径
+  if (level === 'full') {
+    const segs: string[] = [];
+    if (provincePart) segs.push(provincePart);
+    if (cityPart && cityPart !== provincePart) segs.push(cityPart);
+    if (districtPart) segs.push(districtPart);
+    // 如果没匹配到标准后缀，退化为用所有 parts 拼接
+    if (segs.length === 0) segs.push(...parts);
+    return segs.length > 0 ? segs.join('/') : '未知';
+  }
+
+  return '未知';
+}
+
+/**
+ * 计算目标目录路径（支持多模式）
+ *
+ * @param date 拍摄日期
+ * @param mode 归类模式：time / location / time-location
+ * @param location 完整 location 字符串（mode 含 location 时需要）
+ * @param level 地点层级
+ */
+export function getTargetDirEx(
+  date: Date | null,
+  mode: OrganizeMode = 'time',
+  location?: string,
+  level: LocationLevel = 'city',
+): string {
+  const year = date ? date.getFullYear() : 0;
+  const month = date ? String(date.getMonth() + 1).padStart(2, '0') : '00';
+  const place = parseLocationLevel(location, level);
+
+  switch (mode) {
+    case 'location':
+      return `MemBook照片整理/地点/${place}`;
+    case 'time-location':
+      // 旅行场景：地点在前，时间在后
+      return `MemBook照片整理/地点/${place}/${year}年/${month}月`;
+    case 'time':
+    default:
+      // 原有时间归类
+      if (!date) return `MemBook照片整理/未知时间`;
+      return `MemBook照片整理/${year}年/${month}月`;
+  }
+}
+
 export interface PreviewOrganizeOptions {
   onProgress?: (p: ToolProgress) => void;
   /** 异步读取照片数据（用于 EXIF 时间读取），不传则仅用 dateTaken + 文件名 */
@@ -61,17 +151,31 @@ export interface PreviewOrganizeOptions {
   getFileDate?: (photo: PhotoFileInfo) => Promise<Date | null>;
   /** 排除已在"MemBook照片整理/"目录中的文件（已整理过） */
   excludeSorted?: boolean;
+  /** 归类模式（功能2） */
+  mode?: OrganizeMode;
+  /** 地点层级（功能2） */
+  locationLevel?: LocationLevel;
+  /** 逆向 geocode：将 GPS 坐标转为地名（功能2，mode 含 location 时需要） */
+  reverseGeocode?: (lon: number, lat: number) => Promise<string | null>;
 }
 
 /**
- * 预览时间归类：计算每个文件的目标路径
+ * 预览归类：计算每个文件的目标路径（支持时间/地点/时间+地点模式）
  */
 export async function previewOrganize(
   photos: PhotoFileInfo[],
   options: PreviewOrganizeOptions = {},
 ): Promise<OrganizePreviewItem[]> {
   const { onProgress, readData, useFileDate, getFileDate, excludeSorted } = options;
+  const mode = options.mode ?? 'time';
+  const locationLevel = options.locationLevel ?? 'city';
+  const reverseGeocode = options.reverseGeocode;
   const items: OrganizePreviewItem[] = [];
+
+  // location 缓存（避免对相同 GPS 重复 geocode）
+  const locationCache = new Map<string, string>();
+  // 正在进行的 geocode 请求（防并发重复请求）
+  const inflightGeocode = new Map<string, Promise<string | null>>();
 
   for (let i = 0; i < photos.length; i++) {
     const photo = photos[i];
@@ -111,9 +215,33 @@ export async function previewOrganize(
       }
     }
 
-    if (!date) continue;
+    // 地点模式下无日期也可以继续；时间模式无日期则跳过
+    if (!date && mode === 'time') continue;
 
-    const targetDir = getTargetDir(date);
+    // 解析地点（mode 含 location 时）
+    let locationStr: string | undefined;
+    if (mode !== 'time' && photo.gpsLon != null && photo.gpsLat != null && reverseGeocode) {
+      const cacheKey = `${photo.gpsLon.toFixed(4)},${photo.gpsLat.toFixed(4)}`;
+      locationStr = locationCache.get(cacheKey);
+      if (!locationStr) {
+        const existing = inflightGeocode.get(cacheKey);
+        if (existing) {
+          locationStr = await existing ?? undefined;
+        } else {
+          const promise = reverseGeocode(photo.gpsLon, photo.gpsLat)
+            .then(r => { if (r) locationCache.set(cacheKey, r); return r; })
+            .finally(() => inflightGeocode.delete(cacheKey));
+          inflightGeocode.set(cacheKey, promise);
+          try {
+            locationStr = await promise ?? undefined;
+          } catch {
+            // geocode 失败，location 保持 undefined
+          }
+        }
+      }
+    }
+
+    const targetDir = getTargetDirEx(date, mode, locationStr, locationLevel);
     const sourcePath = photo.path || photo.name;
 
     // 检查是否已在目标位置
@@ -150,6 +278,7 @@ export interface ExecuteOrganizeOptions {
 /**
  * 执行时间归类（仅 Tauri 端可用）
  * 在 rootPath 下创建 年/月 目录结构并移动文件
+ * 失败项自动重试一次（应对临时文件锁/系统抖动）
  */
 export async function executeOrganize(
   items: OrganizePreviewItem[],
@@ -201,10 +330,22 @@ export async function executeOrganize(
       await rename(normalize(item.sourcePath), normalize(finalTargetPath));
       moved++;
     } catch (err) {
-      // Tauri rename 可能报错但文件实际已移动（Windows 文件锁等），验证源文件是否还在
+      // Tauri rename 可能报错但文件实际已移动（Windows 文件锁等），验证目标文件是否存在
       try {
-        const sourceExists = await exists(normalize(item.sourcePath));
-        if (!sourceExists) {
+        // 重新计算 finalTargetPath（catch 块中无法访问 try 内的变量）
+        const targetDirPath = join(rootPath, item.targetDir);
+        const targetPath = join(targetDirPath, item.fileName);
+        let finalTargetPath = targetPath;
+        let counter = 1;
+        while (await exists(finalTargetPath)) {
+          const dot = item.fileName.lastIndexOf('.');
+          const stem = dot === -1 ? item.fileName : item.fileName.slice(0, dot);
+          const ext = dot === -1 ? '' : item.fileName.slice(dot);
+          finalTargetPath = join(targetDirPath, `${stem}_${counter}${ext}`);
+          counter++;
+        }
+        const targetExists = await exists(normalize(finalTargetPath));
+        if (targetExists) {
           moved++;
           continue;
         }
@@ -219,6 +360,52 @@ export async function executeOrganize(
       total: items.length,
       message: `移动 ${i + 1}/${items.length}`,
     });
+  }
+
+  // 重试失败项（最多重试 1 次，应对临时文件锁/系统抖动）
+  if (failed > 0) {
+    // 收集实际失败的项（conflictAction 为 move 且未被标记为 moved 的源文件存在的项）
+    const retryItems: OrganizePreviewItem[] = [];
+    for (const item of items) {
+      if (item.conflictAction !== 'skip') {
+        try {
+          const sourceExists = await exists(normalize(item.sourcePath));
+          if (sourceExists) retryItems.push(item);
+        } catch { /* skip */ }
+      }
+    }
+
+    if (retryItems.length > 0) {
+      logger.info(`[organize] 重试 ${retryItems.length} 个失败项...`);
+      let retryOk = 0;
+      for (const item of retryItems) {
+        try {
+          const targetDirPath = join(rootPath, item.targetDir);
+          if (!(await exists(targetDirPath))) {
+            await mkdir(targetDirPath, { recursive: true });
+          }
+          const targetPath = join(targetDirPath, item.fileName);
+          let finalTargetPath = targetPath;
+          let counter = 1;
+          while (await exists(finalTargetPath)) {
+            const dot = item.fileName.lastIndexOf('.');
+            const stem = dot === -1 ? item.fileName : item.fileName.slice(0, dot);
+            const ext = dot === -1 ? '' : item.fileName.slice(dot);
+            finalTargetPath = join(targetDirPath, `${stem}_${counter}${ext}`);
+            counter++;
+          }
+          await rename(normalize(item.sourcePath), normalize(finalTargetPath));
+          retryOk++;
+          failed--;
+        } catch (retryErr) {
+          logger.warn(`[organize] 重试失败: ${item.sourcePath}`, retryErr);
+        }
+      }
+      if (retryOk > 0) {
+        moved += retryOk;
+        logger.info(`[organize] 重试成功 ${retryOk} 个`);
+      }
+    }
   }
 
   return { moved, skipped, failed };

@@ -1244,6 +1244,7 @@ export function PhotoPanel({ photoImport, onNavigateToSmartLayout }: { photoImpo
                                                     placed={placedPhotoIds.has(photo.id)} onToggleSelect={togglePhotoSelect}
                                                     selectedPhotoIds={selectedPhotoIds}
                                                     onLoaded={registerThumbnailLoaded}
+                                                    onDragEnd={() => setSelectedPhotoIds(new Set())}
                                                     onDoubleClick={() => {
                                                       if (photo.processing || multiSelectMode) return;
                                                       setPreview({ photos: day.photos, index: day.photos.findIndex((p) => p.id === photo.id) });
@@ -1360,11 +1361,12 @@ function formatDayKey(isoDate: string): string {
 }
 
 /* ── 照片缩略图：React.memo + getState（0 个 zustand 订阅） ── */
-const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, multiSelectMode, selected, placed, onToggleSelect, onDoubleClick, onPreview, selectedPhotoIds, onLoaded }: {
+const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, multiSelectMode, selected, placed, onToggleSelect, onDoubleClick, onPreview, selectedPhotoIds, onLoaded, onDragEnd }: {
   photo: Photo; thumbW: number; thumbH: number; multiSelectMode: boolean; selected: boolean; placed: boolean;
   onToggleSelect: (id: string, ctrlKey: boolean) => void; onDoubleClick: () => void; onPreview: () => void;
   selectedPhotoIds: Set<string>;
   onLoaded?: (photoId: string) => void;
+  onDragEnd?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -1436,6 +1438,8 @@ const PhotoThumbItem = memo(function PhotoThumbItem({ photo, thumbW, thumbH, mul
           document.removeEventListener('mouseup', onUp);
           if (isDragging) {
             endDrag();
+            // 拖拽完成后清空多选内容，让用户进行下一次多选操作
+            onDragEnd?.();
             // 拖拽完成后阻止后续 click 事件触发选择切换（多选模式下尤其重要）
             const stopClick = (clickEv: MouseEvent) => {
               clickEv.stopPropagation();

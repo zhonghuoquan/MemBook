@@ -122,6 +122,132 @@ export function getTextureBaseColor(texture: string): string {
   return map[texture] || '#FFFFFF';
 }
 
+/**
+ * 为纹理背景生成 Canvas tile 图案（32×32）
+ * 用于 Konva fillPatternImage（画布渲染）和 Canvas createPattern（导出渲染）
+ * 使用确定性坐标（非 random），保证 useMemo 缓存稳定
+ */
+export function createTextureCanvas(texture: string): HTMLCanvasElement | null {
+  const size = 32;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  if (!ctx) return null;
+
+  switch (texture) {
+    case 'texture-ricepaper': {
+      // 宣纸：米色底 + 随机分布的小颗粒
+      ctx.fillStyle = '#F5F0E8';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#E8E0D0';
+      const dots: [number, number][] = [[4,6],[12,3],[20,8],[28,5],[6,14],[14,18],[22,12],[30,16],[8,24],[16,28],[24,22],[2,30],[18,24],[26,30],[10,10],[24,4]];
+      for (const [x, y] of dots) {
+        ctx.beginPath();
+        ctx.arc(x, y, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'texture-kraft': {
+      // 牛皮纸：棕色底 + 纤维线条 + 深色斑点
+      ctx.fillStyle = '#C4A882';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(120, 90, 50, 0.15)';
+      ctx.lineWidth = 0.5;
+      const lines: [number, number, number, number][] = [[2,0,6,32],[10,0,14,32],[18,0,22,32],[26,0,30,32]];
+      for (const [x1, y1, x2, y2] of lines) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(100, 70, 30, 0.08)';
+      const spots: [number, number][] = [[5,5],[15,12],[25,8],[8,20],[20,25],[28,18]];
+      for (const [x, y] of spots) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'texture-dots': {
+      // 波点：浅灰底 + 规则圆点
+      ctx.fillStyle = '#F9FAFB';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#D1D5DB';
+      const step = 12;
+      for (let x = step / 2; x < size; x += step) {
+        for (let y = step / 2; y < size; y += step) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
+    }
+    case 'texture-grid': {
+      // 网格：浅灰底 + 网格线
+      ctx.fillStyle = '#F9FAFB';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = '#E5E7EB';
+      ctx.lineWidth = 1;
+      const step = 16;
+      for (let x = 0; x <= size; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, size);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= size; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(size, y);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'texture-stripes': {
+      // 条纹：浅灰底 + 45度对角条纹
+      ctx.fillStyle = '#FAFAFA';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = '#E5E7EB';
+      ctx.lineWidth = 1;
+      for (let i = -size; i < size * 2; i += 5) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + size, size);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'texture-linen': {
+      // 亚麻：米色底 + 细密十字纹理
+      ctx.fillStyle = '#F0EDE8';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(0,0,0,0.03)';
+      ctx.lineWidth = 1;
+      const step = 4;
+      for (let x = 0; x <= size; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, size);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= size; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(size, y);
+        ctx.stroke();
+      }
+      break;
+    }
+    default:
+      return null;
+  }
+  return c;
+}
+
 /** 根据容器尺寸计算让页面完整可见的缩放（保留 padding，最大可放大到 200%） */
 export function computeFitZoom(containerW: number, containerH: number, pageW: number, pageH: number, padding = 80) {
   if (pageW <= 0 || pageH <= 0) return 1;

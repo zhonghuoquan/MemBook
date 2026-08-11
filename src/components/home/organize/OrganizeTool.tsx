@@ -15,6 +15,8 @@ import {
   type PhotoFileInfo,
   type OrganizePreviewItem,
   type ToolProgress,
+  type OrganizeMode,
+  type LocationLevel,
 } from '../../../photo-tools';
 import { ToolCard, ProgressBar, PrimaryButton, countByExt, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
@@ -29,6 +31,8 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
   const [useFileDate, setUseFileDate] = useState(false);
   const [excludeSorted, setExcludeSorted] = useState(true);
   const [excludedExts, setExcludedExts] = useState<Set<string>>(new Set());
+  const [organizeMode, setOrganizeMode] = useState<OrganizeMode>('time');
+  const [locationLevel, setLocationLevel] = useState<LocationLevel>('full');
 
   // 通知父组件工具执行状态（previewing/executing），用于禁用标签切换
   const busy = previewing || executing;
@@ -76,6 +80,18 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
     }
   }, []);
 
+  /** 逆向 geocode：GPS 坐标 → 地名（Tauri 端调用 Rust reverse_geocode） */
+  const reverseGeocode = useCallback(async (lon: number, lat: number): Promise<string | null> => {
+    if (!isTauri()) return null;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<string | null>('reverse_geocode', { latitude: lat, longitude: lon });
+    } catch (err) {
+      logger.warn('[organize] 逆向 geocode 失败:', lon, lat, err);
+      return null;
+    }
+  }, []);
+
   const handlePreview = async () => {
     setPreviewing(true);
     setItems([]);
@@ -86,6 +102,9 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
         useFileDate,
         excludeSorted,
         getFileDate: useFileDate ? getFileDate : undefined,
+        mode: organizeMode,
+        locationLevel,
+        reverseGeocode: organizeMode !== 'time' ? reverseGeocode : undefined,
         onProgress: setProgress,
       });
       setItems(result);
@@ -171,6 +190,43 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
         <>
           {!items.length && !previewing && (
             <div className="space-y-3">
+              {/* 归类模式选择 */}
+              <div>
+                <span className="text-xs text-[var(--color-gray-600)] mb-1.5 block">{t('home.organize.organize.modeLabel', '归类模式')}</span>
+                <div className="flex gap-1.5">
+                  {([
+                    { mode: 'time', label: t('home.organize.organize.modeTime', '按时间') },
+                    { mode: 'location', label: t('home.organize.organize.modeLocation', '按地点') },
+                    { mode: 'time-location', label: t('home.organize.organize.modeTimeLocation', '时间+地点') },
+                  ] as { mode: OrganizeMode; label: string }[]).map(({ mode, label }) => (
+                    <button
+                      key={mode}
+                      onClick={() => setOrganizeMode(mode)}
+                      className={`px-2.5 py-1 rounded text-xs cursor-pointer border-none transition-all ${
+                        organizeMode === mode
+                          ? 'bg-[var(--color-brand)] text-white'
+                          : 'bg-[var(--color-gray-100)] text-[var(--color-gray-600)] hover:bg-[var(--color-gray-200)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {organizeMode !== 'time' && (
+                  <div className="mt-1.5">
+                    <select
+                      value={locationLevel}
+                      onChange={(e) => setLocationLevel(e.target.value as LocationLevel)}
+                      className="text-xs px-2 py-1 rounded border border-[var(--color-border)] bg-white text-[var(--color-gray-700)] cursor-pointer"
+                    >
+                      <option value="full">{t('home.organize.organize.levelFull', '省/市/区县')}</option>
+                      <option value="province">{t('home.organize.organize.levelProvince', '省级')}</option>
+                      <option value="city">{t('home.organize.organize.levelCity', '市级')}</option>
+                      <option value="district">{t('home.organize.organize.levelDistrict', '区县级')}</option>
+                    </select>
+                  </div>
+                )}
+              </div>
               {/* 格式选择 */}
               {allExts.length > 0 && (
                 <div>

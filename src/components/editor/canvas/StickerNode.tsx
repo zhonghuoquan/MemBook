@@ -19,7 +19,7 @@ import { useStickerImage } from '../../../hooks/useStickerSrc';
 import type { StickerElement } from '../../../types';
 
 function StickerNodeImpl({
-  sticker, mmToPx, isSelected, showHandles = true,
+  sticker, mmToPx, isSelected, showHandles = true, interactive = true,
   onUpdate, onRemove: _onRemove, onSelect,
 }: {
   sticker: StickerElement;
@@ -27,6 +27,8 @@ function StickerNodeImpl({
   isSelected: boolean;
   /** 是否显示 resize/旋转等单独控制手柄。多选模式下应设为 false，由组包围盒统一控制 */
   showHandles?: boolean;
+  /** 是否可交互（画笔/橡皮擦模式下设为 false，禁用选中/拖拽，让事件穿透到 Stage） */
+  interactive?: boolean;
   onUpdate: (patch: Partial<StickerElement>, recordHistory?: boolean) => void;
   onRemove: () => void;
   onSelect: (e: KonvaEventObject<MouseEvent>) => void;
@@ -240,7 +242,8 @@ function StickerNodeImpl({
       x={px}
       y={py}
       rotation={sticker.rotation}
-      draggable={true}
+      listening={interactive}
+      draggable={interactive}
       onClick={(e) => {
         e.cancelBubble = true;
         onSelect(e);

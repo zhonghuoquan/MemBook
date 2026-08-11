@@ -33,7 +33,14 @@ import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
 import { ExifTool } from './organize/ExifTool';
 import { ConvertTool } from './organize/ConvertTool';
+import { SimilarTool } from './organize/SimilarTool';
+import { RenameTool } from './organize/RenameTool';
+import { FaceClusterTool } from './organize/FaceClusterTool';
+import { TimelineView } from './organize/TimelineView';
+import { CalendarView } from './organize/CalendarView';
+import { AlbumBridgeDialog } from './organize/AlbumBridgeDialog';
 import { LibraryPickerDialog } from './organize/LibraryPickerDialog';
+import { ToolSidebar, type ToolId } from './organize/ToolSidebar';
 import { loadPhotos } from '../../db';
 import type { AlbumProject, Photo } from '../../types';
 import { logger } from '../../utils/logger';
@@ -241,6 +248,15 @@ export function OrganizePanel() {
   const [busyTools, setBusyTools] = useState<Set<string>>(new Set());
   const isAnyToolBusy = busyTools.size > 0;
 
+  // ── 视图模式 + 一键成册联动状态 ──
+  // activeTool 取代原 viewMode：左侧导航选中的工具 ID（dedupe/organize/.../timeline/calendar）
+  // 默认 'dedupe'（首个智能整理工具），保证进入面板后右侧工作区有内容
+  const [activeTool, setActiveTool] = useState<ToolId>('dedupe');
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
+  const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
+  // 时间线 → 日历跳转的初始月份（跳转后清空，避免后续切换日历视图时仍定位到旧月份）
+  const [calendarInitialView, setCalendarInitialView] = useState<{ year: number; month: number } | undefined>();
+
   // 去重结果按标签持久化（提升到面板级别，切换标签不丢失）
   // key = tabId, value = { result, overrides }
   const [dedupeStates, setDedupeStates] = useState<
@@ -278,6 +294,25 @@ export function OrganizePanel() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const scanningAny = tabs.some((t) => t.scanning);
+
+  // 选中照片列表（从 activeTab.photos 中按 ID 过滤，用于一键成册联动）
+  const selectedPhotos = useMemo(() => {
+    if (selectedPhotoIds.size === 0 || !activeTab) return [];
+    return activeTab.photos.filter((p) => selectedPhotoIds.has(p.id));
+  }, [selectedPhotoIds, activeTab]);
+
+  // 切换标签时清空选中状态
+  useEffect(() => {
+    setSelectedPhotoIds(new Set());
+  }, [activeTabId]);
+
+  // 日历初始视图清理：CalendarView 在 mount 时通过 useState lazy initializer 消费 initialView，
+  // 消费后立即清除，避免后续 CalendarView 重新挂载（如切到 tools 再切回 calendar）时仍跳转到旧月份
+  useEffect(() => {
+    if (!calendarInitialView) return;
+    const id = setTimeout(() => setCalendarInitialView(undefined), 0);
+    return () => clearTimeout(id);
+  }, [calendarInitialView]);
 
   // 用 ref 跟踪 tabs，避免在释放 blob URL 时闭包过期
   // 必须在 effect 中同步，禁止在 render 期间更新 ref（React 19 严格规则）
@@ -961,31 +996,72 @@ export function OrganizePanel() {
   // 关键：不依赖 activeTab 对象引用（扫描时 setTabState 会重建 tab 对象），
   // 只依赖 hasData + toolProps（已 memo 化）+ 去重状态
   const hasActiveTab = !!activeTab;
-  const toolCards = useMemo(() => {
+
+  // 右侧工作区：只渲染当前选中的工具组件（取代原 toolCards 瀑布流）
+  const activeWorkspace = useMemo(() => {
     if (!hasData || !hasActiveTab) return null;
-    return (
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-        <DedupeTool
-          key={`dedupe-${activeTabId}`}
-          {...toolProps}
-          dedupeResult={activeDedupeState.result}
-          dedupeOverrides={activeDedupeState.overrides}
-          onDedupeStateChange={(result, overrides) => { if (activeTabId) setDedupeState(activeTabId, result, overrides); }}
-        />
-        <OrganizeTool key={`organize-${activeTabId}`} {...toolProps} />
-        <ExifTool key={`exif-${activeTabId}`} {...toolProps} />
-        <ConvertTool key={`convert-${activeTabId}`} {...toolProps} />
-      </div>
-    );
+    switch (activeTool) {
+      case 'dedupe':
+        return (
+          <DedupeTool
+            key={`dedupe-${activeTabId}`}
+            {...toolProps}
+            dedupeResult={activeDedupeState.result}
+            dedupeOverrides={activeDedupeState.overrides}
+            onDedupeStateChange={(result, overrides) => { if (activeTabId) setDedupeState(activeTabId, result, overrides); }}
+          />
+        );
+      case 'organize':
+        return <OrganizeTool key={`organize-${activeTabId}`} {...toolProps} />;
+      case 'faceCluster':
+        return <FaceClusterTool key={`faceCluster-${activeTabId}`} {...toolProps} />;
+      case 'similar':
+        return <SimilarTool key={`similar-${activeTabId}`} {...toolProps} />;
+      case 'exif':
+        return <ExifTool key={`exif-${activeTabId}`} {...toolProps} />;
+      case 'rename':
+        return <RenameTool key={`rename-${activeTabId}`} {...toolProps} />;
+      case 'convert':
+        return <ConvertTool key={`convert-${activeTabId}`} {...toolProps} />;
+      case 'timeline':
+        return (
+          <TimelineView
+            key={`timeline-${activeTabId}`}
+            photos={activeTab?.photos ?? []}
+            readPhotoData={readPhotoData}
+            onSelectionChange={setSelectedPhotoIds}
+            onViewInCalendar={(year, month) => {
+              // 跳转到日历视图：清空选中（月份/路径选择上下文与日历的按天选择不同）
+              setSelectedPhotoIds(new Set());
+              setCalendarInitialView({ year, month });
+              setActiveTool('calendar');
+            }}
+          />
+        );
+      case 'calendar':
+        return (
+          <CalendarView
+            key={`calendar-${activeTabId}`}
+            photos={activeTab?.photos ?? []}
+            readPhotoData={readPhotoData}
+            selectedIds={selectedPhotoIds}
+            onSelectionChange={setSelectedPhotoIds}
+            initialView={calendarInitialView}
+          />
+        );
+      default:
+        return null;
+    }
   }, [
-    hasData, hasActiveTab, toolProps, activeTabId,
+    hasData, hasActiveTab, activeTool, toolProps, activeTabId,
     activeDedupeState.result, activeDedupeState.overrides, setDedupeState,
+    activeTab?.photos, readPhotoData, selectedPhotoIds, calendarInitialView,
   ]);
 
   return (
-    <div className="h-full flex flex-col overflow-auto p-6">
+    <div className="h-full flex flex-col p-6 overflow-hidden">
       {/* 顶部数据源选择 */}
-      <section className={`mb-4 ${hasData ? '' : 'flex-1 flex flex-col'}`}>
+      <section className={`shrink-0 mb-4 ${hasData ? '' : 'flex-1 flex flex-col overflow-auto custom-scrollbar'}`}>
         <header className="flex items-center gap-4 mb-4">
           <div className="shrink-0">
             <h2 className="text-[1.875rem] font-[700] text-[var(--color-text-primary)] leading-tight tracking-tight">{t('organize.title')}</h2>
@@ -1203,8 +1279,73 @@ export function OrganizePanel() {
         )}
       </section>
 
-      {/* 工具卡片区（操作当前激活路径，useMemo 缓存避免扫描进度更新触发重渲染） */}
-      {toolCards}
+      {/* 左侧功能导航 + 右侧工作区（操作当前激活路径） */}
+      {hasData && hasActiveTab && (
+        <div className="flex-1 min-h-0 flex gap-4">
+          {/* 左侧功能导航栏 */}
+          <ToolSidebar
+            activeTool={activeTool}
+            onSelect={(id) => {
+              setActiveTool(id);
+              // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
+              setSelectedPhotoIds(new Set());
+            }}
+          />
+
+          {/* 右侧工作区：无外层标题框，直接渲染工具内容（ToolCard 自带色块标题） */}
+          <div className="flex-1 min-w-0 flex flex-col relative">
+            {/* 加入相册浮动按钮（固定在右上角，不遮挡内容） */}
+            <div className="absolute top-2 right-3 z-20">
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedPhotoIds.size === 0) {
+                    addToast({
+                      type: 'warning',
+                      message: t('home.organize.albumBridge.selectPhotosFirst', {
+                        defaultValue: '请先选择照片',
+                      }),
+                    });
+                    return;
+                  }
+                  setAlbumBridgeOpen(true);
+                }}
+                disabled={selectedPhotoIds.size === 0}
+                title={
+                  selectedPhotoIds.size === 0
+                    ? t('home.organize.albumBridge.selectPhotosFirst', { defaultValue: '请先选择照片' })
+                    : t('home.organize.albumBridge.buttonLabel')
+                }
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-[600] transition-all border-none cursor-pointer shadow-sm ${
+                  selectedPhotoIds.size > 0
+                    ? 'bg-[var(--color-brand)] text-white hover:opacity-90'
+                    : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
+                }`}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M8 3v10M3 8h10" />
+                </svg>
+                {t('home.organize.albumBridge.buttonLabel')}
+                {selectedPhotoIds.size > 0 && <span className="opacity-80">· {selectedPhotoIds.size}</span>}
+              </button>
+            </div>
+            {/* 工作区内容（可滚动，无边框，由内部 ToolCard 提供视觉色块） */}
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              {activeWorkspace}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 一键成册联动对话框 */}
+      <AlbumBridgeDialog
+        open={albumBridgeOpen}
+        onClose={() => setAlbumBridgeOpen(false)}
+        photos={selectedPhotos}
+        sourceMode={activeTab?.sourceMode ?? 'folder'}
+        addToast={addToast}
+        readPhotoData={readPhotoData}
+      />
 
       {/* 项目库选择弹窗 */}
       <LibraryPickerDialog
@@ -1389,7 +1530,7 @@ function EmptyState({
             <span className="text-[13px] font-[600] text-[var(--color-text-secondary)]">{t('organize.emptyState.recentTitle')}</span>
             <span className="text-xs text-[var(--color-text-tertiary)]">{t('organize.emptyState.recentHint')}</span>
           </div>
-          <div className="max-h-[280px] overflow-y-auto">
+          <div className="max-h-[280px] overflow-y-auto custom-scrollbar">
             {history.map((entry) => (
               <div
                 key={entry.path}

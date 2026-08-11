@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line } from 'react-konva';
 import Konva from 'konva';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
-import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP } from '../../types';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement } from '../../types';
@@ -140,6 +140,10 @@ export function Canvas() {
   const addBrushStroke = useEditorStore((s) => s.addBrushStroke);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
   const updateStickyNote = useEditorStore((s) => s.updateStickyNote);
+  // 画笔/橡皮擦工具模式下，所有页面内容元素禁用交互（listening=false），
+  // 让点击事件穿透到 Stage，由 Stage 的 onMouseDown 统一处理绘制。
+  // 笔迹在橡皮擦模式下单独保持 listening=true 以支持点击擦除。
+  const isToolMode = activeTool === 'brush' || activeTool === 'eraser';
   const removeStickyNote = useEditorStore((s) => s.removeStickyNote);
   const updateTextElement = useEditorStore((s) => s.updateTextElement);
   const removeTextElement = useEditorStore((s) => s.removeTextElement);
@@ -1320,7 +1324,7 @@ export function Canvas() {
           width={sw}
           height={sh}
           opacity={isEditing ? 0.3 : 1}
-          listening={!isEditing}
+          listening={!isEditing && !isToolMode}
           clipFunc={(ctx) => { ctx.beginPath(); ctx.roundRect(0, 0, sw, sh, slotCornerRadius); ctx.closePath(); }}
           draggable={!isEditing}
           onClick={(e) => {
@@ -1430,6 +1434,7 @@ export function Canvas() {
               slotW={sw}
               slotH={sh}
               isEditing={false}
+              ignoreStoredPan={!!mePreviewRect}
               onUpdatePan={(slotId, panX, panY, panScale) =>
                 useEditorStore.getState().updatePlacementPan(currentPageIndex, slotId, panX, panY, panScale)
               }
@@ -1476,15 +1481,16 @@ export function Canvas() {
       });
     });
     (currentPage.brushStrokes || []).forEach((s) => {
+      const bs = BRUSH_STYLE_MAP[s.brushType] || BRUSH_STYLE_MAP.pencil;
       items.push({
         z: s.zIndex || 0,
         typeOrder: 1,
         render: <Line
           key={s.id}
           points={s.points.map((v) => v * MM_TO_PX)}
-          stroke={s.color} strokeWidth={s.strokeWidth} opacity={s.opacity}
-          tension={s.tension} lineCap={s.lineCap} lineJoin="round"
-          globalCompositeOperation={s.brushType === 'highlighter' ? 'multiply' : 'source-over'}
+          stroke={s.color} strokeWidth={s.strokeWidth * bs.widthMultiplier} opacity={s.opacity * bs.opacityMultiplier}
+          tension={bs.tension} lineCap={s.lineCap} lineJoin="round"
+          globalCompositeOperation={bs.blendMode}
           listening={activeTool === 'eraser'}
           onClick={activeTool === 'eraser' ? () => removeBrushStroke(currentPageIndex, s.id) : undefined}
           hitStrokeWidth={activeTool === 'eraser' ? 20 : 0}
@@ -1504,13 +1510,15 @@ export function Canvas() {
         render: <TextElementNode
           key={el.id} el={elWithPreview} mmToPx={MM_TO_PX} canvasZoom={canvasZoom}
           isSelected={selectedTextId === el.id || isMultiSelected} isEditing={editingTextId === el.id}
+          interactive={!isToolMode}
           onUpdate={(p: Partial<PageTextElement>, rh?: boolean) => updateTextElement(currentPageIndex, el.id, p, rh)}
           onRemove={() => { removeTextElement(currentPageIndex, el.id); setSelectedTextId(null); setEditingTextId(null); }}
           onClick={(e) => {
             if (e.evt.ctrlKey || e.evt.metaKey) {
               toggleMultiSelect({ type: 'text', id: el.id });
             } else {
-              setSelectedTextId(el.id); setEditingTextId(el.id);
+              // 单击只选中，不进入编辑（双击才编辑）
+              setSelectedTextId(el.id);
             }
           }}
           onDblClick={() => setEditingTextId(el.id)}
@@ -1530,6 +1538,7 @@ export function Canvas() {
           key={note.id} note={noteWithPreview} mmToPx={MM_TO_PX}
           canDrag={true}
           isSelected={selectedStickyId === note.id || isMultiSelected}
+          interactive={!isToolMode}
           onUpdate={(p: Partial<StickyNote>, rh?: boolean) => updateStickyNote(currentPageIndex, note.id, p, rh)}
           onRemove={() => { removeStickyNote(currentPageIndex, note.id); setSelectedStickyId(null); }}
           onRequestEdit={(_t: string) => setEditingTextId(note.id)}
@@ -1558,6 +1567,7 @@ export function Canvas() {
           key={st.id} sticker={stWithPreview} mmToPx={MM_TO_PX}
           isSelected={selectedStickerId === st.id || isMultiSelected}
           showHandles={!inMultiSelectMode}
+          interactive={!isToolMode}
           onUpdate={(p: Partial<StickerElement>, rh?: boolean) => updateStickerElement(currentPageIndex, st.id, p, rh)}
           onRemove={() => { removeStickerElement(currentPageIndex, st.id); setSelectedStickerId(null); }}
           onSelect={(e) => {
@@ -1584,11 +1594,9 @@ export function Canvas() {
         ref={canvasScroll.ref}
         {...canvasScroll.handlers}
         style={{
-          cursor: activeTool === 'brush'
-            ? 'crosshair'
-            : activeTool === 'eraser'
-              ? 'none'
-              : undefined,
+          cursor: activeTool === 'brush' || activeTool === 'eraser'
+            ? 'none'
+            : undefined,
         }}
       >
       {/* 拖拽提示：仅在页面外时显示，顶部居中 */}
@@ -1785,7 +1793,8 @@ export function Canvas() {
             const isStageBg = e.target === stage;
 
             /* ── 画笔/橡皮擦工具 ── */
-            if (activeTool === 'brush' && isStageBg && e.evt.button === 0) {
+            // 画笔模式：无论点击是否在元素上，都开始绘制（元素已 listening=false，事件穿透到 Stage）
+            if (activeTool === 'brush' && e.evt.button === 0) {
               isDrawingRef.current = true;
               const pos = stage.getPointerPosition()!;
               const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
@@ -1966,7 +1975,7 @@ export function Canvas() {
                       fontFamily={WATERMARK_FONT_STACK}
                       fontStyle="italic"
                       fill={isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.35)'}
-                      listening={true}
+                      listening={!isToolMode}
                       onClick={(e) => {
                         e.cancelBubble = true;
                         setSelectedWatermark(true);
@@ -2005,15 +2014,18 @@ export function Canvas() {
               })()}
 
               {/* ── 正在绘制的实时笔迹（始终在最顶层） ── */}
-              {activeStrokePts.length >= 4 && (
-                <Line
-                  points={activeStrokePts}
-                  stroke={brushSettings.color} strokeWidth={brushSettings.strokeWidth}
-                  opacity={brushSettings.opacity} tension={0.5} lineCap="round" lineJoin="round"
-                  globalCompositeOperation={brushSettings.brushType === 'highlighter' ? 'multiply' : 'source-over'}
-                  listening={false}
-                />
-              )}
+              {activeStrokePts.length >= 4 && (() => {
+                const bs = BRUSH_STYLE_MAP[brushSettings.brushType] || BRUSH_STYLE_MAP.pencil;
+                return (
+                  <Line
+                    points={activeStrokePts}
+                    stroke={brushSettings.color} strokeWidth={brushSettings.strokeWidth * bs.widthMultiplier}
+                    opacity={brushSettings.opacity * bs.opacityMultiplier} tension={bs.tension} lineCap="round" lineJoin="round"
+                    globalCompositeOperation={bs.blendMode}
+                    listening={false}
+                  />
+                );
+              })()}
 
               {/* 编辑模式页面遮罩 */}
               {isEditing && selectedSlotId && template && (() => {
@@ -2247,13 +2259,21 @@ export function Canvas() {
           <Layer ref={guidesLayerRef} listening={false} />
         </Stage>
 
-        {/* ── 文字浮动工具栏（动态定位在文字元素上方，编辑时也保持显示） ── */}
+        {/* ── 文字浮动工具栏（动态定位在文字元素上方，旋转后用 AABB 包围盒顶部） ── */}
         {selectedTextId && (() => {
           const el = currentPage?.textElements?.find((e) => e.id === selectedTextId);
           if (!el) return null;
-          // 动态定位：工具栏在文字元素上方居中
-          const toolX = (el.x * MM_TO_PX + el.width * MM_TO_PX / 2) * canvasZoom + groupOX;
-          const toolY = el.y * MM_TO_PX * canvasZoom + groupOY - 36;
+          // AABB 包围盒定位（与便利贴工具栏一致）：旋转后始终在视觉上方
+          const elRot = el.rotation ?? 0;
+          const elW = el.width;
+          const elH = el.height ?? 20;
+          const centerX = el.x + elW / 2;
+          const centerY = el.y + elH / 2;
+          const rad = elRot * Math.PI / 180;
+          const bboxTopMm = centerY - (Math.abs(elW / 2 * Math.sin(rad)) + Math.abs(elH / 2 * Math.cos(rad)));
+          const offsetMm = 48 / (MM_TO_PX * canvasZoom);
+          const toolX = centerX * MM_TO_PX * canvasZoom + groupOX;
+          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
             <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
               style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
@@ -2298,28 +2318,31 @@ export function Canvas() {
             ? currentPage?.stickyNotes?.find((n) => n.id === editingTextId)
             : currentPage?.textElements?.find((e) => e.id === editingTextId);
           if (!el) { setEditingTextId(null); return null; }
-          const tx = el.x * MM_TO_PX * canvasZoom + groupOX;
-          const ty = el.y * MM_TO_PX * canvasZoom + groupOY;
-          const tw = Math.max(el.width * MM_TO_PX, 50) * canvasZoom;
-          // 文字元素 Konva Text 内部有 x=4,y=4 偏移；便利贴 Konva Text 内部有 6px padding
+          // 尺寸阈值须与 Konva 渲染一致：便利贴 min 40，文字元素 min 50/20。
+          const tw = Math.max(el.width * MM_TO_PX, isSticky ? 40 : 50) * canvasZoom;
           const textPad = (isSticky ? 6 : 4) * canvasZoom;
-          // 父级容器尺寸严格对齐虚线边框，使用 height 而非 minHeight 防止 textarea 实际尺寸不一致
-          const boxH = Math.max(('height' in el ? el.height : 80) * MM_TO_PX, 20) * canvasZoom;
-          // 便利贴可能有自己的旋转角度，textarea 容器需同步旋转
-          const stickyRotation = isSticky ? ('rotation' in el ? el.rotation : 0) : 0;
+          const boxH = Math.max(('height' in el ? el.height : 80) * MM_TO_PX, isSticky ? 40 : 20) * canvasZoom;
+          // 旋转角度：便利贴和文字元素都支持旋转。竖排模式(rotation===-90)不旋转 Group。
+          const elRotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
+          const isVert = elRotation === -90;
+          const editRotation = isVert ? 0 : elRotation;
+          // 中心定位（与 Konva Group 一致）：中心 = (el.x + w/2, el.y + h/2)
+          const centerX = el.x + el.width / 2;
+          const centerY = el.y + ('height' in el ? el.height : 80) / 2;
+          const tcx = centerX * MM_TO_PX * canvasZoom + groupOX;
+          const tcy = centerY * MM_TO_PX * canvasZoom + groupOY;
           const saveText = () => {
             const val = editTextareaRef.current?.value || '';
             if (isSticky) updateStickyNote(currentPageIndex, editingTextId, { text: val }, true);
             else updateTextElement(currentPageIndex, editingTextId, { text: val }, true);
             setEditingTextId(null);
           };
-          const isVert = 'rotation' in el && el.rotation === -90;
           const fs = ('fontSize' in el ? el.fontSize : 14) * canvasZoom;
           return (
             <div className="absolute z-[var(--z-overlay)]"
               style={{
-                left: tx, top: ty, width: tw, height: boxH,
-                transform: stickyRotation ? `rotate(${stickyRotation}deg)` : undefined,
+                left: tcx, top: tcy, width: tw, height: boxH,
+                transform: `translate(-50%, -50%)${editRotation ? ` rotate(${editRotation}deg)` : ''}`,
                 transformOrigin: 'center center',
               }}>
               {/* 选中边框提示 */}
@@ -2357,13 +2380,25 @@ export function Canvas() {
           );
         })()}
 
-        {/* ── 便利贴浮动工具栏（动态定位在便利贴上方） ── */}
+        {/* ── 便利贴浮动工具栏（动态定位在便利贴上方，旋转后用 AABB 包围盒顶部） ── */}
         {selectedStickyId && (() => {
           const note = currentPage?.stickyNotes?.find((n) => n.id === selectedStickyId);
           if (!note) return null;
-          const sx = note.x * MM_TO_PX + note.width * MM_TO_PX / 2;
-          const toolX = sx * canvasZoom + groupOX;
-          const toolY = (note.y * MM_TO_PX * canvasZoom + groupOY) - 36;
+          // 工具栏位置：始终在旋转后包围盒顶部上方（屏幕视觉上方，不跟随旋转）
+          // note.x/y 为左上角，中心 = (note.x + w/2, note.y + h/2)；旋转中心 = 便利贴中心
+          const rad = (note.rotation ?? 0) * Math.PI / 180;
+          const halfW = note.width / 2;
+          const halfH = note.height / 2;
+          const centerX = note.x + note.width / 2;
+          const centerY = note.y + note.height / 2;
+          // 包围盒顶部（mm）：旋转后便利贴最高点
+          const bboxTopMm = centerY - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
+          // 48px 偏移转换为 mm（屏幕固定像素，不随缩放变化）
+          const offsetMm = 48 / (MM_TO_PX * canvasZoom);
+          // 工具栏 X = 便利贴中心 X（水平居中，旋转中心不变）
+          const toolX = centerX * MM_TO_PX * canvasZoom + groupOX;
+          // 工具栏 Y = 包围盒顶部 - 偏移（始终在便利贴视觉上方，不遮挡内容）
+          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
             <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
               style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
@@ -2759,9 +2794,12 @@ export function Canvas() {
           );
         })()}
 
-        {/* ── 橡皮擦光标跟随圆 ── */}
+        {/* ── 画笔/橡皮擦光标跟随圆（系统 cursor 已设为 none，完全由此替代） ── */}
         {activeTool === 'eraser' && <EraserCursor containerRef={containerRef} size={brushSettings.strokeWidth * 2} />}
-        {activeTool === 'brush' && <BrushCursor containerRef={containerRef} size={brushSettings.strokeWidth} color={brushSettings.color} opacity={brushSettings.opacity} />}
+        {activeTool === 'brush' && (() => {
+          const bs = BRUSH_STYLE_MAP[brushSettings.brushType] || BRUSH_STYLE_MAP.pencil;
+          return <BrushCursor containerRef={containerRef} size={brushSettings.strokeWidth * bs.widthMultiplier} color={brushSettings.color} opacity={brushSettings.opacity} />;
+        })()}
       </div>
 
     </div>

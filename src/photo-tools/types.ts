@@ -118,6 +118,126 @@ export interface OrganizeResult {
   items: OrganizePreviewItem[];
 }
 
+// ══════════════════════════════════════════════════════════
+// 功能2：按地点归类
+// ══════════════════════════════════════════════════════════
+
+/** 归类模式：时间 / 地点 / 时间+地点 */
+export type OrganizeMode = 'time' | 'location' | 'time-location';
+
+/** 地点层级
+ * - 'province': 省级
+ * - 'city': 市级
+ * - 'district': 区县级
+ * - 'full': 省/市/区县 三级完整路径（用户确认的默认选项）
+ */
+export type LocationLevel = 'province' | 'city' | 'district' | 'full';
+
+// ══════════════════════════════════════════════════════════
+// 功能5：相似照片聚类（非精确重复）
+// ══════════════════════════════════════════════════════════
+
+/** 相似照片组（pHash 距离 6-15，非精确重复） */
+export interface SimilarGroup {
+  groupId: string;
+  files: PhotoFileInfo[];
+  /** 建议保留的文件索引（computeKeepScore 评分最高） */
+  keepIndex: number;
+  /** pHash 距离范围（组内最大距离） */
+  maxDistance: number;
+  /** 平均 pHash 距离 */
+  avgDistance: number;
+}
+
+// ══════════════════════════════════════════════════════════
+// 功能6：批量重命名
+// ══════════════════════════════════════════════════════════
+
+/** 重命名预览条目 */
+export interface RenamePreviewItem {
+  photo: PhotoFileInfo;
+  oldName: string;
+  newName: string;
+  /** 冲突处理：序号后缀 */
+  conflictSuffix?: number;
+}
+
+/** 重命名模板变量 */
+export interface RenameTemplateVars {
+  date: string;       // 2024-01-15
+  location: string;   // 上海
+  seq: string;        // 001
+  camera: string;     // iPhone15Pro
+  original: string;   // 原文件名（不含扩展名）
+}
+
+// ══════════════════════════════════════════════════════════
+// 功能1：按人物归类（人脸聚类）
+// ══════════════════════════════════════════════════════════
+
+/** 单个人脸 descriptor + 位置信息 */
+export interface FaceRecord {
+  /** 128 维 face-api descriptor */
+  descriptor: Float32Array;
+  /** 人脸在图片中的相对位置（0-1） */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** 检测置信度 */
+  score: number;
+  /** 所属照片 ID */
+  photoId: string;
+}
+
+/** 人脸聚类组 */
+export interface FaceCluster {
+  clusterId: string;
+  /** 组内所有人脸记录 */
+  faces: FaceRecord[];
+  /** 关联的照片列表（去重） */
+  photos: PhotoFileInfo[];
+  /** 代表性人脸（面积最大/置信度最高） */
+  representativeFace: FaceRecord;
+  /** 组内照片数 */
+  photoCount: number;
+}
+
+/** 人脸聚类结果 */
+export interface FaceClusterResult {
+  clusters: FaceCluster[];
+  /** 未识别人脸的照片 */
+  noFacePhotos: PhotoFileInfo[];
+  /** 总处理照片数 */
+  totalPhotos: number;
+  /** 检测到人脸的照片数 */
+  photosWithFaces: number;
+  /** 处理失败的照片数（模型加载失败/读取异常等） */
+  failedPhotos: number;
+}
+
+// ══════════════════════════════════════════════════════════
+// 功能3：时间线/日历视图
+// ══════════════════════════════════════════════════════════
+
+/** 时间线分组（按年-月） */
+export interface TimelineGroup {
+  key: string;        // "2024-03"
+  year: number;
+  month: number;
+  photos: PhotoFileInfo[];
+  /** 是否包含异常日期（年份 < 2000 或 > 当前年+1） */
+  hasAnomaly: boolean;
+}
+
+/** 日历日期项 */
+export interface CalendarDay {
+  date: Date;
+  photos: PhotoFileInfo[];
+  isCurrentMonth: boolean;
+  isAnomaly: boolean;
+}
+
 /** EXIF 编辑项 */
 export interface ExifEditItem {
   file: PhotoFileInfo;

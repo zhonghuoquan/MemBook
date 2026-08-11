@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { THEME_BACKGROUNDS, GRADIENT_BACKGROUNDS, TEXTURE_BACKGROUNDS } from '../../../types';
 
@@ -15,6 +15,11 @@ interface BackgroundPickerProps {
   onApplyToAll: (color: string) => void;
 }
 
+// EyeDropper API 类型声明（Chromium 系浏览器支持，TS 无内置类型）
+interface EyeDropperResult { sRGBHex: string; }
+interface EyeDropperInterface { open: () => Promise<EyeDropperResult>; }
+type EyeDropperConstructor = new () => EyeDropperInterface;
+
 // 纹理预览生成（CSS 背景图案）
 const TEXTURE_STYLES: Record<string, React.CSSProperties> = {
   'texture-ricepaper': { backgroundColor: '#F5F0E8', backgroundImage: 'radial-gradient(circle, #E8E0D0 1px, transparent 1px)', backgroundSize: '8px 8px' },
@@ -29,6 +34,8 @@ export function BackgroundPicker({ currentPageBg, onApplyBg, onApplyToAll }: Bac
   const { t } = useTranslation();
   const [tab, setTab] = useState<BgTab>('solid');
   const [applyToAll, setApplyToAll] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const colorInputRef = useRef<HTMLInputElement>(null);
 
   const handleApply = useCallback((value: string) => {
     if (applyToAll) {
@@ -37,6 +44,29 @@ export function BackgroundPicker({ currentPageBg, onApplyBg, onApplyToAll }: Bac
       onApplyBg(value);
     }
   }, [applyToAll, onApplyBg, onApplyToAll]);
+
+  // 屏幕取色（EyeDropper API）：优于系统取色器的吸管，体验更流畅
+  // Chromium 系浏览器（含 Tauri WebView2）支持；不支持时回退到 color input
+  const handleEyeDropper = useCallback(async () => {
+    const EyeDropperClass = (window as unknown as { EyeDropper?: EyeDropperConstructor }).EyeDropper;
+    if (!EyeDropperClass) {
+      // 不支持 EyeDropper：回退到系统取色器
+      colorInputRef.current?.click();
+      return;
+    }
+    try {
+      setPicking(true);
+      const eyeDropper = new EyeDropperClass();
+      const result = await eyeDropper.open();
+      if (result?.sRGBHex) {
+        handleApply(result.sRGBHex);
+      }
+    } catch {
+      // 用户取消取色，忽略
+    } finally {
+      setPicking(false);
+    }
+  }, [handleApply]);
 
   return (
     <div className="space-y-3">
@@ -122,14 +152,31 @@ export function BackgroundPicker({ currentPageBg, onApplyBg, onApplyToAll }: Bac
         </div>
       )}
 
-      {/* 自定义取色器 */}
+      {/* 自定义取色器 + 屏幕吸管 */}
       <div className="flex items-center gap-2">
         <input
+          ref={colorInputRef}
           type="color"
           value={currentPageBg?.startsWith('#') ? currentPageBg : '#FFFFFF'}
           onChange={(e) => handleApply(e.target.value)}
           className="w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer p-0 bg-transparent"
         />
+        <button
+          onClick={handleEyeDropper}
+          disabled={picking}
+          title={t('editor.tools.background.eyeDropper')}
+          className={`w-8 h-8 rounded-[var(--radius-sm)] border flex items-center justify-center transition-colors cursor-pointer
+            ${picking
+              ? 'border-[var(--color-brand)] text-[var(--color-brand)] bg-[var(--color-surface-selected)]'
+              : 'border-[var(--color-border)] text-[var(--color-gray-500)] bg-white hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]'
+            } disabled:cursor-wait`}
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="M11.5 2.5l2 2L6 12H3v-3l8.5-8.5z" />
+            <path d="M10 4l2 2" />
+            <path d="M3 14h10" />
+          </svg>
+        </button>
         <span className="text-[10px] text-[var(--color-gray-400)]">{t('editor.tools.background.customPicker')}</span>
       </div>
 

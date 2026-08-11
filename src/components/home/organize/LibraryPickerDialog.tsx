@@ -140,7 +140,7 @@ export function LibraryPickerDialog({ open, onClose, onSelect }: LibraryPickerDi
         </div>
 
         {/* 项目列表 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <svg className="w-8 h-8 animate-spin text-[var(--color-brand)]" viewBox="0 0 24 24" fill="none">

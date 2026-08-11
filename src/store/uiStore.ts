@@ -6,6 +6,8 @@ import type {
 import { STORAGE_MODE_KEY } from '../types';
 import type { TierPattern, GooglePhotosDensity, GooglePhotosLayoutRhythm, GooglePhotosDateGrouping } from '../engine/google-photos-layout';
 import { MIN_PANEL_WIDTH, MAX_PANEL_WIDTH, STORAGE_KEYS } from '../config/appConfig';
+// editorStore 在 setActivePanel 中按需引用，避免顶部循环依赖
+import { useEditorStore } from './editorStore';
 
 /* ── 智能编排持久化设置 ── */
 export interface SmartLayoutSettings {
@@ -187,7 +189,16 @@ export const useUIStore = create<UIState>((set) => ({
   pendingImportPaths: null,
 
   setViewMode: (mode) => set({ viewMode: mode }),
-  setActivePanel: (panel) => set({ activePanel: panel }),
+  setActivePanel: (panel) => {
+    set({ activePanel: panel });
+    // 切换离开「工具」面板时自动取消画笔/橡皮擦，避免干扰其他面板操作
+    if (panel !== 'tools') {
+      const { activeTool, setActiveTool } = useEditorStore.getState();
+      if (activeTool === 'brush' || activeTool === 'eraser') {
+        setActiveTool('none');
+      }
+    }
+  },
   setEditFlyoutOpen: (open) => set({ editFlyoutOpen: open }),
   setEditFlyoutTab: (tab) => set({ editFlyoutTab: tab }),
   setEditFlyoutCollapsed: (collapsed) => {

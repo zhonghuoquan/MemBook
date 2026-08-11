@@ -54,8 +54,6 @@ export function ToolsPanel() {
   const setSelectedStickyId = useEditorStore((s) => s.setSelectedStickyId);
   const updateTextElement = useEditorStore((s) => s.updateTextElement);
   const updateStickyNote = useEditorStore((s) => s.updateStickyNote);
-  const bringToFront = useEditorStore((s) => s.bringToFront);
-  const sendToBack = useEditorStore((s) => s.sendToBack);
   const selectedTextEl = currentPage?.textElements?.find((e) => e.id === selectedTextId);
   const selectedStickyNote = currentPage?.stickyNotes?.find((n) => n.id === selectedStickyId);
 
@@ -273,38 +271,23 @@ export function ToolsPanel() {
           )}
         </CollapsibleSection>
 
-        {/* ═══════════════════ 2. 文字 / 便利贴（合并面板） ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.textStickySection')} icon="text" defaultOpen onToggle={() => toggleSection('textSticky')}>
-          {/* 添加按钮 — 只保留添加按钮 */}
-          <div className="flex gap-2 mb-3">
+        {/* ═══════════════════ 2. 文字 ═══════════════════ */}
+        <CollapsibleSection title={t('editor.tools.textSection')} icon="text" defaultOpen onToggle={() => toggleSection('text')}
+          headerAction={
             <button
               onClick={() => handleAddText()}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3
-                         border border-dashed border-[var(--color-primary-400)] rounded-[var(--radius-md)]
-                         text-[12px] text-[var(--color-primary-600)]
+              title={t('editor.tools.addText')}
+              className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)]
+                         border border-[var(--color-primary-400)] text-[var(--color-primary-600)]
                          bg-[var(--color-surface-selected)] cursor-pointer
-                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors font-[500]"
+                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors"
             >
               <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
                 <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
               </svg>
-              {t('editor.tools.addText')}
             </button>
-            <button
-              onClick={() => handleAddSticky()}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3
-                         border border-dashed border-[var(--color-primary-400)] rounded-[var(--radius-md)]
-                         text-[12px] text-[var(--color-primary-600)]
-                         bg-[var(--color-surface-selected)] cursor-pointer
-                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors font-[500]"
-            >
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
-                <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
-              </svg>
-              {t('editor.tools.addSticky')}
-            </button>
-          </div>
-
+          }
+        >
           {/* 文字属性面板（选中文字元素时显示） */}
           {selectedTextEl && (
             <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
@@ -386,20 +369,34 @@ export function ToolsPanel() {
                   </button>
                 </div>
               </div>
-              {/* 层级 */}
-              <div className="flex gap-1.5">
-                <button onClick={() => bringToFront(currentPageIndex, 'text', selectedTextEl.id)}
-                  className="flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)] cursor-pointer transition-colors">
-                  {t('editor.toolbar.bringToFront')}
-                </button>
-                <button onClick={() => sendToBack(currentPageIndex, 'text', selectedTextEl.id)}
-                  className="flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)] cursor-pointer transition-colors">
-                  {t('editor.toolbar.sendToBack')}
-                </button>
-              </div>
             </div>
           )}
 
+          {/* 未选中文字时的提示 */}
+          {!selectedTextEl && (
+            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
+              {t('editor.tools.textHint')}
+            </div>
+          )}
+        </CollapsibleSection>
+
+        {/* ═══════════════════ 3. 便利贴 ═══════════════════ */}
+        <CollapsibleSection title={t('editor.tools.stickySection')} icon="sticky" defaultOpen onToggle={() => toggleSection('sticky')}
+          headerAction={
+            <button
+              onClick={() => handleAddSticky()}
+              title={t('editor.tools.addSticky')}
+              className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)]
+                         border border-[var(--color-primary-400)] text-[var(--color-primary-600)]
+                         bg-[var(--color-surface-selected)] cursor-pointer
+                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors"
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
+                <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
+              </svg>
+            </button>
+          }
+        >
           {/* 便利贴属性面板（选中便利贴时显示） */}
           {selectedStickyNote && (
             <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
@@ -444,50 +441,13 @@ export function ToolsPanel() {
                   ))}
                 </div>
               </div>
-              {/* 大小（调整选中便利贴尺寸） */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">{t('editor.tools.size')}</div>
-                <div className="flex gap-1.5">
-                  {([
-                    { key: 'sm' as const, label: t('editor.tools.sizeSmall'), w: 80, h: 80 },
-                    { key: 'md' as const, label: t('editor.tools.sizeMedium'), w: 120, h: 120 },
-                    { key: 'lg' as const, label: t('editor.tools.sizeLarge'), w: 160, h: 160 },
-                  ]).map(({ key, label, w, h }) => {
-                    const isActive = Math.abs(selectedStickyNote.width - w) < 5 && Math.abs(selectedStickyNote.height - h) < 5;
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => updateStickyNote(currentPageIndex, selectedStickyNote.id, { width: w, height: h })}
-                        className={`flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border cursor-pointer transition-colors
-                          ${isActive
-                            ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
-                            : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'
-                          }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              {/* 层级 */}
-              <div className="flex gap-1.5">
-                <button onClick={() => bringToFront(currentPageIndex, 'sticky', selectedStickyNote.id)}
-                  className="flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)] cursor-pointer transition-colors">
-                  {t('editor.toolbar.bringToFront')}
-                </button>
-                <button onClick={() => sendToBack(currentPageIndex, 'sticky', selectedStickyNote.id)}
-                  className="flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)] cursor-pointer transition-colors">
-                  {t('editor.toolbar.sendToBack')}
-                </button>
-              </div>
             </div>
           )}
 
-          {/* 未选中任何元素时的提示 */}
-          {!selectedTextEl && !selectedStickyNote && (
-            <div className="text-[11px] text-[var(--color-gray-400)] px-3 py-2 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {t('editor.tools.textStickyHint')}
+          {/* 未选中便利贴时的提示 */}
+          {!selectedStickyNote && (
+            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
+              {t('editor.tools.stickyHint')}
             </div>
           )}
         </CollapsibleSection>
@@ -512,30 +472,38 @@ function CollapsibleSection({
   defaultOpen,
   onToggle,
   children,
+  headerAction,
 }: {
   title: string;
   icon?: string;
   defaultOpen: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  /** 标题栏右侧的操作区（如添加按钮），不随展开/收起隐藏 */
+  headerAction?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const toggle = () => { setOpen(!open); onToggle(); };
 
   return (
     <section className="rounded-[var(--radius-md)] border border-[var(--color-border-light)] bg-white overflow-hidden">
-      <button
-        onClick={toggle}
-        className="w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors border-none bg-transparent"
-      >
-        <svg
-          viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-          className={`w-3 h-3 text-[var(--color-gray-400)] transition-transform ${open ? 'rotate-90' : ''}`}
+      <div className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--color-surface-hover)] transition-colors">
+        <button
+          onClick={toggle}
+          className="flex items-center gap-2 flex-1 cursor-pointer border-none bg-transparent p-0"
         >
-          <path d="M4.5 2l4 4-4 4"/>
-        </svg>
-        <span className="text-[12px] font-[500] text-[var(--color-gray-700)]">{title}</span>
-      </button>
+          <svg
+            viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+            className={`w-3 h-3 text-[var(--color-gray-400)] transition-transform ${open ? 'rotate-90' : ''}`}
+          >
+            <path d="M4.5 2l4 4-4 4"/>
+          </svg>
+          <span className="text-[12px] font-[500] text-[var(--color-gray-700)]">{title}</span>
+        </button>
+        {headerAction && (
+          <div className="shrink-0">{headerAction}</div>
+        )}
+      </div>
       {open && (
         <div className="px-3 pb-3">
           {children}

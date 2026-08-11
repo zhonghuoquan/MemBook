@@ -287,7 +287,7 @@ export function PhotoReorderDialog({ open, onClose }: Props) {
       : {
           // 默认显示在工作区左侧，与排版变化面板顶部对齐，左侧距左侧面板 6px
           left: bounds.left + 6,
-          top: 112,
+          top: 152,
         }),
     zIndex: isActive ? 'calc(var(--z-dropdown) + 10)' : 'var(--z-dropdown)',
   };

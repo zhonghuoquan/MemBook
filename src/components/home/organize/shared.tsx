@@ -2,10 +2,12 @@
  * 整理工具共享组件与工具函数
  */
 
+import { useState, useEffect, useRef } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo, ToolProgress, DataSourceMode } from '../../../photo-tools';
 import { formatBytes } from '../../../photo-tools';
+import { getThumbUrl, type ThumbSize } from './thumbCache';
 
 // ── 常量 ────────────────────────────────────────────────
 
@@ -294,5 +296,162 @@ export function PrimaryButton({
     >
       {loading ? t('home.organize.shared.processing') : children}
     </button>
+  );
+}
+
+// ── 共享缩略图组件 ────────────────────────────────────────
+
+/**
+ * 共享缩略图组件（性能优化版）
+ *
+ * 性能优化：
+ * - **IntersectionObserver 懒加载**：只在进入视口（提前 200px）才触发加载，
+ *   避免一次性加载几百张照片
+ * - **Canvas 缩小**：通过 thumbCache 用 createImageBitmap + Canvas 缩小到目标尺寸，
+ *   原始大数据立即释放，blob URL 只持有缩小后的小图（几 KB）
+ * - **全局 LRU 缓存**：同一照片同一尺寸只生成一次，跨组件复用
+ * - **并发去重**：同一照片并发请求只发起一次 IO
+ *
+ * @param photo 照片信息
+ * @param onPreview 点击预览按钮回调（不传则不显示预览按钮）
+ * @param readPhotoData 读取照片二进制（统一入口）
+ * @param aspect 宽高比，默认 'square'
+ * @param size 缩略图尺寸分级，默认 'small'（128px）。日历格子用 'tiny'，网格用 'medium'，大图预览用 'full'
+ * @param lazy 是否启用 IntersectionObserver 懒加载，默认 true
+ */
+export function ThumbImage({
+  photo,
+  onPreview,
+  readPhotoData,
+  aspect = 'square',
+  size = 'small',
+  lazy = true,
+}: {
+  photo: PhotoFileInfo;
+  onPreview?: () => void;
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  aspect?: 'square' | '4/3' | 'video';
+  size?: ThumbSize;
+  lazy?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!photo.thumbUrl);
+  const [failed, setFailed] = useState(false);
+  const [inView, setInView] = useState(!lazy);
+  const [retryCount, setRetryCount] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // IntersectionObserver 懒加载：进入视口（提前 400px）才触发加载
+  useEffect(() => {
+    if (!lazy || inView) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '400px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lazy, inView]);
+
+  // 进入视口后加载缩略图（通过 thumbCache，带缓存 + 并发去重）
+  // 失败时自动重试最多 2 次（间隔 500ms）
+  useEffect(() => {
+    if (!inView) return;
+    if (photo.thumbUrl) return; // Web 模式已有 thumbUrl
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    setLoading(true);
+    setFailed(false);
+    (async () => {
+      try {
+        const u = await getThumbUrl(photo, size, readPhotoData);
+        if (cancelled) return;
+        if (u) {
+          setUrl(u);
+          setLoading(false);
+        } else {
+          // 加载失败，重试（最多 2 次）
+          if (retryCount < 2) {
+            timer = setTimeout(() => setRetryCount((c) => c + 1), 500);
+          } else {
+            setFailed(true);
+            setLoading(false);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          if (retryCount < 2) {
+            timer = setTimeout(() => setRetryCount((c) => c + 1), 500);
+          } else {
+            setFailed(true);
+            setLoading(false);
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [inView, photo, size, readPhotoData, retryCount]);
+
+  const src = photo.thumbUrl || url;
+  const aspectCls = aspect === '4/3' ? 'aspect-[4/3]' : aspect === 'video' ? 'aspect-video' : 'aspect-square';
+
+  // 预览按钮覆盖层（hover 显示眼睛图标）
+  const previewOverlay = onPreview ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onPreview(); }}
+      className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 transition-colors group"
+      title={t('home.organize.dedupe.preview')}
+    >
+      <svg viewBox="0 0 24 24" className="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3.5" />
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      </svg>
+    </button>
+  ) : null;
+
+  if (src) {
+    return (
+      <div ref={containerRef} className={`relative ${aspectCls} bg-[var(--color-gray-100)] overflow-hidden`}>
+        <img
+          src={src}
+          alt={photo.name}
+          className="w-full h-full object-cover"
+          draggable={false}
+          loading="lazy"
+        />
+        {previewOverlay}
+      </div>
+    );
+  }
+
+  // 加载中 / 失败占位
+  return (
+    <div ref={containerRef} className={`relative ${aspectCls} bg-[var(--color-gray-100)] overflow-hidden flex items-center justify-center`}>
+      {loading ? (
+        <div className="w-5 h-5 border-2 border-[var(--color-gray-300)] border-t-[var(--color-gray-500)] rounded-full animate-spin" />
+      ) : failed ? (
+        <svg viewBox="0 0 24 24" className="w-7 h-7 text-[var(--color-gray-300)]" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 9l6 6M15 9l-6 6" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="w-9 h-9 text-[var(--color-gray-300)]" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <path d="M21 15l-5-5L5 21" />
+        </svg>
+      )}
+      {previewOverlay}
+    </div>
   );
 }

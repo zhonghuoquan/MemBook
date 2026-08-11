@@ -332,6 +332,25 @@ export function getSlotZIndex(page: { slotZIndices?: Record<string, number> }, s
 /* ── 画笔工具 ── */
 export type BrushType = 'pencil' | 'brush' | 'marker' | 'highlighter';
 
+/**
+ * 笔触类型样式参数（统一管理四种笔触的视觉差异）
+ * - pencil: 细线、高精度，tension 0.3 让线条更锐利
+ * - brush: 中等粗度，柔和的贝塞尔曲线
+ * - marker: 粗度适中，tension 0.5 平滑
+ * - highlighter: 最粗、半透明、multiply 混合模式模拟荧光笔效果
+ */
+export const BRUSH_STYLE_MAP: Record<BrushType, {
+  widthMultiplier: number;   // 线宽倍数（相对 strokeWidth）
+  tension: number;           // 贝塞尔曲线张力
+  opacityMultiplier: number; // 透明度倍数（highlighter 更透明）
+  blendMode: 'source-over' | 'multiply'; // 混合模式
+}> = {
+  pencil: { widthMultiplier: 1, tension: 0.3, opacityMultiplier: 1, blendMode: 'source-over' },
+  brush: { widthMultiplier: 2.5, tension: 0.5, opacityMultiplier: 1, blendMode: 'source-over' },
+  marker: { widthMultiplier: 1.8, tension: 0.5, opacityMultiplier: 0.85, blendMode: 'source-over' },
+  highlighter: { widthMultiplier: 4, tension: 0.5, opacityMultiplier: 0.4, blendMode: 'multiply' },
+};
+
 export type BrushStroke = {
   id: string;
   points: number[];           // Konva Line points [x1,y1,x2,y2,...] in logical mm

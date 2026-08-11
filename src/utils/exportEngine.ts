@@ -26,6 +26,7 @@ import {
   type SlotRect,
   type PhotoRenderParams,
 } from './sharedRender';
+import { createTextureCanvas } from '../components/editor/canvas/constants';
 import {
   resolveTemplate,
 } from '../types';
@@ -560,10 +561,18 @@ function drawPageBackground(
       return;
     }
   }
-  // 纹理：取基础色填充（Konva 不直接支持 CSS 纹理，画布同样用纯色底）
+  // 纹理：底色 + Canvas 图案填充（与画布 PageBackgroundRect 一致）
   if (value.startsWith('texture-')) {
     ctx.fillStyle = getTextureBaseColor(value);
     ctx.fillRect(0, 0, w, h);
+    const textureCanvas = createTextureCanvas(value);
+    if (textureCanvas) {
+      const pattern = ctx.createPattern(textureCanvas, 'repeat');
+      if (pattern) {
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
     return;
   }
   // 回退纯白
@@ -940,14 +949,16 @@ function drawBrushStroke(ctx: CanvasRenderingContext2D, stroke: BrushStroke, mmT
   ctx.globalCompositeOperation = 'source-over';
 }
 
-/** 绘制文字元素（与编辑器 TextElementNode.tsx 一致：含竖排文字支持） */
+/** 绘制文字元素（与编辑器 TextElementNode.tsx 一致：含竖排文字 + 任意角度旋转支持） */
 function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmToPx: number): void {
+  const scale = mmToPx / MM_TO_PX;
   const tx = te.x * mmToPx;
   const ty = te.y * mmToPx;
   const tw = te.width * mmToPx;
   const th = (te.height ?? 0) * mmToPx;
-  const fs = te.fontSize * (mmToPx / MM_TO_PX);
-  const pad = 4 * (mmToPx / MM_TO_PX);
+  const fs = te.fontSize * scale;
+  const pad = 4 * scale;
+  const rotation = te.rotation ?? 0;
 
   // 空文本处理（与 TextElementNode.tsx 一致：灰色斜体占位文字）
   const hasText = te.text && te.text.length > 0;
@@ -958,12 +969,12 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
   ctx.fillStyle = hasText ? te.color : '#999';
   ctx.textBaseline = 'top';
 
-  // 竖排（春联）模式：rotation === -90 时逐字竖排，从右到左
-  if (te.rotation === -90) {
+  // 竖排（春联）模式：rotation === -90 时逐字竖排，从右到左（不应用旋转变换）
+  if (rotation === -90) {
     ctx.textAlign = 'left';
     const text = te.text || '';
-    const stepY = fs + 2 * (mmToPx / MM_TO_PX);
-    const stepX = fs + 6 * (mmToPx / MM_TO_PX);
+    const stepY = fs + 2 * scale;
+    const stepX = fs + 6 * scale;
     let cx = tx + tw - fs - pad;
     let cy = ty + pad;
     for (const ch of text) {
@@ -982,21 +993,36 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
     return;
   }
 
-  // 横排模式
+  // 任意角度旋转：中心定位（与编辑器 TextElementNode.tsx 一致）
+  // Group: x=cx, y=cy, rotation=θ（无 offset，旋转中心 = 文字框中心）
+  // 在本地坐标系（0,0 = 左上角，tw×th）内绘制横排文字
+  ctx.save();
+  if (rotation !== 0) {
+    const centerX = tx + tw / 2;
+    const centerY = ty + th / 2;
+    ctx.translate(centerX, centerY);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.translate(-tw / 2, -th / 2);
+  } else {
+    ctx.translate(tx, ty);
+  }
+
+  // 横排文字（本地坐标系）
   ctx.textAlign = te.align as CanvasTextAlign;
   const lines = wrapText(ctx, te.text || '', tw - pad * 2);
   const lineHeight = fs * 1.2;
-  let y = ty + pad;
+  let y = pad;
   for (const line of lines) {
-    let x = tx + pad;
-    if (te.align === 'center') x = tx + tw / 2;
-    else if (te.align === 'right') x = tx + tw - pad;
+    let x = pad;
+    if (te.align === 'center') x = tw / 2;
+    else if (te.align === 'right') x = tw - pad;
     ctx.fillText(line, x, y);
     y += lineHeight;
   }
+  ctx.restore();
 }
 
-/** 绘制便利贴（按 style 字段渲染，与 StickyNoteNode.tsx 一致） */
+/** 绘制便利贴（按 style 字段渲染，与 StickyNoteNode.tsx 美化版一致） */
 function drawStickyNote(ctx: CanvasRenderingContext2D, sn: StickyNote, mmToPx: number): void {
   const scale = mmToPx / MM_TO_PX;
   const sx = sn.x * mmToPx;
@@ -1007,69 +1033,128 @@ function drawStickyNote(ctx: CanvasRenderingContext2D, sn: StickyNote, mmToPx: n
   const fs = sn.fontSize * scale;
   const style = sn.style || 'rounded';
 
-  // 与 StickyNoteNode.tsx 一致的圆角/阴影参数，固定像素值按 scale 缩放
-  const cornerRadius = (style === 'square' ? 2 : style === 'rounded' ? 8 : 6) * scale;
-  const shadowBlur = (style === 'shadow' ? 12 : 4) * scale;
-  const shadowOffsetY = (style === 'shadow' ? 6 : 2) * scale;
-  const shadowOpacity = style === 'shadow' ? 0.25 : 0.15;
+  // 与 StickyNoteNode.tsx 美化版一致的圆角/阴影参数
+  const cornerRadius = (style === 'square' ? 3 : style === 'rounded' ? 10 : 8) * scale;
+  const shadowBlur = (style === 'shadow' ? 18 : 8) * scale;
+  const shadowOffsetY = (style === 'shadow' ? 10 : 4) * scale;
+  const shadowOpacity = style === 'shadow' ? 0.32 : 0.18;
+  const foldSize = Math.min(sw, sh) * 0.14;
+  // 本地坐标系：中心 (0, 0)，左上角 (-sw/2, -sh/2)
+  const left = -sw / 2;
+  const top = -sh / 2;
 
   ctx.save();
-  // 完整复刻 Konva Group transform: T(x,y) * R(θ) * T(-offsetX, -offsetY)
-  // Group: x=sx+sw/2, y=sy+sh/2, offsetX=sw/2, offsetY=sh/2, rotation=θ
-  // Rect: x=-sw/2, y=-sh/2（在 Group 自身坐标系中），中心在 Group(0,0)
-  // 三段 translate 确保旋转中心与编辑器完全一致（旋转时也不会偏移）
+  // 与 StickyNoteNode.tsx 一致：Group x=cx, y=cy, rotation=θ（中心定位，无 offset）
+  // 旋转中心 = 便利贴中心，与编辑器完全一致
   ctx.translate(sx + sw / 2, sy + sh / 2);
   ctx.rotate((sn.rotation * Math.PI) / 180);
-  ctx.translate(-sw / 2, -sh / 2);
 
-  // 背景矩形
+  // 背景矩形（纸张底色 + 柔和阴影）
   ctx.fillStyle = sn.color;
   ctx.shadowColor = `rgba(0,0,0,${shadowOpacity})`;
   ctx.shadowBlur = shadowBlur;
   ctx.shadowOffsetY = shadowOffsetY;
-  roundRect(ctx, -sw / 2, -sh / 2, sw, sh, cornerRadius);
+  roundRect(ctx, left, top, sw, sh, cornerRadius);
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
 
-  // 边框（与 StickyNoteNode.tsx 一致：非 hover/selected 态的浅边框）
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  // 边框（细微描边）
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
   ctx.lineWidth = 0.5 * scale;
-  roundRect(ctx, -sw / 2, -sh / 2, sw, sh, cornerRadius);
+  roundRect(ctx, left, top, sw, sh, cornerRadius);
   ctx.stroke();
 
-  // tape 样式：绘制胶带装饰（与 StickyNoteNode.tsx 一致，尺寸按 scale 缩放）
+  // 顶部高光层：半透明白色渐变（从上到下淡出，增强纸张质感）
+  const topGrad = ctx.createLinearGradient(0, top, 0, top + sh * 0.35);
+  topGrad.addColorStop(0, 'rgba(255,255,255,0.28)');
+  topGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = topGrad;
+  roundRect(ctx, left, top, sw, sh * 0.35, cornerRadius);
+  ctx.fill();
+
+  // 底部阴影渐变：透明到淡黑（增强深度）
+  const bottomGrad = ctx.createLinearGradient(0, top + sh * 0.65, 0, top + sh);
+  bottomGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  bottomGrad.addColorStop(1, 'rgba(0,0,0,0.1)');
+  ctx.fillStyle = bottomGrad;
+  roundRect(ctx, left, top, sw, sh, cornerRadius);
+  ctx.fill();
+
+  // rounded 样式：右上角折角（模拟便签纸撕开效果）
+  if (style === 'rounded') {
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath();
+    ctx.moveTo(left + sw - foldSize, top);
+    ctx.lineTo(left + sw, top);
+    ctx.lineTo(left + sw, top + foldSize);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 0.5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(left + sw - foldSize, top);
+    ctx.lineTo(left + sw, top + foldSize);
+    ctx.stroke();
+  }
+
+  // shadow 样式：对角渐变（右上到左下，增强3D投影）
+  if (style === 'shadow') {
+    const diagGrad = ctx.createLinearGradient(left + sw, top, left, top + sh);
+    diagGrad.addColorStop(0, 'rgba(255,255,255,0.18)');
+    diagGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
+    ctx.fillStyle = diagGrad;
+    roundRect(ctx, left, top, sw, sh, cornerRadius);
+    ctx.fill();
+  }
+
+  // tape 样式：米黄色胶带，对角倾斜（更真实）
   if (style === 'tape') {
     ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.translate(0, top - 7 * scale); // 胶带中心在顶部边缘上方
+    ctx.rotate((-4 * Math.PI) / 180);
+    const tapeW = sw * 0.36;
+    const tapeH = 16 * scale;
+    ctx.fillStyle = 'rgba(255, 224, 160, 0.72)';
+    ctx.strokeStyle = 'rgba(180, 140, 60, 0.18)';
     ctx.lineWidth = 0.5 * scale;
-    ctx.translate(-sw / 4, -sh / 2 - 4 * scale);
-    ctx.rotate((-2 * Math.PI) / 180);
-    roundRect(ctx, 0, 0, sw / 2, 12 * scale, 2 * scale);
+    ctx.shadowColor = 'rgba(0,0,0,0.1)';
+    ctx.shadowBlur = 4 * scale;
+    ctx.shadowOffsetY = 1 * scale;
+    roundRect(ctx, -tapeW / 2, 0, tapeW, tapeH, 1 * scale);
     ctx.fill();
     ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    // 胶带边缘锯齿（细虚线模拟撕开边缘）
+    ctx.strokeStyle = 'rgba(180, 140, 60, 0.2)';
+    ctx.lineWidth = 0.5 * scale;
+    ctx.setLineDash([1.5 * scale, 1.5 * scale]);
+    ctx.beginPath();
+    ctx.moveTo(-tapeW / 2, 0);
+    ctx.lineTo(tapeW / 2, 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
-  // 文字（内边距 6px × scale，与 StickyNoteNode.tsx 一致）
-  const pad = 6 * scale;
+  // 文字（内边距 8px，行高 1.4，与 StickyNoteNode.tsx 美化版一致）
+  const pad = 8 * scale;
   const textWrapW = sw - pad * 2;
   const textH = sh - pad * 2;
-  // 空文本处理（与 StickyNoteNode.tsx 一致：灰色斜体占位文字）
   const hasText = sn.text && sn.text.length > 0;
-  ctx.fillStyle = hasText ? '#333' : '#999';
+  ctx.fillStyle = hasText ? '#2c2c2c' : '#999';
   ctx.font = `${hasText ? 'normal' : 'italic'} ${fs}px ${sn.fontFamily || 'sans-serif'}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   const displayText = hasText ? sn.text : '';
   const lines = wrapText(ctx, displayText, textWrapW);
-  const lineHeight = fs * 1.2;
-  let y = -sh / 2 + pad;
+  const lineHeight = fs * 1.4;
+  let y = top + pad;
   for (const line of lines) {
     // 高度限制：超出便利贴底部的文字不绘制（与 Konva Text height + ellipsis 行为一致）
-    if (y + fs > -sh / 2 + pad + textH) break;
-    ctx.fillText(line, -sw / 2 + pad, y);
+    if (y + fs > top + pad + textH) break;
+    ctx.fillText(line, left + pad, y);
     y += lineHeight;
   }
   ctx.restore();

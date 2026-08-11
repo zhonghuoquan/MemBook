@@ -204,12 +204,22 @@ export async function convertToJpg(
   if (e === '.livp') return convertLivpToJpg(data, options);
   if (e === '.heic' || e === '.heif') return convertHeicToJpg(data, options);
   // JPG/JPEG：通过 Canvas 重新编码，清除非标准 EXIF 结构（修复 piexifjs 无法处理的 JPEG）
-  // 不保留原 EXIF（这些照片本就无日期，且原 EXIF 结构是导致修改失败的原因）
+  // 重编码前先读取原始 EXIF，重编码后写回，避免误杀原始 EXIF 数据
   if (e === '.jpg' || e === '.jpeg') {
     const { quality = 0.95, onProgress } = options;
+    let exif: Record<string, unknown> | null = null;
+    try {
+      exif = await readExifFull(data);
+    } catch {
+      // EXIF 读取失败不阻断转换
+    }
     onProgress?.({ phase: 'convert', current: 0, total: 1, message: 'JPG 重编码修复中...' });
     const blob = await convertImageViaCanvas(data, quality);
     onProgress?.({ phase: 'done', current: 1, total: 1, message: '修复完成' });
+    // 有原始 EXIF 时写回（通过 embedResult 用 embedExifIntoJpeg 写入）
+    if (exif) {
+      return embedResult(blob, exif);
+    }
     return { blob, exif: null };
   }
   if (CANVAS_EXTS.has(e)) return convertImageToJpg(data, options);

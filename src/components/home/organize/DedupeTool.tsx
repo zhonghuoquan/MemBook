@@ -22,8 +22,9 @@ import {
   type DedupeGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
+import { evictFromCache } from './thumbCache';
 
 interface DedupeToolProps extends ToolProps {
   /** 去重结果（受控，由父组件持久化到 tab 级别，切换标签不丢失） */
@@ -40,6 +41,8 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
   const [progress, setProgress] = useState<ToolProgress | null>(null);
   const [confirmMode, setConfirmMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 最近删除的照片（用于撤销）
+  const [lastDeleted, setLastDeleted] = useState<PhotoFileInfo[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 受控状态：result 和 overrides 由父组件持久化（切换标签不丢失）
@@ -183,12 +186,16 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
       return;
     }
     setDeleting(true);
+    // 保存删除前的照片列表，用于撤销
+    const deletedPhotos = [...toDelete];
 
     let ok = 0, fail = 0;
     try {
       if (sourceMode === 'library') {
         for (const f of toDelete) {
           if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
+          // 清理 thumbCache 中缓存的此照片缩略图
+          evictFromCache(f.id);
           ok++;
         }
       } else if (isTauri()) {
@@ -226,6 +233,9 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
         type: fail > 0 ? 'warning' : 'success',
         message: fail > 0 ? t('home.organize.dedupe.toastDeletedWithFail', { ok, fail }) : t('home.organize.dedupe.toastDeleted', { ok }),
       });
+      setLastDeleted(deletedPhotos);
+      // 撤销倒计时：5秒后自动清除撤销状态
+      setTimeout(() => setLastDeleted(null), 5000);
       updateDedupeState(null, {});
       setConfirmMode(false);
     } catch (err) {
@@ -295,6 +305,33 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
           onClose={closePreview}
           readPhotoData={readPhotoData}
         />
+      )}
+
+      {/* 撤销删除栏 */}
+      {lastDeleted && lastDeleted.length > 0 && (
+        <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between">
+          <span className="text-xs text-amber-800">
+            {t('home.organize.dedupe.undoHint', {
+              count: lastDeleted.length,
+              defaultValue: '已删除 {{count}} 张照片',
+            })}
+          </span>
+          <button
+            onClick={() => {
+              // 通过 onPhotosUpdate 恢复被删除的照片
+              onPhotosUpdate((prev) => {
+                const existingIds = new Set(prev.map((p) => p.id));
+                const toRestore = lastDeleted.filter((p) => !existingIds.has(p.id));
+                return [...prev, ...toRestore];
+              });
+              setLastDeleted(null);
+              addToast({ type: 'info', message: t('home.organize.dedupe.undoDone', '已撤销删除') });
+            }}
+            className="text-xs font-medium text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded border-none cursor-pointer transition-colors"
+          >
+            {t('home.organize.dedupe.undo', '撤销')}
+          </button>
+        </div>
       )}
     </ToolCard>
   );
@@ -492,6 +529,8 @@ function DedupeResults({
                             photo={f}
                             onPreview={() => onPreview(g, i)}
                             readPhotoData={readPhotoData}
+                            aspect="4/3"
+                            size="medium"
                           />
 
                           {/* 日期标签（右下角，叠在缩略图上） */}
@@ -548,113 +587,6 @@ function DedupeResults({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-/**
- * 缩略图组件
- *
- * - Web 模式有 thumbUrl：直接显示
- * - Tauri/library 模式无 thumbUrl：用 readPhotoData 异步加载完整字节创建 blob URL
- *
- * 点击缩略图（hover 显示的眼睛图标）打开大图预览，不触发卡片切换。
- */
-function ThumbImage({
-  photo,
-  onPreview,
-  readPhotoData,
-}: {
-  photo: PhotoFileInfo;
-  onPreview: () => void;
-  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
-}) {
-  const { t } = useTranslation();
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!photo.thumbUrl);
-  const [failed, setFailed] = useState(false);
-
-  // 无 thumbUrl 时按需加载（Tauri/library 模式）
-  useEffect(() => {
-    if (photo.thumbUrl) return; // Web 模式已有 thumbUrl，无需加载
-    let revoked = false;
-    let url: string | null = null;
-
-    setLoading(true);
-    setFailed(false);
-
-    (async () => {
-      try {
-        const buf = await readPhotoData(photo);
-        if (revoked || !buf) {
-          if (!revoked) { setFailed(true); setLoading(false); }
-          return;
-        }
-        const blob = new Blob([buf], { type: photo.mimeType || 'image/jpeg' });
-        url = URL.createObjectURL(blob);
-        if (revoked) { URL.revokeObjectURL(url); return; }
-        setBlobUrl(url);
-        setLoading(false);
-      } catch {
-        if (!revoked) { setFailed(true); setLoading(false); }
-      }
-    })();
-
-    return () => {
-      revoked = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [photo, readPhotoData]);
-
-  const src = photo.thumbUrl || blobUrl;
-
-  // 预览按钮覆盖层（hover 显示眼睛图标）
-  const previewOverlay = (
-    <button
-      onClick={(e) => { e.stopPropagation(); onPreview(); }}
-      className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 transition-colors group"
-      title={t('home.organize.dedupe.preview')}
-    >
-      <svg viewBox="0 0 24 24" className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3.5" />
-        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-      </svg>
-    </button>
-  );
-
-  if (src) {
-    return (
-      <div className="relative aspect-[4/3] bg-[var(--color-gray-100)] overflow-hidden">
-        <img
-          src={src}
-          alt={photo.name}
-          className="w-full h-full object-cover"
-          draggable={false}
-          loading="lazy"
-        />
-        {previewOverlay}
-      </div>
-    );
-  }
-
-  // 加载中 / 失败占位
-  return (
-    <div className="relative aspect-[4/3] bg-[var(--color-gray-100)] overflow-hidden flex items-center justify-center">
-      {loading ? (
-        <div className="w-5 h-5 border-2 border-[var(--color-gray-300)] border-t-[var(--color-gray-500)] rounded-full animate-spin" />
-      ) : failed ? (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 text-[var(--color-gray-300)]" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M9 9l6 6M15 9l-6 6" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" className="w-10 h-10 text-[var(--color-gray-300)]" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <circle cx="9" cy="9" r="2" />
-          <path d="M21 15l-5-5L5 21" />
-        </svg>
-      )}
-      {previewOverlay}
     </div>
   );
 }

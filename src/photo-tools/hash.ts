@@ -21,7 +21,7 @@
  * - 文件路径字符串（Tauri 桌面端模式，通过 plugin-fs 读取）
  */
 
-import type { PhotoFileInfo, DedupeGroup, DedupeResult, ToolProgress } from './types';
+import type { PhotoFileInfo, DedupeGroup, DedupeResult, ToolProgress, SimilarGroup } from './types';
 import { logger } from '../utils/logger';
 import { computePHash, hammingDistance, DEFAULT_PHASH_THRESHOLD } from './perceptual-hash';
 
@@ -340,14 +340,24 @@ export async function deduplicatePhotos(
   onProgress?.({ phase: 'full-hash', current: 0, total: headCandidates.length, message: '计算完整 SHA256 哈希...' });
   const fullHashGroups = new Map<string, PhotoFileInfo[]>();
   // 缓存 Phase 3 读取的完整文件数据，供 Phase 4 pHash 复用，避免重复读取
+  // 使用 LRU 限制缓存上限（200 项，约 200MB 假设单图 1MB），防止 OOM
+  const FULL_CACHE_MAX = 200;
   const fullDataCache = new Map<string, ArrayBuffer>();
+  function setFullDataCache(id: string, data: ArrayBuffer): void {
+    if (fullDataCache.size >= FULL_CACHE_MAX) {
+      // 淘汰最旧条目
+      const firstKey = fullDataCache.keys().next().value;
+      if (firstKey !== undefined) fullDataCache.delete(firstKey);
+    }
+    fullDataCache.set(id, data);
+  }
 
   await mapWithConcurrency(
     headCandidates,
     async (p) => {
       try {
         const { data } = await readPhotoData(p);
-        fullDataCache.set(p.id, data);
+        setFullDataCache(p.id, data);
         const fullHash = await sha256(data);
         const group = fullHashGroups.get(fullHash) ?? [];
         group.push(p);
@@ -424,6 +434,9 @@ export async function deduplicatePhotos(
     visualDuplicateCount = visualResult.duplicateCount ?? 0;
     visualFreedBytes = visualResult.freedBytes ?? 0;
   }
+
+  // Phase 4 完成后释放 fullDataCache 内存
+  fullDataCache.clear();
 
   // 合并结果
   const allGroups = [...exactGroups, ...visualGroups];
@@ -739,4 +752,259 @@ export function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// ══════════════════════════════════════════════════════════
+// 功能5：相似照片聚类（非精确重复，pHash 距离 6-15）
+// ══════════════════════════════════════════════════════════
+
+export interface FindSimilarOptions {
+  /** 进度回调 */
+  onProgress?: (progress: ToolProgress) => void;
+  /** 中止信号 */
+  signal?: AbortSignal;
+  /** pHash 距离下限（> 该值才视为"相似"而非"重复"），默认 6 */
+  minDistance?: number;
+  /** pHash 距离上限（≤ 该值视为相似），默认 15 */
+  maxDistance?: number;
+  /** 读取照片数据 */
+  readData?: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+}
+
+/**
+ * 查找相似照片（非精确重复）
+ *
+ * 与 deduplicatePhotos 的区别：
+ * - deduplicatePhotos 找 pHash 距离 ≤ 5 的视觉重复
+ * - findSimilarPhotos 找 pHash 距离 6-15 的相似照片（连拍/同场景）
+ *
+ * 相似组只展示不自动标记删除，用户手动选择。
+ *
+ * 算法：
+ * 1. 并发计算所有照片的 pHash
+ * 2. LSH 加速桶间比对（鸽巢原理，零假阴性）
+ * 3. 并查集合并相似组
+ * 4. computeKeepScore 选最佳保留项
+ */
+export async function findSimilarPhotos(
+  photos: PhotoFileInfo[],
+  options: FindSimilarOptions = {},
+): Promise<SimilarGroup[]> {
+  const { onProgress, signal } = options;
+  const minDist = options.minDistance ?? 6;
+  const maxDist = options.maxDistance ?? 15;
+  const readData = options.readData;
+
+  if (photos.length < 2) return [];
+  if (!readData) {
+    logger.warn('[findSimilar] 缺少 readData，无法计算 pHash');
+    return [];
+  }
+
+  // ── 计算所有照片的 pHash ──
+  onProgress?.({ phase: 'phash', current: 0, total: photos.length, message: '计算感知哈希...' });
+  const phashMap = new Map<string, string>(); // photoId → pHash
+  const photoById = new Map<string, PhotoFileInfo>();
+
+  let doneCount = 0;
+  await mapWithConcurrency(
+    photos,
+    async (p) => {
+      if (signal?.aborted) return;
+      try {
+        const data = await readData(p);
+        if (data) {
+          const phash = await computePHash(data);
+          if (phash) {
+            phashMap.set(p.id, phash);
+            photoById.set(p.id, p);
+          }
+        }
+      } catch (err) {
+        logger.warn(`[findSimilar] pHash 计算失败 ${p.name}:`, err);
+      }
+      doneCount++;
+      onProgress?.({ phase: 'phash', current: doneCount, total: photos.length, message: `感知哈希 ${doneCount}/${photos.length}` });
+    },
+    8,
+    undefined,
+    signal,
+  );
+
+  const uniqueHashes = [...new Set(phashMap.values())];
+  const hashToPhotos = new Map<string, PhotoFileInfo[]>();
+  for (const p of photos) {
+    const h = phashMap.get(p.id);
+    if (!h) continue;
+    const arr = hashToPhotos.get(h) ?? [];
+    arr.push(p);
+    hashToPhotos.set(h, arr);
+  }
+
+  if (uniqueHashes.length < 2) return [];
+
+  // ── 并查集 ──
+  const parent = new Map<string, string>();
+  for (const id of photoById.keys()) parent.set(id, id);
+  function find(x: string): string {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    let cur = x;
+    while (parent.get(cur) !== root) { const n = parent.get(cur)!; parent.set(cur, root); cur = n; }
+    return root;
+  }
+  function union(a: string, b: string): void {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  // ── LSH 加速桶间比较 ──
+  // 鸽巢原理：若两 hash 差异位数 ≤ maxDist，至少一个子串完全相同
+  const numLshChunks = Math.min(maxDist + 1, 16);
+  const useLsh = numLshChunks >= 2 && uniqueHashes.length > 1;
+
+  if (useLsh) {
+    const chunkLen = Math.floor(16 / numLshChunks);
+    const remainder = 16 % numLshChunks;
+    const chunkBoundaries: Array<[number, number]> = [];
+    let pos = 0;
+    for (let i = 0; i < numLshChunks; i++) {
+      const size = chunkLen + (i < remainder ? 1 : 0);
+      if (size > 0) { chunkBoundaries.push([pos, pos + size]); pos += size; }
+    }
+
+    const lshIndexes: Array<Map<string, number[]>> = chunkBoundaries.map(() => new Map());
+    for (let idx = 0; idx < uniqueHashes.length; idx++) {
+      const h = uniqueHashes[idx];
+      for (let c = 0; c < chunkBoundaries.length; c++) {
+        const [start, end] = chunkBoundaries[c];
+        const key = h.slice(start, end);
+        const arr = lshIndexes[c].get(key) ?? [];
+        arr.push(idx);
+        lshIndexes[c].set(key, arr);
+      }
+    }
+
+    const compared = new Set<string>();
+    for (let idx = 0; idx < uniqueHashes.length; idx++) {
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+      const h = uniqueHashes[idx];
+      for (let c = 0; c < chunkBoundaries.length; c++) {
+        const [start, end] = chunkBoundaries[c];
+        const key = h.slice(start, end);
+        const arr = lshIndexes[c].get(key);
+        if (!arr) continue;
+        for (const otherIdx of arr) {
+          if (otherIdx <= idx) continue;
+          const pairKey = `${idx},${otherIdx}`;
+          if (compared.has(pairKey)) continue;
+          compared.add(pairKey);
+          const dist = hammingDistance(h, uniqueHashes[otherIdx]);
+          // 相似但不重复：距离在 (minDist, maxDist] 范围内
+          if (dist > minDist && dist <= maxDist) {
+            const idA = hashToPhotos.get(uniqueHashes[idx])![0].id;
+            const idB = hashToPhotos.get(uniqueHashes[otherIdx])![0].id;
+            union(idA, idB);
+          }
+        }
+      }
+      if ((idx + 1) % 50 === 0 || idx === uniqueHashes.length - 1) {
+        onProgress?.({ phase: 'compare', current: idx + 1, total: uniqueHashes.length, message: `相似度比对 ${idx + 1}/${uniqueHashes.length}` });
+      }
+    }
+  } else {
+    // Fallback: O(M²) 全比较
+    for (let i = 0; i < uniqueHashes.length; i++) {
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+      for (let j = i + 1; j < uniqueHashes.length; j++) {
+        const dist = hammingDistance(uniqueHashes[i], uniqueHashes[j]);
+        if (dist > minDist && dist <= maxDist) {
+          const idA = hashToPhotos.get(uniqueHashes[i])![0].id;
+          const idB = hashToPhotos.get(uniqueHashes[j])![0].id;
+          union(idA, idB);
+        }
+      }
+      if ((i + 1) % 50 === 0 || i === uniqueHashes.length - 1) {
+        onProgress?.({ phase: 'compare', current: i + 1, total: uniqueHashes.length, message: `相似度比对 ${i + 1}/${i + 1}` });
+      }
+    }
+  }
+
+  // ── 收集相似组 ──
+  const ufGroups = new Map<string, string[]>();
+  for (const id of photoById.keys()) {
+    const root = find(id);
+    const group = ufGroups.get(root) ?? [];
+    group.push(id);
+    ufGroups.set(root, group);
+  }
+
+  /**
+   * 二次质检拆组：并查集通过传递性合并（A≈B、B≈C → A、B、C 同组），
+   * 但 A 与 C 的 pHash 距离可能远超 maxDist（链式蔓延）。
+   * 对每组按"与基准成员距离 ≤ maxDist"贪心拆分，保证组内任意成员与基准的差异在合理范围。
+   */
+  function splitRunawayGroup(ids: string[]): string[][] {
+    const remaining = [...ids];
+    const result: string[][] = [];
+    while (remaining.length > 0) {
+      const base = remaining.shift()!;
+      const group: string[] = [base];
+      const rest: string[] = [];
+      for (const id of remaining) {
+        const d = hammingDistance(phashMap.get(base)!, phashMap.get(id)!);
+        if (d <= maxDist) group.push(id);
+        else rest.push(id);
+      }
+      result.push(group);
+      remaining.length = 0;
+      remaining.push(...rest);
+    }
+    return result;
+  }
+
+  // 构建相似组（仅保留 ≥ 2 个文件的组）
+  const similarGroups: SimilarGroup[] = [];
+  let groupCounter = 0;
+  for (const [, ids] of ufGroups) {
+    if (ids.length < 2) continue;
+    // 二次质检：拆掉链式蔓延的组（组内可能出现差异过大的照片）
+    for (const subIds of splitRunawayGroup(ids)) {
+      if (subIds.length < 2) continue;
+      const groupPhotos = subIds.map((id) => photoById.get(id)!);
+
+      // 计算组内两两距离（直接用 pHash 全量计算，覆盖间接合并的成员对）
+      let maxDistInGroup = 0;
+      let sumDist = 0;
+      let distCount = 0;
+      for (let i = 0; i < subIds.length; i++) {
+        for (let j = i + 1; j < subIds.length; j++) {
+          const d = hammingDistance(phashMap.get(subIds[i])!, phashMap.get(subIds[j])!);
+          maxDistInGroup = Math.max(maxDistInGroup, d);
+          sumDist += d;
+          distCount++;
+        }
+      }
+
+      // 选最佳保留项（复用 computeKeepScore 逻辑）
+      let bestIdx = 0;
+      let bestScore = -Infinity;
+      const maxFileSize = Math.max(...groupPhotos.map((p) => p.size));
+      for (let i = 0; i < groupPhotos.length; i++) {
+        const score = computeKeepScore(groupPhotos[i], maxFileSize);
+        if (score > bestScore) { bestScore = score; bestIdx = i; }
+      }
+
+      similarGroups.push({
+        groupId: `similar-${groupCounter++}`,
+        files: groupPhotos,
+        keepIndex: bestIdx,
+        maxDistance: maxDistInGroup,
+        avgDistance: distCount > 0 ? sumDist / distCount : 0,
+      });
+    }
+  }
+
+  onProgress?.({ phase: 'done', current: similarGroups.length, total: similarGroups.length, message: `找到 ${similarGroups.length} 组相似照片` });
+  return similarGroups;
 }
