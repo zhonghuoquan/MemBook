@@ -21,6 +21,41 @@
 
 ---
 
+## 仓库与同步
+
+本项目代码在 **GitHub** 与 **cnb.cool**（腾讯云代码托管）双平台维护，内容保持一致。
+
+| 平台 | 仓库地址 | 特点 |
+| --- | --- | --- |
+| **GitHub** | <https://github.com/zhonghuoquan/MemBook> | 国际主流平台，支持 Actions CI、Pages 静态托管；国内访问偏慢 |
+| **cnb.cool** | <https://cnb.cool/MemBook-Flash/MemBook> | 腾讯云代码托管，国内访问快，支持 WebIDE 云开发与云原生构建流水线 |
+
+### 同步策略
+
+- 以 **本地仓库为准**，修改后同时推送到两个平台。
+- 保持 `main` 分支在两端完全一致（同一提交哈希）。
+
+```bash
+# 一键同步到双平台
+git push origin main      # GitHub
+git push cnb main         # cnb.cool
+```
+
+### 远程仓库配置（本地）
+
+```bash
+git remote add origin https://github.com/zhonghuoquan/MemBook.git   # GitHub
+git remote add cnb     https://cnb.cool/MemBook-Flash/MemBook.git   # cnb.cool
+```
+
+> 推送时的认证：GitHub 使用 Personal Access Token 或浏览器登录；cnb.cool 使用「Git Username + 令牌」。
+
+### 产品主页同步
+
+产品介绍页（[`docs/MemBook-Home`](../docs/MemBook-Home)）在 GitHub Pages 托管，仓库为 [membook-home](https://github.com/zhonghuoquan/membook-home) 及 cnb 镜像 [membook-home](https://cnb.cool/MemBook-Flash/membook-home)，内容与上述主页同步更新。
+
+---
+
 ## 一、主要功能
 
 ### 1. 项目管理（主页）
