@@ -45,7 +45,7 @@ const STAGES: Array<{ phase: string; label: string }> = [
 /** 缩略图网格最多显示数量 */
 const MAX_THUMBS = 6;
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate }: ToolProps) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -171,6 +171,18 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 取消分析 */
   const handleCancel = () => abortRef.current?.abort();
 
+  // “一键分析”自动触发：仅当本工具是当前分析目标且令牌变化时，自动开始人脸识别
+  const prevToken = useRef(0);
+  useEffect(() => {
+    if (isAutoRunTarget && autoRunToken && autoRunToken !== prevToken.current) {
+      prevToken.current = autoRunToken;
+      if (!running && photos.length > 0) {
+        void handleStart();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunToken, isAutoRunTarget]);
+
   /** 调整阈值后即时重聚类（使用缓存的检测结果，毫秒级） */
   const handleRecluster = useCallback(() => {
     if (!detection) return;
@@ -291,7 +303,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     <ToolCard
       title={t('home.organize.faceCluster.title', '人脸聚类')}
       description={t('home.organize.faceCluster.description', '按人物归类照片，自动识别同一人的不同照片')}
-      color="purple"
+      color="violet"
       icon={
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
           <circle cx="12" cy="12" r="10" />

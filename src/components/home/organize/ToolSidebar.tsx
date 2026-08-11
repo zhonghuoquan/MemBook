@@ -41,21 +41,60 @@ export interface ToolMeta {
 
 /** 色块映射：每种颜色对应的图标背景 + 图标文字色 + 选中态背景 + 选中态左侧色条 */
 const COLOR_BLOCK: Record<ToolColor, { iconBg: string; iconText: string; activeBg: string; activeBar: string }> = {
-  brand:   { iconBg: 'bg-[var(--color-brand-bg)]',   iconText: 'text-[var(--color-brand)]',   activeBg: 'bg-[var(--color-brand-bg)]',   activeBar: 'bg-[var(--color-brand)]' },
-  orange:  { iconBg: 'bg-[#FFD9C7]',                 iconText: 'text-[#C95A4D]',              activeBg: 'bg-[#FFF1EB]',                 activeBar: 'bg-[#E8836A]' },
-  green:   { iconBg: 'bg-[#C5E5CE]',                 iconText: 'text-[#4A9C6B]',              activeBg: 'bg-[#E9F4ED]',                 activeBar: 'bg-[#6BB58A]' },
-  blue:    { iconBg: 'bg-[#C5E0F4]',                 iconText: 'text-[#4A8FCC]',              activeBg: 'bg-[#E9F4FB]',                 activeBar: 'bg-[#6BA8D8]' },
-  purple:  { iconBg: 'bg-[#D7C5EC]',                 iconText: 'text-[#8B6BB0]',              activeBg: 'bg-[#F1E9F8]',                 activeBar: 'bg-[#A887D0]' },
+  coral:   { iconBg: 'bg-[#FFC9BA]', iconText: 'text-[#D1513B]', activeBg: 'bg-[#FFEBE6]', activeBar: 'bg-[#E06A52]' },
+  blue:    { iconBg: 'bg-[#BFD9F3]', iconText: 'text-[#3C83C7]', activeBg: 'bg-[#E8F2FC]', activeBar: 'bg-[#5599D6]' },
+  violet:  { iconBg: 'bg-[#D8C2F1]', iconText: 'text-[#8A5FC4]', activeBg: 'bg-[#F1EAFB]', activeBar: 'bg-[#A97BD6]' },
+  amber:   { iconBg: 'bg-[#FFE6A0]', iconText: 'text-[#AC8313]', activeBg: 'bg-[#FFF6DF]', activeBar: 'bg-[#C99A24]' },
+  green:   { iconBg: 'bg-[#BCE4C9]', iconText: 'text-[#3C9258]', activeBg: 'bg-[#E6F5EA]', activeBar: 'bg-[#58A972]' },
+  teal:    { iconBg: 'bg-[#B4E3DD]', iconText: 'text-[#23847A]', activeBg: 'bg-[#DFF3F0]', activeBar: 'bg-[#3AA298]' },
+  pink:    { iconBg: 'bg-[#F8C9DC]', iconText: 'text-[#C04B7C]', activeBg: 'bg-[#FDEDF4]', activeBar: 'bg-[#D26993]' },
+  indigo:  { iconBg: 'bg-[#C7CFF5]', iconText: 'text-[#4B57B8]', activeBg: 'bg-[#EBEDFC]', activeBar: 'bg-[#5E6BC7]' },
+  cyan:    { iconBg: 'bg-[#B8E8EA]', iconText: 'text-[#178A9C]', activeBg: 'bg-[#E3F7F8]', activeBar: 'bg-[#2FA7B6]' },
 };
 
 /** 工具元信息列表（按分类顺序排列） */
 export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
   {
+    category: 'browse',
+    tools: [
+      {
+        id: 'timeline',
+        color: 'indigo',
+        titleKey: 'home.organize.sidebar.timeline',
+        descKey: 'home.organize.sidebar.timelineDesc',
+        icon: (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <line x1="4" y1="4" x2="4" y2="16" />
+            <circle cx="4" cy="6" r="1.5" fill="currentColor" />
+            <circle cx="4" cy="11" r="1.5" fill="currentColor" />
+            <line x1="8" y1="6" x2="16" y2="6" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+            <line x1="8" y1="14" x2="12" y2="14" />
+          </svg>
+        ),
+      },
+      {
+        id: 'calendar',
+        color: 'cyan',
+        titleKey: 'home.organize.sidebar.calendar',
+        descKey: 'home.organize.sidebar.calendarDesc',
+        icon: (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <rect x="3" y="4" width="14" height="13" rx="1" />
+            <line x1="3" y1="8" x2="17" y2="8" />
+            <line x1="7" y1="2" x2="7" y2="6" />
+            <line x1="13" y1="2" x2="13" y2="6" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
     category: 'smart',
     tools: [
       {
         id: 'dedupe',
-        color: 'orange',
+        color: 'coral',
         titleKey: 'home.organize.dedupe.title',
         descKey: 'home.organize.dedupe.sidebarDesc',
         icon: (
@@ -82,7 +121,7 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
       },
       {
         id: 'faceCluster',
-        color: 'purple',
+        color: 'violet',
         titleKey: 'home.organize.faceCluster.title',
         descKey: 'home.organize.faceCluster.sidebarDesc',
         icon: (
@@ -96,7 +135,7 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
       },
       {
         id: 'similar',
-        color: 'orange',
+        color: 'amber',
         titleKey: 'home.organize.similar.title',
         descKey: 'home.organize.similar.sidebarDesc',
         icon: (
@@ -127,7 +166,7 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
       },
       {
         id: 'rename',
-        color: 'green',
+        color: 'teal',
         titleKey: 'home.organize.rename.title',
         descKey: 'home.organize.rename.sidebarDesc',
         icon: (
@@ -140,48 +179,13 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
       },
       {
         id: 'convert',
-        color: 'purple',
+        color: 'pink',
         titleKey: 'home.organize.convert.title',
         descKey: 'home.organize.convert.sidebarDesc',
         icon: (
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
             <path d="M4 4h12v12H4z" />
             <path d="M4 14l4-4 3 3 5-5" />
-          </svg>
-        ),
-      },
-    ],
-  },
-  {
-    category: 'browse',
-    tools: [
-      {
-        id: 'timeline',
-        color: 'blue',
-        titleKey: 'home.organize.sidebar.timeline',
-        descKey: 'home.organize.sidebar.timelineDesc',
-        icon: (
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-            <line x1="4" y1="4" x2="4" y2="16" />
-            <circle cx="4" cy="6" r="1.5" fill="currentColor" />
-            <circle cx="4" cy="11" r="1.5" fill="currentColor" />
-            <line x1="8" y1="6" x2="16" y2="6" />
-            <line x1="8" y1="11" x2="14" y2="11" />
-            <line x1="8" y1="14" x2="12" y2="14" />
-          </svg>
-        ),
-      },
-      {
-        id: 'calendar',
-        color: 'blue',
-        titleKey: 'home.organize.sidebar.calendar',
-        descKey: 'home.organize.sidebar.calendarDesc',
-        icon: (
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-            <rect x="3" y="4" width="14" height="13" rx="1" />
-            <line x1="3" y1="8" x2="17" y2="8" />
-            <line x1="7" y1="2" x2="7" y2="6" />
-            <line x1="13" y1="2" x2="13" y2="6" />
           </svg>
         ),
       },

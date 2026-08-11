@@ -822,6 +822,14 @@
       "closeTab": "Close Tab",
       "maxTabsReached": "Maximum {{max}} paths can be open simultaneously"
     },
+    "autoAnalyze": {
+      "title": "One-click Analyze",
+      "running": "Analyzing…",
+      "empty": "Please add a photo path first",
+      "busy": "A tool is already running, please wait",
+      "start": "Starting one-click analyze: Dedupe → Face Recognition → Similar Photos",
+      "done": "One-click analyze complete"
+    },
     "scan": {
       "scanningFolder": "Scanning folder...",
       "photosFound": "{{count}} photos found...",

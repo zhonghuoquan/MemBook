@@ -25,7 +25,7 @@ import { ToolCard, ProgressBar, CancelButton, PrimaryButton, DualRangeSlider, Ad
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
-export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode }: ToolProps) {
+export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -86,6 +86,18 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
   };
 
   const handleCancel = () => abortRef.current?.abort();
+
+  // “一键分析”自动触发：仅当本工具是当前分析目标且令牌变化时，自动开始相似照片分析
+  const prevToken = useRef(0);
+  useEffect(() => {
+    if (isAutoRunTarget && autoRunToken && autoRunToken !== prevToken.current) {
+      prevToken.current = autoRunToken;
+      if (!running && !deleting && photos.length > 0) {
+        void handleStart();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunToken, isAutoRunTarget]);
 
   // 大图预览
   const [previewGroup, setPreviewGroup] = useState<SimilarGroup | null>(null);
@@ -199,7 +211,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
     <ToolCard
       title={t('home.organize.similar.title')}
       description={t('home.organize.similar.description')}
-      color="orange"
+      color="amber"
       icon={
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
           <rect x="2" y="4" width="11" height="11" rx="2" />

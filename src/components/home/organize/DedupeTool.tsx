@@ -33,9 +33,13 @@ interface DedupeToolProps extends ToolProps {
   dedupeOverrides?: Record<string, Set<number>>;
   /** 去重状态变化通知（result + overrides 一起更新，避免分步调用产生中间态） */
   onDedupeStateChange?: (result: DedupeResult | null, overrides: Record<string, Set<number>>) => void;
+  /** “一键分析”触发令牌（递增触发一次自动运行） */
+  autoRunToken?: number;
+  /** 当前是否为“一键分析”的目标工具（仅目标工具自动运行） */
+  isAutoRunTarget?: boolean;
 }
 
-export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readPhotoData, onBusyChange, dedupeResult, dedupeOverrides, onDedupeStateChange }: DedupeToolProps) {
+export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readPhotoData, onBusyChange, dedupeResult, dedupeOverrides, onDedupeStateChange, autoRunToken, isAutoRunTarget }: DedupeToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -109,6 +113,18 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
   };
 
   const handleCancel = () => abortRef.current?.abort();
+
+  // “一键分析”自动触发：仅当本工具是当前分析目标且令牌变化时，自动开始去重
+  const prevToken = useRef(0);
+  useEffect(() => {
+    if (isAutoRunTarget && autoRunToken && autoRunToken !== prevToken.current) {
+      prevToken.current = autoRunToken;
+      if (!running && !deleting && photos.length >= 2) {
+        void handleStart();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunToken, isAutoRunTarget]);
 
   /** 获取某组实际保留的索引集合（用户覆盖优先，否则回退算法 keepIndex） */
   const getKeepSet = useCallback(
@@ -249,7 +265,7 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
     <ToolCard
       title={t('home.organize.dedupe.title')}
       description={t('home.organize.dedupe.description')}
-      color="orange"
+      color="coral"
       icon={
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
           <path d="M9 2a7 7 0 105.293 11.707l3.707 3.707" />

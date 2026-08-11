@@ -12,7 +12,7 @@
  * 月份分组按时间倒序排列（最新的在前）；无法识别日期的照片归入"未知日期"分组置于末尾。
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolvePhotoDate, type PhotoFileInfo, type TimelineGroup } from '../../../photo-tools';
 import { ThumbWithMenu, deletePhotos } from './shared';
@@ -148,6 +148,160 @@ function Thumb({
       onView={onView}
       onDelete={onDelete}
     />
+  );
+}
+
+/** 时间线缩略图固定边长（96px，与人脸识别一致） */
+const THUMB_SIZE = 96;
+/** 缩略图之间间隙（px） */
+const THUMB_GAP = 8;
+/** 渐变"更多"色块的固定宽度（px） */
+const MORE_BLOCK_WIDTH = 96;
+
+/**
+ * 单行照片列表（不换行，根据容器宽度自适应展示）
+ *
+ * - 根据容器宽度，只展示能放得下的前 N 张缩略图，单行不换行；
+ * - 更多照片默认收起，末尾用一个「主体渐变色调块 +N」表示；
+ * - 展开（showAll）后以网格形式展示全部照片。
+ */
+function PhotoRow({
+  items,
+  selected,
+  anomalyIds,
+  anomalyLabel,
+  readPhotoData,
+  isShowAll,
+  onToggleShowAll,
+  onClickThumb,
+  onView,
+  onDelete,
+  hasMoreButton,
+}: {
+  items: PhotoFileInfo[];
+  selected: Set<string>;
+  anomalyIds: Set<string>;
+  anomalyLabel: string;
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  isShowAll: boolean;
+  onToggleShowAll: () => void;
+  onClickThumb: (id: string) => void;
+  onView: (index: number) => void;
+  onDelete: (photo: PhotoFileInfo) => void;
+  hasMoreButton: boolean;
+}) {
+  const { t } = useTranslation();
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  // 当前容器宽度（用于计算单行能放多少张）
+  const [rowWidth, setRowWidth] = useState(0);
+
+  // 用 ResizeObserver 实时测量容器宽度，窗口变化/面板拉伸时自动重排
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const update = () => setRowWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  // 单行能容纳的缩略图数量 = floor((宽度 - 间隙) / (缩略图+间隙))
+  const fitCount = Math.max(1, Math.floor((rowWidth - THUMB_GAP) / (THUMB_SIZE + THUMB_GAP)));
+  // 收起时最多展示 fitCount 张，剩余张数用于渐变"更多"色块
+  const collapsedCount = Math.min(items.length, fitCount);
+  const overflow = items.length - collapsedCount;
+  // 收起时是否把最后一张位置让给"更多"色块（有溢出且未展开时）
+  const showMoreBlock = !isShowAll && overflow > 0;
+  // 单行实际展示的缩略图数量（若放"更多"色块，则少展示一张）
+  const visibleCount = showMoreBlock ? Math.max(0, collapsedCount - 1) : collapsedCount;
+  const visible = items.slice(0, visibleCount);
+
+  if (isShowAll) {
+    return (
+      <>
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}>
+          {items.map((p, i) => (
+            <Thumb
+              key={p.id}
+              photo={p}
+              selected={selected.has(p.id)}
+              anomaly={anomalyIds.has(p.id)}
+              anomalyLabel={anomalyLabel}
+              readPhotoData={readPhotoData}
+              onClick={() => onClickThumb(p.id)}
+              onView={() => onView(i)}
+              onDelete={() => onDelete(p)}
+            />
+          ))}
+        </div>
+        {hasMoreButton && (
+          <button
+            type="button"
+            onClick={onToggleShowAll}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
+          >
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+              <path d="M2 4l4 4 4-4" />
+            </svg>
+            {t('home.organize.timeline.collapseAll', '收起全部')}
+          </button>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div ref={rowRef} className="flex gap-2 overflow-x-auto overflow-y-hidden custom-scrollbar">
+        {visible.map((p, i) => (
+          <div key={p.id} className="shrink-0" style={{ width: THUMB_SIZE }}>
+            <Thumb
+              photo={p}
+              selected={selected.has(p.id)}
+              anomaly={anomalyIds.has(p.id)}
+              anomalyLabel={anomalyLabel}
+              readPhotoData={readPhotoData}
+              onClick={() => onClickThumb(p.id)}
+              onView={() => onView(i)}
+              onDelete={() => onDelete(p)}
+            />
+          </div>
+        ))}
+        {showMoreBlock && overflow > 0 && (
+          <div className="shrink-0" style={{ width: MORE_BLOCK_WIDTH }}>
+            <button
+              type="button"
+              onClick={onToggleShowAll}
+              title={t('home.organize.timeline.viewAll', { count: items.length, defaultValue: '查看全部 {{count}} 张' })}
+              className="aspect-square w-full rounded-lg border-none cursor-pointer flex flex-col items-center justify-center gap-1 text-white font-[700]
+                         bg-gradient-to-br from-[var(--color-brand)] to-[#8b5cf6]
+                         shadow-[0_2px_8px_rgba(108,99,255,0.25)]
+                         hover:brightness-110 hover:shadow-[0_4px_14px_rgba(108,99,255,0.35)] transition-all"
+            >
+              <span className="text-lg leading-none">+{overflow}</span>
+              <span className="text-[10px] text-white/80 font-[500]">{t('home.organize.timeline.overflowSuffix')}</span>
+            </button>
+          </div>
+        )}
+      </div>
+      {hasMoreButton && items.length > fitCount && (
+        <button
+          type="button"
+          onClick={onToggleShowAll}
+          className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
+        >
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
+            <path d="M2 4l4 4 4-4" />
+          </svg>
+          {t('home.organize.timeline.viewAll', { count: items.length, defaultValue: '查看全部 {{count}} 张' })}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -288,8 +442,6 @@ export function TimelineView({
   ) => {
     const isCollapsed = collapsed.has(key);
     const isShowAll = showAll.has(key);
-    const shown = isShowAll ? items : items.slice(0, 12);
-    const overflow = items.length - shown.length;
     const groupIds = items.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
     const headerBgCls =
@@ -372,48 +524,22 @@ export function TimelineView({
           </div>
         </div>
 
-        {/* 缩略图网格 */}
+        {/* 缩略图列表（单行自适应，更多收起 + 末尾主体渐变色块） */}
         {!isCollapsed && (
           <div className="px-4 pb-3 bg-white">
-            <div
-              className="grid gap-2"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
-            >
-              {shown.map((p, i) => (
-                <Thumb
-                  key={p.id}
-                  photo={p}
-                  selected={selected.has(p.id)}
-                  anomaly={anomalyIds.has(p.id)}
-                  anomalyLabel={anomalyLabel}
-                  readPhotoData={readPhotoData}
-                  onClick={() => toggleSelect(p.id)}
-                  onView={() => openPreview(items, i)}
-                  onDelete={() => handleDeletePhoto(p)}
-                />
-              ))}
-              {overflow > 0 && !isShowAll && (
-                <div className="aspect-square rounded-lg bg-[var(--color-gray-100)] flex items-center justify-center text-[var(--color-gray-500)] text-sm font-[600]">
-                  +{overflow}
-                  {t('home.organize.timeline.overflowSuffix')}
-                </div>
-              )}
-            </div>
-            {/* 查看全部 / 收起全部 */}
-            {items.length > 12 && (
-              <button
-                type="button"
-                onClick={() => toggleShowAll(key)}
-                className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
-              >
-                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
-                  <path d="M2 4l4 4 4-4" />
-                </svg>
-                {isShowAll
-                  ? t('home.organize.timeline.collapseAll', '收起全部')
-                  : t('home.organize.timeline.viewAll', { count: items.length, defaultValue: '查看全部 {{count}} 张' })}
-              </button>
-            )}
+            <PhotoRow
+              items={items}
+              selected={selected}
+              anomalyIds={anomalyIds}
+              anomalyLabel={anomalyLabel}
+              readPhotoData={readPhotoData}
+              isShowAll={isShowAll}
+              onToggleShowAll={() => toggleShowAll(key)}
+              onClickThumb={toggleSelect}
+              onView={(i) => openPreview(items, i)}
+              onDelete={handleDeletePhoto}
+              hasMoreButton={items.length > 12}
+            />
           </div>
         )}
       </div>
@@ -425,8 +551,6 @@ export function TimelineView({
     const key = g.key;
     const isCollapsed = collapsed.has(key);
     const isShowAll = showAll.has(key);
-    const shown = isShowAll ? g.photos : g.photos.slice(0, 12);
-    const overflow = g.photos.length - shown.length;
     const groupIds = g.photos.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
     return (
@@ -479,45 +603,19 @@ export function TimelineView({
 
         {!isCollapsed && (
           <div className="px-4 pb-3">
-            <div
-              className="grid gap-2"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
-            >
-              {shown.map((p, i) => (
-                <Thumb
-                  key={p.id}
-                  photo={p}
-                  selected={selected.has(p.id)}
-                  anomaly={anomalyIds.has(p.id)}
-                  anomalyLabel={anomalyLabel}
-                  readPhotoData={readPhotoData}
-                  onClick={() => toggleSelect(p.id)}
-                  onView={() => openPreview(g.photos, i)}
-                  onDelete={() => handleDeletePhoto(p)}
-                />
-              ))}
-              {overflow > 0 && !isShowAll && (
-                <div className="aspect-square rounded-lg bg-[var(--color-gray-100)] flex items-center justify-center text-[var(--color-gray-500)] text-sm font-[600]">
-                  +{overflow}
-                  {t('home.organize.timeline.overflowSuffix')}
-                </div>
-              )}
-            </div>
-            {/* 查看全部 / 收起全部 */}
-            {g.photos.length > 12 && (
-              <button
-                type="button"
-                onClick={() => toggleShowAll(key)}
-                className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] bg-transparent border-none cursor-pointer font-[600]"
-              >
-                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${isShowAll ? 'rotate-180' : ''}`}>
-                  <path d="M2 4l4 4 4-4" />
-                </svg>
-                {isShowAll
-                  ? t('home.organize.timeline.collapseAll', '收起全部')
-                  : t('home.organize.timeline.viewAll', { count: g.photos.length, defaultValue: '查看全部 {{count}} 张' })}
-              </button>
-            )}
+            <PhotoRow
+              items={g.photos}
+              selected={selected}
+              anomalyIds={anomalyIds}
+              anomalyLabel={anomalyLabel}
+              readPhotoData={readPhotoData}
+              isShowAll={isShowAll}
+              onToggleShowAll={() => toggleShowAll(key)}
+              onClickThumb={toggleSelect}
+              onView={(i) => openPreview(g.photos, i)}
+              onDelete={handleDeletePhoto}
+              hasMoreButton={g.photos.length > 12}
+            />
           </div>
         )}
       </div>
