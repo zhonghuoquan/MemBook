@@ -52,6 +52,46 @@ let faceApiModule: FaceApiModule | null = null;
 let faceApiLoadPromise: Promise<FaceApiModule | null> | null = null;
 let recognitionModelLoaded = false;
 
+// ── tfjs 后端回退（WebGL → CPU）─────────────────────────
+// face-api.js 0.22 依赖的 tfjs-core 1.7 在部分浏览器/WebView 的 WebGL 后端下，
+// landmark/recognition 推理会抛 “Cannot set properties of undefined” 之类的 TypeError。
+// 一旦检测到推理异常，切换到 CPU 后端重试一次，保证人脸聚类功能可用。
+interface TfCoreLike {
+  getBackend: () => string;
+  setBackend: (name: string) => Promise<boolean> | void;
+}
+
+let tfCoreModule: TfCoreLike | null = null;
+let cpuBackendTried = false;
+
+async function getTfCore(): Promise<TfCoreLike> {
+  if (!tfCoreModule) {
+    tfCoreModule = (await import('@tensorflow/tfjs-core')) as unknown as TfCoreLike;
+  }
+  return tfCoreModule;
+}
+
+/**
+ * 切换 tfjs 到 CPU 后端（仅尝试一次）。
+ * @returns 是否成功切换（true 表示已切换，调用方可重试推理）
+ */
+async function trySwitchToCpuBackend(): Promise<boolean> {
+  if (cpuBackendTried) return false;
+  cpuBackendTried = true;
+  try {
+    const tf = await getTfCore();
+    const current = tf.getBackend();
+    if (current && current !== 'cpu') {
+      await tf.setBackend('cpu');
+      logger.warn(`[face-cluster] 推理异常，已切换 tfjs 后端 ${current} → cpu（较慢但稳定），后续人脸识别将用 CPU 完成`);
+      return true;
+    }
+  } catch (err) {
+    logger.warn('[face-cluster] 切换 CPU 后端失败:', err);
+  }
+  return false;
+}
+
 /**
  * 加载 face-api.js + 所需模型（TinyFaceDetector + FaceLandmark68 + FaceRecognition）
  * 模型路径：
@@ -64,7 +104,7 @@ async function loadFaceApiForClustering(): Promise<FaceApiModule | null> {
 
   faceApiLoadPromise = (async () => {
     try {
-      // @ts-ignore - face-api.js 为可选依赖
+      // @ts-expect-error - face-api.js 为可选依赖
       const mod = (await import(/* @vite-ignore */ 'face-api.js')) as FaceApiModule;
 
       // 加载模型
@@ -127,7 +167,7 @@ async function loadImageFromData(data: ArrayBuffer, photoName: string): Promise<
         img.src = url;
       });
       return { img, url };
-    } catch (err) {
+    } catch {
       // 加载失败立即释放
       URL.revokeObjectURL(url);
       return null;
@@ -174,12 +214,26 @@ export async function extractFaceDescriptors(
   if (!loaded) return [];
   const { img, url } = loaded;
 
-  try {
-    const detections = await mod
+  const runInference = () =>
+    mod
       .detectAllFaces(img, new mod.TinyFaceDetectorOptions({ inputSize, scoreThreshold }))
       .withFaceLandmarks()
       .withFaceDescriptors();
 
+  let detections: FaceApiDescriptor[];
+  try {
+    detections = await runInference();
+  } catch (err) {
+    // 推理失败：很可能是 WebGL 后端兼容性问题，切换到 CPU 后端重试一次
+    logger.warn(`[face-cluster] 首次推理失败 ${photo.name}:`, err);
+    if (await trySwitchToCpuBackend()) {
+      detections = await runInference();
+    } else {
+      throw err;
+    }
+  }
+
+  try {
     if (!detections || detections.length === 0) return [];
 
     // 归一化人脸位置到 0-1
