@@ -693,7 +693,12 @@
         "createNew": "新建相册",
         "confirmCreate": "创建",
         "albumCreated": "已创建相册「{{name}}」",
-        "createFailed": "创建相册失败：{{message}}"
+        "createFailed": "创建相册失败：{{message}}",
+        "viewPhotos": "查看相册内已加入的照片",
+        "loadingPhotos": "正在加载照片…",
+        "noPhotosInAlbum": "该相册还没有照片",
+        "photosInAlbum": "相册内已有 {{count}} 张照片",
+        "viewPhotosFailed": "查看相册照片失败"
       },
       "viewMode": {
         "tools": "工具",

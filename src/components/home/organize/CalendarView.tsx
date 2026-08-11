@@ -92,7 +92,7 @@ function StackedThumb({
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
 }) {
   return (
-    <div className="w-9 h-9 rounded-md shrink-0 overflow-hidden border border-white shadow-sm bg-[var(--color-gray-200)]">
+    <div className="w-11 h-11 rounded-md shrink-0 overflow-hidden border border-white shadow-sm bg-[var(--color-gray-200)]">
       <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
     </div>
   );
@@ -320,7 +320,7 @@ export function CalendarView({
           {weekdays.map((w, i) => (
             <div
               key={i}
-              className={`text-center text-[11px] font-[600] py-1.5 ${
+              className={`text-center text-[11px] font-[600] py-1 ${
                 i === 5 || i === 6
                   ? 'text-[var(--color-gray-400)]'
                   : 'text-[var(--color-text-secondary)]'
@@ -346,7 +346,7 @@ export function CalendarView({
                 key={idx}
                 type="button"
                 onClick={() => setSelectedDay(new Date(cell.date))}
-                className={`relative min-h-[96px] p-1.5 text-left transition-colors flex flex-col gap-0.5 cursor-pointer ${
+                className={`relative min-h-[86px] p-1 text-left transition-colors flex flex-col gap-0.5 cursor-pointer ${
                   isSelected
                     ? 'bg-[var(--color-brand-bg)] ring-1 ring-inset ring-[var(--color-brand)]'
                     : !cell.isCurrentMonth
