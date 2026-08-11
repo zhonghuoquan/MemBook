@@ -219,15 +219,23 @@ export function ToolCard({
 }
 
 /** 马卡龙色扩展（含更深一档的图标背景），供空状态特色卡片使用 */
-export const FEATURE_COLORS: Record<'peach' | 'sky' | 'mint' | 'lavender', {
+export const FEATURE_COLORS: Record<
+  | 'peach' | 'sky' | 'mint' | 'lavender'
+  | 'grape' | 'amber' | 'teal' | 'indigo' | 'cyan',
+  {
   cardBg: string;
   iconBg: string;
   text: string;
 }> = {
-  peach:   { cardBg: 'bg-[#FFF1EB]', iconBg: 'bg-[#FFD9C7]', text: 'text-[#C95A4D]' },
-  sky:     { cardBg: 'bg-[#E9F4FB]', iconBg: 'bg-[#C5E0F4]', text: 'text-[#4A8FCC]' },
-  mint:    { cardBg: 'bg-[#E9F4ED]', iconBg: 'bg-[#C5E5CE]', text: 'text-[#4A9C6B]' },
-  lavender:{ cardBg: 'bg-[#F1E9F8]', iconBg: 'bg-[#D7C5EC]', text: 'text-[#8B6BB0]' },
+  peach:    { cardBg: 'bg-[#FFF1EB]', iconBg: 'bg-[#FFD9C7]', text: 'text-[#C95A4D]' },
+  sky:      { cardBg: 'bg-[#E9F4FB]', iconBg: 'bg-[#C5E0F4]', text: 'text-[#4A8FCC]' },
+  mint:     { cardBg: 'bg-[#E9F4ED]', iconBg: 'bg-[#C5E5CE]', text: 'text-[#4A9C6B]' },
+  lavender: { cardBg: 'bg-[#F1E9F8]', iconBg: 'bg-[#D7C5EC]', text: 'text-[#8B6BB0]' },
+  grape:    { cardBg: 'bg-[#F6EEFC]', iconBg: 'bg-[#E0C9F3]', text: 'text-[#7A4FA3]' },
+  amber:    { cardBg: 'bg-[#FFF7E8]', iconBg: 'bg-[#FFE3A6]', text: 'text-[#B07A1E]' },
+  teal:     { cardBg: 'bg-[#E7F5F4]', iconBg: 'bg-[#BFE4E0]', text: 'text-[#2E8B84]' },
+  indigo:   { cardBg: 'bg-[#EEF0FC]', iconBg: 'bg-[#D4D9F5]', text: 'text-[#5A67B8]' },
+  cyan:     { cardBg: 'bg-[#E8F7FB]', iconBg: 'bg-[#C4ECF6]', text: 'text-[#2E8DB8]' },
 };
 
 export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
