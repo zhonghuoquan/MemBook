@@ -22,7 +22,7 @@ import {
   type DedupeGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, ThumbImage, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { evictFromCache } from './thumbCache';
 
@@ -265,11 +265,11 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
       )}
 
       {running && (
-        <div>
+        <div className="mt-3">
           <ProgressBar progress={progress} />
-          <button onClick={handleCancel} className="mt-2 px-3 py-1.5 rounded text-xs border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
-            {t('home.organize.dedupe.cancel')}
-          </button>
+          <div className="mt-2 flex justify-end">
+            <CancelButton onClick={handleCancel} label={t('home.organize.dedupe.cancel')} />
+          </div>
         </div>
       )}
 

@@ -13,7 +13,8 @@
  *   - 检测与聚类分离：detectFaces 只提取 descriptor，recluster 只做聚类
  *     调阈值时仅重跑 recluster（毫秒级），无需重新检测
  *   - 使用 complete linkage 替代 single linkage，防止链式合并
- *   - 阈值使用欧氏距离（与 FaceMatcher 一致），默认 0.6
+ *   - 阈值使用欧氏距离，默认 0.5；检测输入尺寸 416、置信度阈值 0.35，
+ *     提升小尺寸/模糊人脸检测准确率
  *   - 使用 @vladmandic/face-api 替代已停止维护的 face-api.js 0.22.2
  *     原因：face-api.js 0.22.2 依赖 tfjs-core 1.7.0（2020年），
  *     在 Tauri WebView2 中有兼容性问题（"Cannot set properties of undefined"）
@@ -270,14 +271,14 @@ export interface FaceClusterOptions {
   /** 读取照片数据 */
   readData?: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
   /**
-   * 聚类距离阈值（欧氏距离，<= 该值视为同一人），默认 0.6
-   * face-api.js FaceMatcher 默认值也是 0.6
-   * 值越小越严格（分出更多组），值越大越宽松（合并更多）
+   * 聚类距离阈值（欧氏距离，<= 该值视为同一人），默认 0.5
+   * 值越小越严格（分出更多组，减少误合并），值越大越宽松（合并更多）
    */
   similarityThreshold?: number;
-  /** TinyFaceDetector 输入尺寸，默认 320（TinyFaceDetector 支持的档位之一，速度/精度平衡） */
+  /** TinyFaceDetector 输入尺寸，默认 416（TinyFaceDetector 支持的档位之一，兼顾精度与速度）
+   * 相比 320 能更好检测小尺寸人脸，提升识别准确率 */
   inputSize?: number;
-  /** 检测置信度阈值，默认 0.4 */
+  /** 检测置信度阈值，默认 0.35（略微降低以捕获更多模糊/小尺寸人脸） */
   scoreThreshold?: number;
 }
 
@@ -288,8 +289,8 @@ export interface FaceClusterOptions {
 export async function extractFaceDescriptors(
   photo: PhotoFileInfo,
   readData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>,
-  inputSize = 320,
-  scoreThreshold = 0.4,
+  inputSize = 416,
+  scoreThreshold = 0.35,
 ): Promise<FaceRecord[]> {
   const mod = await loadFaceApiForClustering();
   if (!mod) return [];
@@ -540,8 +541,8 @@ export async function detectFaces(
   options: FaceClusterOptions = {},
 ): Promise<FaceDetectionResult> {
   const { onProgress, signal } = options;
-  const inputSize = options.inputSize ?? 320;
-  const scoreThreshold = options.scoreThreshold ?? 0.4;
+  const inputSize = options.inputSize ?? 416;
+  const scoreThreshold = options.scoreThreshold ?? 0.35;
   const readData = options.readData;
 
   if (photos.length === 0) {
@@ -703,7 +704,7 @@ export async function clusterFaces(
   options: FaceClusterOptions = {},
 ): Promise<FaceClusterResult> {
   const { onProgress, signal } = options;
-  const threshold = options.similarityThreshold ?? 0.6;
+  const threshold = options.similarityThreshold ?? 0.5;
 
   if (photos.length === 0) {
     return { clusters: [], noFacePhotos: [], totalPhotos: 0, photosWithFaces: 0, failedPhotos: 0 };

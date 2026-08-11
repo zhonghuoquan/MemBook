@@ -257,3 +257,128 @@ export function evictFromCache(photoId: string) {
   // 同时清理 HEIC 转换缓存
   heicConvertedCache.delete(photoId);
 }
+
+/** 人脸裁剪缩略图缓存 key 前缀 */
+const FACE_CACHE_PREFIX = 'face:';
+
+/**
+ * 生成人脸裁剪缩略图 — 根据人脸在照片中的相对位置裁剪放大，
+ * 让人脸区域清晰可辨（解决有人脸照片缩略图模糊的问题）。
+ *
+ * @param photo 照片信息
+ * @param face 人脸记录（含相对位置 x/y/width/height，均为 0-1）
+ * @param readPhotoData 读取照片二进制
+ * @param targetDim 输出缩略图边长（默认 256，2x DPI 下更清晰）
+ * @param margin 人脸边界外扩比例（相对人脸宽高），默认 0.45，让裁剪框包含更多上下文
+ */
+export async function getFaceThumbUrl(
+  photo: PhotoFileInfo,
+  face: { x: number; y: number; width: number; height: number },
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>,
+  targetDim = 256,
+  margin = 0.45,
+): Promise<string | null> {
+  // Web 模式已有完整 thumbUrl 时，直接返回（人脸裁剪需要原始数据，此处忽略 thumbUrl）
+  const key = `${FACE_CACHE_PREFIX}${photo.id}:${face.x.toFixed(3)}:${face.y.toFixed(3)}:${face.width.toFixed(3)}:${face.height.toFixed(3)}:${targetDim}`;
+  const cached = cache.get(key);
+  if (cached) {
+    cached.lastUsed = Date.now();
+    return cached.url;
+  }
+  const existing = inflight.get(key);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    try {
+      const buf = await readPhotoData(photo);
+      if (!buf) return null;
+      const mime = photo.mimeType || 'image/jpeg';
+      let blob = new Blob([buf], { type: mime });
+      if (isHeicFile(photo.name)) {
+        let converted = heicConvertedCache.get(photo.id);
+        if (!converted) {
+          try {
+            const file = new File([buf], photo.name, { type: mime });
+            const jpegFile = await ensureSupportedFormat(file);
+            converted = new Blob([await jpegFile.arrayBuffer()], { type: 'image/jpeg' });
+            heicConvertedCache.set(photo.id, converted);
+          } catch { /* 转换失败则用原 blob */ }
+        }
+        if (converted) blob = converted;
+      }
+
+      // 解码原图获取尺寸
+      let img: { width: number; height: number };
+      try {
+        const bitmap = await createImageBitmap(blob);
+        img = { width: bitmap.width, height: bitmap.height };
+        bitmap.close();
+      } catch {
+        return null;
+      }
+
+      // 计算人脸裁剪框（外扩 margin，并夹紧在图片范围内）
+      const mw = face.width * img.width;
+      const mh = face.height * img.height;
+      let sx = (face.x - margin * face.width) * img.width;
+      let sy = (face.y - margin * face.height) * img.height;
+      let sw = mw * (1 + margin * 2);
+      let sh = mh * (1 + margin * 2);
+      // 夹紧
+      sx = Math.max(0, Math.min(sx, img.width - 1));
+      sy = Math.max(0, Math.min(sy, img.height - 1));
+      sw = Math.min(sw, img.width - sx);
+      sh = Math.min(sh, img.height - sy);
+      if (sw < 4 || sh < 4) return null;
+
+      // 取正方形源区域（以人脸中心为准）保证输出为方形
+      const srcSide = Math.max(sw, sh);
+      const cx = sx + sw / 2;
+      const cy = sy + sh / 2;
+      sx = Math.max(0, cx - srcSide / 2);
+      sy = Math.max(0, cy - srcSide / 2);
+      const side = Math.min(srcSide, img.width - sx, img.height - sy);
+
+      // 输出到 Canvas（保持 2x 清晰度）
+      const canvas = document.createElement('canvas');
+      canvas.width = targetDim;
+      canvas.height = targetDim;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      // 重绘（先解码 bitmap 再绘制裁剪区域）
+      try {
+        const source = await createImageBitmap(blob, sx, sy, side, side);
+        ctx.drawImage(source, 0, 0, targetDim, targetDim);
+        source.close();
+      } catch {
+        // fallback：Image 元素
+        const url = URL.createObjectURL(blob);
+        const im = new Image();
+        await new Promise<void>((resolve) => {
+          im.onload = () => resolve();
+          im.onerror = () => resolve();
+          im.src = url;
+        });
+        URL.revokeObjectURL(url);
+        if (im.width === 0) return null;
+        ctx.drawImage(im, sx, sy, side, side, 0, 0, targetDim, targetDim);
+      }
+
+      const outBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, 'image/jpeg', 0.85),
+      );
+      if (!outBlob) return null;
+      const url = URL.createObjectURL(outBlob);
+      evictIfNeeded();
+      cache.set(key, { url, lastUsed: Date.now() });
+      return url;
+    } catch {
+      return null;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, promise);
+  return promise;
+}

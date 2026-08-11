@@ -193,7 +193,7 @@ export function ToolCard({
 }) {
   const colors = COLOR_STYLES[color];
   return (
-    <div className={`rounded-2xl border p-5 transition-all duration-200 flex flex-col ${
+    <div className={`relative rounded-2xl border p-5 transition-all duration-200 flex flex-col ${
       disabled
         ? 'border-[var(--color-border)] bg-[var(--color-gray-50)] opacity-60'
         : `border-transparent ${colors.cardBg} hover:shadow-[var(--shadow-md)] ${colors.ring}`
@@ -233,16 +233,22 @@ export const FEATURE_COLORS: Record<'peach' | 'sky' | 'mint' | 'lavender', {
 export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
   if (!progress) return null;
   const totalUnknown = !progress.total || progress.total === 0;
-  const pct = totalUnknown ? 0 : Math.round((progress.current / progress.total) * 100);
+  const pct = totalUnknown ? 0 : Math.min(100, Math.round((progress.current / progress.total) * 100));
   return (
-    <div className="mt-3">
-      <div className="flex justify-between mb-1.5">
-        <span className="text-xs text-[var(--color-text-secondary)]">{progress.message}</span>
-        <span className="text-xs text-[var(--color-gray-500)] font-mono">
+    <div className="mt-3 rounded-xl border border-[var(--color-border)]/60 bg-white/60 backdrop-blur-sm px-3.5 py-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+      <div className="flex justify-between items-center mb-2">
+        <span className="text-xs text-[var(--color-text-secondary)] truncate pr-2">{progress.message}</span>
+        <span className="shrink-0 inline-flex items-center gap-1 text-xs font-mono font-[600] text-[var(--color-brand)]">
+          {!totalUnknown && (
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+              <circle cx="8" cy="8" r="6" />
+              <path d="M8 8l2.5-2.5" />
+            </svg>
+          )}
           {totalUnknown ? progress.current : `${pct}%`}
         </span>
       </div>
-      <div className="h-2 bg-[var(--color-brand-bg)] rounded-full overflow-hidden">
+      <div className="h-2.5 bg-[var(--color-gray-100)] rounded-full overflow-hidden relative ring-1 ring-inset ring-[var(--color-border)]/40">
         {totalUnknown ? (
           // 不确定进度：渐变光带（透明边缘）从左滑入、柔和扫过、右侧淡出
           <div
@@ -253,16 +259,179 @@ export function ProgressBar({ progress }: { progress: ToolProgress | null }) {
             }}
           />
         ) : (
-          <div
-            className="h-full rounded-full transition-[width] duration-300 ease-out"
-            style={{
-              width: `${pct}%`,
-              background:
-                'linear-gradient(90deg, var(--color-primary-400, var(--color-brand)), var(--color-brand))',
-            }}
-          />
+          <>
+            <div
+              className="h-full rounded-full transition-[width] duration-300 ease-out relative overflow-hidden"
+              style={{
+                width: `${Math.max(pct, 2)}%`,
+                background:
+                  'linear-gradient(90deg, var(--color-primary-400, var(--color-brand)), var(--color-brand))',
+              }}
+            >
+              {/* 高光扫过动效 */}
+              <div className="absolute inset-0 animate-[progress-shine_2s_ease-in-out_infinite]"
+                style={{ background: 'linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%)' }} />
+            </div>
+          </>
         )}
       </div>
+      {/* 细粒度格点刻度（仅确定进度时显示） */}
+      {!totalUnknown && (
+        <div className="flex justify-between mt-1.5 px-0.5 text-[9px] font-mono text-[var(--color-gray-400)]">
+          <span>0</span>
+          <span>{Math.round(progress.total / 2)}</span>
+          <span>{progress.total}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 统一取消按钮 */
+export function CancelButton({
+  onClick,
+  label,
+  className = '',
+}: {
+  onClick: () => void;
+  label?: string;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[600] cursor-pointer
+        border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-gray-600)]
+        hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-gray-800)] hover:border-[var(--color-brand)]/40
+        transition-all ${className}`}
+    >
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+        <path d="M4 4l8 8M12 4l-8 8" />
+      </svg>
+      {label ?? t('common.cancel', '取消')}
+    </button>
+  );
+}
+
+/**
+ * 双滑块区间选择器 — 用单个控件同时设置最小/最大值
+ *
+ * 通过两个重叠的 range 滑块实现（上层滑块透明），
+ * 保证 min ≤ max 始终成立。
+ */
+export function DualRangeSlider({
+  min,
+  max,
+  valueMin,
+  valueMax,
+  onChange,
+  step = 1,
+  disabled = false,
+  accent = 'var(--color-brand)',
+}: {
+  min: number;
+  max: number;
+  valueMin: number;
+  valueMax: number;
+  onChange: (min: number, max: number) => void;
+  step?: number;
+  disabled?: boolean;
+  accent?: string;
+}) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const range = Math.max(1, max - min);
+  const leftPct = ((valueMin - min) / range) * 100;
+  const rightPct = ((valueMax - min) / range) * 100;
+
+  const handleMinChange = (v: number) => {
+    const next = Math.min(Math.round(v), valueMax - step);
+    onChange(Math.max(min, next), valueMax);
+  };
+  const handleMaxChange = (v: number) => {
+    const next = Math.max(Math.round(v), valueMin + step);
+    onChange(valueMin, Math.min(max, next));
+  };
+
+  // 共享的滑块样式：输入本身不拦截点击（pointer-events-none），仅 thumb 可拖动
+  const baseSlider =
+    'pointer-events-none absolute w-full h-2 rounded-full appearance-none bg-transparent';
+
+  return (
+    <div className={`relative w-full ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* 轨道背景 */}
+      <div ref={trackRef} className="h-2 rounded-full bg-[var(--color-gray-100)] ring-1 ring-inset ring-[var(--color-border)]/40" />
+      {/* 选中区间高亮 */}
+      <div
+        className="absolute top-0 h-2 rounded-full"
+        style={{
+          left: `${leftPct}%`,
+          width: `${rightPct - leftPct}%`,
+          background: `linear-gradient(90deg, ${accent}, ${accent})`,
+          opacity: 0.85,
+        }}
+      />
+      {/* 最小值滑块（下层 thumb 可拖动） */}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={valueMin}
+        onChange={(e) => handleMinChange(parseFloat(e.target.value))}
+        className={`${baseSlider} left-0 z-20`}
+        style={{
+          ['--range-accent' as string]: accent,
+        }}
+        aria-label="min"
+      />
+      {/* 最大值滑块（上层 thumb 可拖动） */}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={valueMax}
+        onChange={(e) => handleMaxChange(parseFloat(e.target.value))}
+        className={`${baseSlider} left-0 z-30`}
+        style={{
+          ['--range-accent' as string]: accent,
+        }}
+        aria-label="max"
+      />
+      <style>{`
+        input[type='range']::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 2.5px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          cursor: grab;
+          pointer-events: auto;
+          transition: transform 0.12s ease, box-shadow 0.12s ease;
+        }
+        input[type='range']::-webkit-slider-thumb:hover {
+          transform: scale(1.12);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
+        input[type='range']::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 2.5px solid var(--range-accent, var(--color-brand));
+          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          cursor: grab;
+          pointer-events: auto;
+        }
+        input[type='range']::-moz-range-track {
+          background: transparent;
+        }
+      `}</style>
     </div>
   );
 }

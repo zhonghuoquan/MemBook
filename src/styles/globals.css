@@ -52,6 +52,12 @@ html.is-dragging *::selection {
   100% { transform: translateX(250%); opacity: 0; }
 }
 
+/* 确定进度高光扫过动画 */
+@keyframes progress-shine {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
 /* TailwindCSS v4 自定义主题扩展 */
 @theme {
   --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

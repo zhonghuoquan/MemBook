@@ -8,7 +8,8 @@
  *
  * 关键优化：
  *   - 检测与聚类分离：调阈值时仅重跑 recluster（毫秒级），无需重新检测
- *   - 阈值使用欧氏距离（与 face-api.js FaceMatcher 一致），默认 0.6
+ *   - 阈值使用欧氏距离，默认 0.5（越小越严格、越不易误合并，兼顾准确率与召回）
+ *   - 人脸缩略图按人脸区域裁剪放大，清晰可辨
  *   - 模型加载失败时显示明确 toast，不再误报"未检测到人脸"
  *   - 支持手动合并聚类组
  *   - 支持组命名
@@ -24,12 +25,14 @@ import {
   recluster,
   type PhotoFileInfo,
   type FaceCluster,
+  type FaceRecord,
   type FaceClusterResult,
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, CancelButton, PrimaryButton, ThumbImage, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
+import { getFaceThumbUrl } from './thumbCache';
 
 /** 聚类阶段定义（对应 progress.phase） */
 const STAGES: Array<{ phase: string; label: string }> = [
@@ -48,9 +51,9 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   const [result, setResult] = useState<FaceClusterResult | null>(null);
   /**
    * 距离阈值（欧氏距离）：值越小越严格（分出更多组），值越大越宽松（合并更多）
-   * 默认 0.6，与 face-api.js FaceMatcher 一致
+   * 默认 0.5，兼顾准确率与召回（欧氏距离越小越严格、越不易误合并）
    */
-  const [threshold, setThreshold] = useState(0.6);
+  const [threshold, setThreshold] = useState(0.5);
   // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测
   const [detection, setDetection] = useState<FaceDetectionResult | null>(null);
   // 选中的照片 ID 集合
@@ -61,6 +64,8 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
   // 选中的聚类组（用于合并操作）
   const [selectedClusters, setSelectedClusters] = useState<Set<string>>(new Set());
+  // 组内照片展开状态（默认折叠，仅显示前 MAX_THUMBS 张；展开后查看全部）
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
   // 组名映射（clusterId → 用户输入的名称）
   const [clusterNames, setClusterNames] = useState<Map<string, string>>(new Map());
   // 正在编辑名称的组 ID
@@ -82,6 +87,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     setDetection(null);
     setSelectedIds(new Set());
     setSelectedClusters(new Set());
+    setExpandedClusters(new Set());
     setNoFaceExpanded(false);
 
     try {
@@ -153,6 +159,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     setResult(res);
     setSelectedIds(new Set());
     setSelectedClusters(new Set());
+    setExpandedClusters(new Set());
   }, [detection, threshold, photos]);
 
   /** 阈值滑块变化时自动重聚类（仅在有检测结果时） */
@@ -275,6 +282,29 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         </svg>
       }
     >
+      {/* 固定“加入相册”浮动按钮（与日历/时间线一致：固定在右上角，样式统一） */}
+      {result && (
+        <div className="absolute top-4 right-4 z-20">
+          <button
+            type="button"
+            onClick={handleAddToAlbum}
+            disabled={selectedIds.size === 0}
+            title={selectedIds.size === 0 ? t('home.organize.faceCluster.selectPhotosFirst') : t('home.organize.faceCluster.addToAlbum')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[600] transition-all border-none cursor-pointer shadow-sm ${
+              selectedIds.size > 0
+                ? 'bg-[var(--color-brand)] text-white hover:opacity-90'
+                : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
+            }`}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+            {t('home.organize.faceCluster.addToAlbum')}
+            {selectedIds.size > 0 && <span className="opacity-80">· {selectedIds.size}</span>}
+          </button>
+        </div>
+      )}
+
       {/* ── 顶部：距离阈值滑块 + 操作按钮 ── */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -302,12 +332,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
               : t('home.organize.faceCluster.start', '开始分析')}
           </PrimaryButton>
         ) : (
-          <button
-            onClick={handleCancel}
-            className="px-3 py-1.5 rounded text-xs border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-gray-600)] bg-transparent"
-          >
-            {t('home.organize.faceCluster.cancel', '取消')}
-          </button>
+          <CancelButton onClick={handleCancel} label={t('home.organize.faceCluster.cancel', '取消')} />
         )}
       </div>
       <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
@@ -372,31 +397,12 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             </div>
           )}
 
-          {/* 选中计数 + 加入相册按钮 */}
-          <div className="mt-2 flex items-center gap-3 flex-wrap">
-            {selectedIds.size > 0 && (
-              <span className="text-xs text-[var(--color-gray-500)]">
-                {t('home.organize.faceCluster.selectedCount', { count: selectedIds.size, defaultValue: '已选中 {{count}} 张照片' })}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={handleAddToAlbum}
-              disabled={selectedIds.size === 0}
-              title={selectedIds.size === 0 ? t('home.organize.faceCluster.selectPhotosFirst') : t('home.organize.faceCluster.addToAlbum')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[600] cursor-pointer transition-all border-none ${
-                selectedIds.size > 0
-                  ? 'bg-[var(--color-brand)] text-white hover:opacity-90'
-                  : 'bg-[var(--color-gray-100)] text-[var(--color-gray-400)] cursor-not-allowed'
-              }`}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M8 3v10M3 8h10" />
-              </svg>
-              {t('home.organize.faceCluster.addToAlbum')}
-              {selectedIds.size > 0 && <span className="opacity-80">· {selectedIds.size}</span>}
-            </button>
-          </div>
+          {/* 选中计数提示（加入相册按钮已固定在卡片右上角） */}
+          {selectedIds.size > 0 && (
+            <div className="mt-2 text-xs text-[var(--color-gray-500)]">
+              {t('home.organize.faceCluster.selectedCount', { count: selectedIds.size, defaultValue: '已选中 {{count}} 张照片' })}
+            </div>
+          )}
 
           {/* 人脸分组列表 */}
           {result.clusters.length > 0 && (
@@ -415,6 +421,23 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
                   editingName={editingNameClusterId === cluster.clusterId}
                   onSetEditingName={setEditingNameClusterId}
                   readPhotoData={readPhotoData}
+                  expanded={expandedClusters.has(cluster.clusterId)}
+                  onToggleExpand={(id) => {
+                    setExpandedClusters((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onToggleSingle={(photoId) => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(photoId)) next.delete(photoId);
+                      else next.add(photoId);
+                      return next;
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -489,6 +512,9 @@ function FaceClusterGroupItem({
   editingName,
   onSetEditingName,
   readPhotoData,
+  expanded,
+  onToggleExpand,
+  onToggleSingle,
 }: {
   cluster: FaceCluster;
   index: number;
@@ -496,11 +522,15 @@ function FaceClusterGroupItem({
   selectedClusters: Set<string>;
   onToggleSelect: (cluster: FaceCluster) => void;
   onToggleClusterSelect: (clusterId: string) => void;
+  onToggleSingle: (photoId: string) => void;
   onRenameCluster: (clusterId: string, name: string) => void;
   clusterName?: string;
   editingName: boolean;
   onSetEditingName: (id: string | null) => void;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  /** 组内照片是否展开（展开后查看全部并支持单张选择） */
+  expanded: boolean;
+  onToggleExpand: (clusterId: string) => void;
 }) {
   const { t } = useTranslation();
   const [nameInput, setNameInput] = useState('');
@@ -509,8 +539,20 @@ function FaceClusterGroupItem({
   const allSelected = selectedCount === groupIds.length;
   const isClusterSelected = selectedClusters.has(cluster.clusterId);
 
-  const visiblePhotos = cluster.photos.slice(0, MAX_THUMBS);
+  // 折叠时仅显示前 MAX_THUMBS 张；展开后显示全部（支持单张选择）
+  const displayPhotos = expanded ? cluster.photos : cluster.photos.slice(0, MAX_THUMBS);
   const extraCount = cluster.photos.length - MAX_THUMBS;
+
+  // 建立 photoId → 人脸记录 映射，用于裁剪出清晰人脸缩略图
+  const faceByPhoto = useMemo(() => {
+    const map = new Map<string, FaceRecord>();
+    for (const f of cluster.faces) {
+      // 优先保留面积更大的那张脸
+      const prev = map.get(f.photoId);
+      if (!prev || (f.width * f.height > prev.width * prev.height)) map.set(f.photoId, f);
+    }
+    return map;
+  }, [cluster.faces]);
 
   const handleNameSubmit = () => {
     onRenameCluster(cluster.clusterId, nameInput);
@@ -587,21 +629,29 @@ function FaceClusterGroupItem({
         </button>
       </div>
 
-      {/* 缩略图网格 */}
+      {/* 缩略图网格（折叠 6 列 / 展开更多列） */}
       <div className="px-3 pb-3 pt-2">
-        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
-          {visiblePhotos.map((photo, i) => {
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: expanded ? 'repeat(auto-fill, minmax(96px, 1fr))' : 'repeat(6, minmax(0, 1fr))' }}>
+          {displayPhotos.map((photo, i) => {
             const isSelected = selectedIds.has(photo.id);
-            const showExtraOverlay = i === MAX_THUMBS - 1 && extraCount > 0;
+            const showExtraOverlay = !expanded && i === MAX_THUMBS - 1 && extraCount > 0;
+            const face = faceByPhoto.get(photo.id);
             return (
               <div
                 key={photo.id}
-                className={`relative aspect-square rounded-md overflow-hidden border-2 transition-all ${
-                  isSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]' : 'border-transparent'
+                className={`relative aspect-square rounded-md overflow-hidden border-2 transition-all cursor-pointer ${
+                  isSelected ? 'border-[#8B6BB0] ring-1 ring-[#8B6BB0]' : 'border-transparent hover:border-[#C4A5E0]'
                 }`}
                 title={photo.name}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // 组内单张选择
+                  onToggleSingle(photo.id);
+                }}
               >
-                <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" />
+                {face
+                  ? <FaceCropThumb photo={photo} face={face} readPhotoData={readPhotoData} />
+                  : <ThumbImage photo={photo} readPhotoData={readPhotoData} size={expanded ? 'medium' : 'small'} />}
                 {showExtraOverlay && (
                   <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-mono font-bold">
                     +{extraCount}
@@ -616,7 +666,56 @@ function FaceClusterGroupItem({
             );
           })}
         </div>
+
+        {/* 展开/收起全部照片 */}
+        {cluster.photos.length > MAX_THUMBS && (
+          <button
+            onClick={() => onToggleExpand(cluster.clusterId)}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-[#8B6BB0] hover:text-[#6d5094] bg-transparent border-none cursor-pointer font-[600]"
+          >
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`}>
+              <path d="M2 4l4 4 4-4" />
+            </svg>
+            {expanded
+              ? t('home.organize.faceCluster.collapseGroup', '收起全部')
+              : t('home.organize.faceCluster.expandGroup', { count: cluster.photos.length, defaultValue: '查看全部 {{count}} 张' })}
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 人脸裁剪缩略图 — 根据人脸相对位置裁剪放大，让人脸清晰可辨
+ * 解决“有人脸照片缩略图显示模糊”的问题
+ */
+function FaceCropThumb({
+  photo,
+  face,
+  readPhotoData,
+}: {
+  photo: PhotoFileInfo;
+  face: FaceRecord;
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getFaceThumbUrl(photo, face, readPhotoData).then((u) => {
+      if (!cancelled && u) setUrl(u);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photo, face, readPhotoData]);
+
+  if (url) {
+    return <img src={url} alt={photo.name} className="w-full h-full object-cover" draggable={false} loading="lazy" />;
+  }
+  return (
+    <div className="w-full h-full bg-[var(--color-gray-100)] flex items-center justify-center">
+      <div className="w-4 h-4 border-2 border-[var(--color-gray-300)] border-t-[var(--color-gray-500)] rounded-full animate-spin" />
     </div>
   );
 }
