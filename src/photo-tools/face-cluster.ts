@@ -2,17 +2,21 @@
  * 人脸聚类模块（功能1：按人物归类）
  * ──────────────────────────────────────────────────────
  *
- * 基于 face-api.js 的 TinyFaceDetector + FaceLandmark68Net + FaceRecognitionNet：
+ * 基于 @vladmandic/face-api（face-api.js 维护版 fork）的
+ * TinyFaceDetector + FaceLandmark68Net + FaceRecognitionNet：
  *   1. 检测人脸位置（TinyFaceDetector）
  *   2. 提取 68 个面部关键点（FaceLandmark68Net）
  *   3. 计算 128 维人脸 descriptor（FaceRecognitionNet）
- *   4. 余弦相似度 + 层次聚类
+ *   4. 欧氏距离 + complete linkage 层次聚类
  *
  * 关键设计：
  *   - 检测与聚类分离：detectFaces 只提取 descriptor，recluster 只做聚类
  *     调阈值时仅重跑 recluster（毫秒级），无需重新检测
  *   - 使用 complete linkage 替代 single linkage，防止链式合并
- *   - 阈值使用欧氏距离（与 face-api.js FaceMatcher 一致），默认 0.6
+ *   - 阈值使用欧氏距离（与 FaceMatcher 一致），默认 0.6
+ *   - 使用 @vladmandic/face-api 替代已停止维护的 face-api.js 0.22.2
+ *     原因：face-api.js 0.22.2 依赖 tfjs-core 1.7.0（2020年），
+ *     在 Tauri WebView2 中有兼容性问题（"Cannot set properties of undefined"）
  */
 
 import type { PhotoFileInfo, FaceRecord, FaceCluster, FaceClusterResult, FaceDetectionResult, ToolProgress } from './types';
@@ -35,6 +39,13 @@ interface TfTensor {
   dispose(): void;
 }
 
+interface TfEngine {
+  startScope(): void;
+  endScope(): void;
+  /** 当前未释放的 tensor 数量（诊断用） */
+  state: { numTensors: number };
+}
+
 interface TfModule {
   ready(): Promise<void>;
   setBackend(name: string): Promise<boolean>;
@@ -43,6 +54,9 @@ interface TfModule {
   tensor1d(values: number[]): TfTensor;
   add(a: TfTensor, b: TfTensor): TfTensor;
   dispose(t: TfTensor): void;
+  engine(): TfEngine;
+  /** 释放所有非变量 tensor（清理中间结果） */
+  tidy<T>(fn: () => T): T;
 }
 
 interface FaceApiModule {
@@ -71,36 +85,23 @@ let recognitionModelLoaded = false;
 let lastLoadError: string | null = null;
 
 // ── tfjs 后端回退（WebGL → CPU）─────────────────────────
-// face-api.js 0.22 依赖的 tfjs-core 1.7 在部分浏览器/WebView 的 WebGL 后端下，
-// landmark/recognition 推理会抛 “Cannot set properties of undefined” 之类的 TypeError。
-// 一旦检测到推理异常，切换到 CPU 后端重试一次，保证人脸聚类功能可用。
-interface TfCoreLike {
-  getBackend: () => string;
-  setBackend: (name: string) => Promise<boolean> | void;
-}
-
-let tfCoreModule: TfCoreLike | null = null;
+// @vladmandic/face-api 内置新版 tfjs，在部分 WebView 的 WebGL 后端下
+// 推理仍可能抛异常。一旦检测到推理异常，切换到 CPU 后端重试一次。
 let cpuBackendTried = false;
-
-async function getTfCore(): Promise<TfCoreLike> {
-  if (!tfCoreModule) {
-    tfCoreModule = (await import('@tensorflow/tfjs-core')) as unknown as TfCoreLike;
-  }
-  return tfCoreModule;
-}
 
 /**
  * 切换 tfjs 到 CPU 后端（仅尝试一次）。
+ * 使用 faceApiModule.tf（@vladmandic/face-api 导出的 tf 命名空间）
  * @returns 是否成功切换（true 表示已切换，调用方可重试推理）
  */
 async function trySwitchToCpuBackend(): Promise<boolean> {
   if (cpuBackendTried) return false;
   cpuBackendTried = true;
   try {
-    const tf = await getTfCore();
-    const current = tf.getBackend();
+    if (!faceApiModule) return false;
+    const current = faceApiModule.tf.getBackend();
     if (current && current !== 'cpu') {
-      await tf.setBackend('cpu');
+      await faceApiModule.tf.setBackend('cpu');
       logger.warn(`[face-cluster] 推理异常，已切换 tfjs 后端 ${current} → cpu（较慢但稳定），后续人脸识别将用 CPU 完成`);
       return true;
     }
@@ -122,13 +123,14 @@ async function loadFaceApiForClustering(): Promise<FaceApiModule | null> {
 
   faceApiLoadPromise = (async () => {
     try {
-      // @ts-expect-error - face-api.js 为可选依赖，未安装时无类型声明
-      const mod = (await import(/* @vite-ignore */ 'face-api.js')) as FaceApiModule;
+      // 使用 @vladmandic/face-api（face-api.js 维护版 fork，内置新版 tfjs）
+      // 原始 face-api.js 0.22.2 依赖 tfjs-core 1.7.0（2020年），在 Tauri WebView2 中崩溃
+      const mod = (await import('@vladmandic/face-api')) as unknown as FaceApiModule;
 
       // ── 关键：初始化 TensorFlow.js backend ──
-      // face-api.js 0.22 依赖 @tensorflow/tfjs-core 1.7.0
+      // @vladmandic/face-api 内置新版 tfjs（4.x），backend 注册更可靠
+      // 优先 WebGL（GPU 加速），失败时回退 CPU
       // setBackend 返回 Promise<boolean>，false 表示初始化失败（不抛错）
-      // 必须检查返回值，否则 backend 未就绪会导致后续操作崩溃
       logger.info('[face-cluster] 正在初始化 TF.js backend...');
 
       // 尝试顺序：webgl → cpu（GPU 推理比 CPU 快 5-10 倍；推理已串行化，无并发竞态，WebGL 稳定可用）
@@ -320,6 +322,7 @@ export async function extractFaceDescriptors(
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       logger.warn(`[face-cluster] 无法创建 Canvas 2D context: ${photo.name}`);
+      URL.revokeObjectURL(url);
       return [];
     }
     ctx.drawImage(img, 0, 0, cw, ch);
@@ -355,19 +358,34 @@ export async function extractFaceDescriptors(
     const cw = canvas!.width;
     const ch = canvas!.height;
 
-    return detections.map((d) => ({
-      descriptor: d.descriptor,
-      x: d.detection.box.x / cw,
-      y: d.detection.box.y / ch,
-      width: d.detection.box.width / cw,
-      height: d.detection.box.height / ch,
-      score: d.detection.score,
-      photoId: photo.id,
-    }));
+    // 提前拷贝 descriptor 数据（Float32Array），避免后续访问可能被释放的 tensor
+    const faces: FaceRecord[] = detections.map((d) => {
+      // descriptor 是 Float32Array，slice() 创建独立拷贝
+      const descriptorCopy = d.descriptor.slice(0) as Float32Array;
+      return {
+        descriptor: descriptorCopy,
+        x: d.detection.box.x / cw,
+        y: d.detection.box.y / ch,
+        width: d.detection.box.width / cw,
+        height: d.detection.box.height / ch,
+        score: d.detection.score,
+        photoId: photo.id,
+      };
+    });
+
+    return faces;
   } catch (err) {
     logger.warn(`[face-cluster] 提取 descriptor 失败 ${photo.name}:`, err);
     return [];
   } finally {
+    // 显式释放 Canvas 和 Image，减少内存压力
+    // 关键：不释放会导致处理 70+ 张照片后内存耗尽，
+    // tfjs 内部对象变为 undefined，抛出 "Cannot set properties of undefined"
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    img.src = '';
     URL.revokeObjectURL(url);
   }
 }
@@ -421,9 +439,14 @@ function agglomerativeCluster(
   const limitedN = faces.length;
 
   // 预计算距离矩阵（对称），O(n²)
+  // 必须先初始化所有行，再填充距离值。
+  // 否则当 i=0, j=1 时 distMatrix[1] 还是 undefined，
+  // 执行 distMatrix[1][0] = dist 会抛 "Cannot set properties of undefined (setting '0')"
   const distMatrix: Float32Array[] = new Array(limitedN);
   for (let i = 0; i < limitedN; i++) {
     distMatrix[i] = new Float32Array(limitedN);
+  }
+  for (let i = 0; i < limitedN; i++) {
     for (let j = i + 1; j < limitedN; j++) {
       const dist = euclideanDistance(faces[i].descriptor, faces[j].descriptor);
       distMatrix[i][j] = dist;
@@ -539,14 +562,13 @@ export async function detectFaces(
 
     // 顺序提取 descriptor（串行）
     //
-    // 为什么必须串行：face-api.js 0.22 依赖的 tfjs-core 1.7 推理**不是线程安全的**，
-    // 它依赖全局可变执行状态（graph runner、当前 tensor、内存管理器）。
+    // 为什么必须串行：tfjs 推理依赖全局可变执行状态（graph runner、当前 tensor、内存管理器）。
     // 若并发执行 detectAllFaces→withFaceLandmarks→withFaceDescriptors，多个推理任务
     // 会通过 await 交错执行，互相污染共享状态，导致
-    //   “Cannot set properties of undefined (setting 'o')”
+    //   "Cannot set properties of undefined (setting 'o')"
     // 这类随机 TypeError（WebGL 与 CPU 后端均会出现）。
     //
-    // 且 JS 为单线程：CPU 后端下“并发”只是时间片切换，无真实并行，反而因状态竞争更慢；
+    // 且 JS 为单线程：CPU 后端下"并发"只是时间片切换，无真实并行，反而因状态竞争更慢；
     // WebGL 后端也是通过主线程串行提交到 GPU。因此串行既不损失速度，又彻底消除竞态。
     onProgress?.({ phase: 'detecting', current: 0, total: photos.length, message: '检测人脸...' });
     const allFaces: FaceRecord[] = [];
@@ -567,12 +589,17 @@ export async function detectFaces(
         failedCount++;
       }
       doneCount++;
-      onProgress?.({
-        phase: 'detecting',
-        current: doneCount,
-        total: photos.length,
-        message: `检测人脸 ${doneCount}/${photos.length}`,
-      });
+      // onProgress 放在 try/catch 内部，防止回调错误逃逸到顶层 catch
+      try {
+        onProgress?.({
+          phase: 'detecting',
+          current: doneCount,
+          total: photos.length,
+          message: `检测人脸 ${doneCount}/${photos.length}`,
+        });
+      } catch {
+        // 忽略进度回调错误（如 React state 更新异常）
+      }
     }
 
     if (signal?.aborted) {

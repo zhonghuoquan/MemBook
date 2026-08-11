@@ -207,10 +207,8 @@ async function tryLoadFaceApi(): Promise<FaceApiModule | null> {
 
   faceApiLoadPromise = (async () => {
     try {
-      // 动态 import：未安装时抛异常，捕获后返回 null
-      // face-api.js 为可选依赖，未安装时回退到同步分析（@ts-ignore 跳过模块解析）
-      // @ts-ignore - face-api.js 为可选依赖，未安装时回退到同步分析
-      const mod = (await import(/* @vite-ignore */ 'face-api.js')) as FaceApiModule;
+      // 使用 @vladmandic/face-api（face-api.js 维护版 fork，内置新版 tfjs）
+      const mod = (await import('@vladmandic/face-api')) as unknown as FaceApiModule;
       faceApiModule = mod;
       // 加载模型（从 public/models 目录，可在线下载或本地存放）
       const modelUrl = '/models/face-detection';
@@ -225,8 +223,8 @@ async function tryLoadFaceApi(): Promise<FaceApiModule | null> {
       }
       return mod;
     } catch (err) {
-      // face-api.js 未安装，回退到同步分析
-      logger.warn('[content-aware] face-api.js 未安装，回退到同步分析。错误:', err);
+      // @vladmandic/face-api 未安装，回退到同步分析
+      logger.warn('[content-aware] @vladmandic/face-api 未安装，回退到同步分析。错误:', err);
       return null;
     }
   })();
