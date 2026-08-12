@@ -3,7 +3,7 @@ import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById } from
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
-import { generateCoverPage, generateBackCoverPage, buildCoverPalette } from '../../engine/cover-generator';
+import { generateCoverPage, generateBackCoverPage, buildCoverPalette, regenerateCoverDesign, buildBackCoverTextElements } from '../../engine/cover-generator';
 import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
 
@@ -332,6 +332,87 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         return { pages: np };
       });
     }
+    pushSnapshot(get);
+  },
+
+  /**
+   * 一键换设计：基于当前封面重新智能生成下一款设计（切换版式/主图/配色），保留用户文案。
+   * step>0 向后切换，step<0 向前。
+   */
+  regenerateCoverPage: (step = 1) => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    const albumName = get().projectName || '我的相册';
+    const albumType = get().albumType as AlbumTypeId | undefined;
+    const photos = usePhotoStore.getState().photos;
+    const coverIdx = get().pages.findIndex((p) => p.pageKind === 'cover');
+    if (coverIdx < 0) return;
+    const current = get().pages[coverIdx];
+    const result = regenerateCoverDesign(
+      current,
+      { photos, albumName, albumType },
+      new Map(),
+      pageMm,
+      step,
+    );
+    set((s) => {
+      const np = [...s.pages];
+      np[coverIdx] = result.page;
+      return { pages: np };
+    });
+    pushSnapshot(get);
+  },
+
+  /** 更新封面/封底页的结构化元信息（标题/副标题/作者/日期/封底文案），并同步文字层 */
+  updateCoverFields: (pageIndex, patch) => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    set((s) => {
+      const np = [...s.pages];
+      const page = np[pageIndex];
+      if (!page || !page.pageKind || page.pageKind === 'content') return s;
+      const cf = { ...(page.coverFields ?? {}), ...patch } as NonNullable<AlbumPage['coverFields']>;
+      np[pageIndex] = { ...page, coverFields: cf };
+      // 封底：直接更新落款文字层
+      if (page.pageKind === 'backCover') {
+        const palette = page.background
+          ? { background: page.background, dark: luminanceOf(page.background) < 0.45, titleColor: '#FFF8EC', bodyColor: 'rgba(255,248,236,0.82)' }
+          : { background: '#FFFFFF', dark: false, titleColor: '#2B2A4A', bodyColor: 'rgba(43,42,74,0.72)' };
+        const date = cf.dateText;
+        const els = buildBackCoverTextElements({ backText: cf.backText, date, author: cf.author }, palette, pageMm);
+        np[pageIndex] = { ...np[pageIndex], textElements: els };
+      }
+      return { pages: np };
+    });
+    pushSnapshot(get);
+  },
+
+  /** 切换封面版式：在当前封面上应用另一款封面模板，保留主图与文案 */
+  switchCoverTemplate: (pageIndex, templateId) => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    const albumName = get().projectName || '我的相册';
+    const albumType = get().albumType as AlbumTypeId | undefined;
+    const photos = usePhotoStore.getState().photos;
+    set((s) => {
+      const np = [...s.pages];
+      const page = np[pageIndex];
+      if (!page || page.pageKind !== 'cover') return s;
+      // 保留当前主图 photoId 与用户文案
+      const mainPhotoId = page.placements.find((pl) => pl.slotId === 'main')?.photoId ?? undefined;
+      const cf = page.coverFields ?? {};
+      const result = generateCoverPage(
+        { photos, albumName, albumType, templateId, coverPhotoId: mainPhotoId },
+        new Map(),
+        pageMm,
+      );
+      const newPage = result.page;
+      // 覆盖为新模板并保留用户文案
+      const newCf = { ...(newPage.coverFields ?? {}), ...cf };
+      newPage.coverFields = newCf;
+      np[pageIndex] = newPage;
+      return { pages: np };
+    });
     pushSnapshot(get);
   },
 
