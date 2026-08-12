@@ -1622,7 +1622,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               </div>
             )}
             {visitedTools.has('timeline') && (
-              <div className={!showAnalyzeReport && activeTool === 'timeline' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'timeline' ? 'flex-1 min-h-0 overflow-y-auto scrollbar-inset' : 'hidden'}>
                 <ToolCard
                   title={t('home.organize.sidebar.timeline', '时间线')}
                   description={t('home.organize.sidebar.timelineDesc', '按月份或路径分组浏览照片')}
@@ -1656,7 +1656,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               </div>
             )}
             {visitedTools.has('calendar') && (
-              <div className={!showAnalyzeReport && activeTool === 'calendar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'calendar' ? 'flex-1 min-h-0 overflow-y-auto scrollbar-inset' : 'hidden'}>
                 <ToolCard
                   title={t('home.organize.sidebar.calendar', '日历')}
                   description={t('home.organize.sidebar.calendarDesc', '按日期浏览照片')}
