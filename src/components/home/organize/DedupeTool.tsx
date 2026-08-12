@@ -266,6 +266,15 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
       setTimeout(() => setLastDeleted(null), 5000);
       updateDedupeState(null, {});
       setConfirmMode(false);
+      // 删除完成后重新上报摘要，同步更新报告页数据
+      onResultSummary?.({
+        tool: 'dedupe',
+        hasResult: false,
+        count: 0,
+        label: t('home.organize.dedupe.summaryClean'),
+        targetTool: 'dedupe',
+        color: 'coral',
+      });
     } catch (err) {
       addToast({ type: 'error', message: t('home.organize.dedupe.toastDeleteFailed', { message: (err as Error).message }) });
     } finally {

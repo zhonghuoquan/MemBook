@@ -219,6 +219,15 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
       setGroups([]);
       setMarkedDelete({});
       setScanned(false);
+      // 删除完成后重新上报摘要，同步更新报告页数据
+      onResultSummary?.({
+        tool: 'similar',
+        hasResult: false,
+        count: 0,
+        label: t('home.organize.similar.summaryNone'),
+        targetTool: 'similar',
+        color: 'amber',
+      });
     } catch (err) {
       addToast({ type: 'error', message: t('home.organize.similar.toastDeleteFailed', { message: (err as Error).message }) });
     } finally {

@@ -886,12 +886,12 @@
       "empty": "Please add a photo path first",
       "busy": "A tool is already running, please wait",
       "start": "One-click analysis: {{seq}}",
-      "done": "One-click analyze complete"
+      "done": "Smart analysis report generated"
     },
     "analyzeReport": {
-      "title": "One-click analyze complete",
+      "title": "Smart Analysis Report",
       "subtitle": "Here are the results found this time. Click to jump and handle.",
-      "emptyTitle": "Analysis Report",
+      "emptyTitle": "Smart Analysis Report",
       "emptyHint": "No analysis results yet. Please click \"One-click Analyze\" first.",
       "totalTools": "Tools",
       "hasIssue": "Actionable",
