@@ -635,10 +635,7 @@
         "expand": "展开",
         "collapse": "收起",
         "unknownDate": "未知日期",
-        "overflowSuffix": "张",
-        "empty": "暂无可识别日期的照片",
-        "viewAll": "查看全部 {{count}} 张",
-        "collapseAll": "收起全部"
+        "empty": "暂无可识别日期的照片"
       },
       "calendar": {
         "prevMonth": "上一月",
