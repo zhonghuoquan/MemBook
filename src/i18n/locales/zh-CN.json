@@ -901,6 +901,9 @@
       "jumpHint": "发现 {{count}} 项{{sub}}",
       "subCount": "（涉及 {{sub}}）",
       "cleanHint": "该项无需处理",
+      "cleanRate": "整理完成度",
+      "foundBadge": "已发现",
+      "cleanBadge": "无需处理",
       "handle": "去处理",
       "reanalyze": "重新分析"
     },
