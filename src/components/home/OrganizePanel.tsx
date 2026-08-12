@@ -395,11 +395,11 @@ export function OrganizePanel() {
     return activeTab.photos.filter((p) => selectedPhotoIds.has(p.id));
   }, [selectedPhotoIds, activeTab]);
 
-  // 切换标签时清空选中状态 + 重置工具状态（不同标签的照片集不同，旧结果无效）
+  // 切换标签时清空选中状态。
+  // 注意：不再重置 visitedTools / toolStatuses——工具保持挂载（不带 tab 的 key），
+  // 且扫描结果由各工具内部 useTabCachedResult 按标签缓存，切回时自动恢复，无需卸载重挂。
   useEffect(() => {
     setSelectedPhotoIds(new Set());
-    setVisitedTools(new Set([activeTool]));
-    setToolStatuses(new Map());
   }, [activeTabId]);
 
   // 访问新工具时加入 visitedTools（懒挂载：首次访问才渲染，之后保持挂载保留状态）
@@ -1419,7 +1419,7 @@ export function OrganizePanel() {
             {visitedTools.has('dedupe') && (
               <div className={activeTool === 'dedupe' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <DedupeTool
-                  key={`dedupe-${activeTabId}`}
+                  key="dedupe"
                   {...toolProps}
                   dedupeResult={activeDedupeState.result}
                   dedupeOverrides={activeDedupeState.overrides}
@@ -1431,37 +1431,37 @@ export function OrganizePanel() {
             )}
             {visitedTools.has('organize') && (
               <div className={activeTool === 'organize' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <OrganizeTool key={`organize-${activeTabId}`} {...toolProps} />
+                <OrganizeTool key="organize" {...toolProps} />
               </div>
             )}
             {visitedTools.has('faceCluster') && (
               <div className={activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key={`faceCluster-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
+                <FaceClusterTool key="faceCluster" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
               <div className={activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <SimilarTool key={`similar-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
+                <SimilarTool key="similar" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('screenshot') && (
               <div className={activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ScreenshotTool key={`screenshot-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
+                <ScreenshotTool key="screenshot" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
               </div>
             )}
             {visitedTools.has('exif') && (
               <div className={activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ExifTool key={`exif-${activeTabId}`} {...toolProps} />
+                <ExifTool key="exif" {...toolProps} />
               </div>
             )}
             {visitedTools.has('rename') && (
               <div className={activeTool === 'rename' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <RenameTool key={`rename-${activeTabId}`} {...toolProps} />
+                <RenameTool key="rename" {...toolProps} />
               </div>
             )}
             {visitedTools.has('convert') && (
               <div className={activeTool === 'convert' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ConvertTool key={`convert-${activeTabId}`} {...toolProps} />
+                <ConvertTool key="convert" {...toolProps} />
               </div>
             )}
             {visitedTools.has('timeline') && (
@@ -1482,7 +1482,7 @@ export function OrganizePanel() {
                   }
                 >
                   <TimelineView
-                    key={`timeline-${activeTabId}`}
+                    key="timeline"
                     photos={activeTab?.photos ?? []}
                     readPhotoData={readPhotoData}
                     onSelectionChange={setSelectedPhotoIds}
@@ -1514,7 +1514,7 @@ export function OrganizePanel() {
                   }
                 >
                   <CalendarView
-                    key={`calendar-${activeTabId}`}
+                    key="calendar"
                     photos={activeTab?.photos ?? []}
                     readPhotoData={readPhotoData}
                     selectedIds={selectedPhotoIds}
