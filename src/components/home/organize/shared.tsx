@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PhotoFileInfo, ToolProgress, DataSourceMode } from '../../../photo-tools';
+import type { PhotoFileInfo, ToolProgress, ToolResultSummary, DataSourceMode } from '../../../photo-tools';
 import { formatBytes, isTauri } from '../../../photo-tools';
 import { getThumbUrl, evictFromCache, type ThumbSize } from './thumbCache';
 
@@ -167,6 +167,8 @@ export interface ToolProps {
   tabId?: string;
   /** 工具执行状态变化通知（按工具名汇总，任一 busy 即锁定标签切换） */
   onBusyChange?: (toolName: string, busy: boolean) => void;
+  /** 工具扫描结果摘要上报（供“一键分析结果报告页”汇总展示） */
+  onResultSummary?: (summary: ToolResultSummary) => void;
 }
 
 // ── 共享 UI 组件 ────────────────────────────────────────

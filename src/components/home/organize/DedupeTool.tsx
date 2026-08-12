@@ -39,7 +39,7 @@ interface DedupeToolProps extends ToolProps {
   isAutoRunTarget?: boolean;
 }
 
-export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readPhotoData, onBusyChange, dedupeResult, dedupeOverrides, onDedupeStateChange, autoRunToken, isAutoRunTarget }: DedupeToolProps) {
+export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readPhotoData, onBusyChange, onResultSummary, dedupeResult, dedupeOverrides, onDedupeStateChange, autoRunToken, isAutoRunTarget }: DedupeToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -94,6 +94,18 @@ export function DedupeTool({ photos, sourceMode, onPhotosUpdate, addToast, readP
         onProgress: setProgress,
       });
       updateDedupeState(res, {});
+      // 上报结果摘要（供“一键分析结果报告页”展示）
+      onResultSummary?.({
+        tool: 'dedupe',
+        hasResult: res.totalGroups > 0,
+        count: res.totalGroups,
+        subCount: res.duplicateCount,
+        label: res.totalGroups > 0
+          ? t('home.organize.dedupe.summaryFound', { groups: res.totalGroups, count: res.duplicateCount, size: formatBytes(res.freedBytes) })
+          : t('home.organize.dedupe.summaryClean'),
+        targetTool: 'dedupe',
+        color: 'coral',
+      });
       if (res.totalGroups > 0) {
         addToast({
           type: 'info',

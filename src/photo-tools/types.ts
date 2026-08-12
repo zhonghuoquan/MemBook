@@ -345,3 +345,26 @@ export interface ToolResult<T = unknown> {
   data?: T;
   error?: string;
 }
+
+/**
+ * 单个整理工具的结果摘要（供“一键分析结果报告页”收集展示）
+ *
+ * 每个工具完成扫描后通过 ToolProps.onResultSummary 上报给面板，
+ * 面板汇总后生成“一键分析”结果报告，让用户看到整理的价值。
+ */
+export interface ToolResultSummary {
+  /** 工具名 */
+  tool: string;
+  /** 是否有结果（true 表示本次扫描产生了结果） */
+  hasResult: boolean;
+  /** 该工具发现的“问题”数量（重复张数 / 相似组数 / 截图张数 / 人脸组数） */
+  count: number;
+  /** 副标题统计（可空） */
+  subCount?: number;
+  /** 一句话描述 */
+  label: string;
+  /** 可跳转处理的目标工具 */
+  targetTool: string;
+  /** 主题色 */
+  color: string;
+}

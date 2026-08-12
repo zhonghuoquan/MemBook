@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLicenseStore } from './licenseStore';
+import { TierComparisonPanel } from './TierComparisonPanel';
 import { useEditorStore, useUIStore } from '../store';
 import { getMachineId } from './licenseService';
 import { useDialogHotkeys } from '../hooks/useDialogHotkeys';
@@ -259,6 +260,20 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
               </div>
             </form>
           )}
+
+          {/* 版本阶梯对比：让用户清楚 Free/Pro 各自能力差异 */}
+          <div className="mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-[var(--color-primary-500)]">
+                <path d="M8 2h4l1 3h4a1 1 0 011 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V6a1 1 0 011-1h4l1-3z" />
+                <path d="M10 11l1.5 1.5L14 10" />
+              </svg>
+              <span className="text-[12px] font-[700] text-[var(--color-gray-800)]">
+                {t('license.tier.title', '版本对比')}
+              </span>
+            </div>
+            <TierComparisonPanel currentTier={hasLicense || isActivated ? 'pro' : 'free'} />
+          </div>
         </div>
       </div>
     </div>

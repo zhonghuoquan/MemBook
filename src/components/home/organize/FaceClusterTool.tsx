@@ -30,7 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, useTabCachedResult, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, RangeSlider, useTabCachedResult, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
@@ -69,7 +69,7 @@ function getClusterColor(index: number) {
   return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
 }
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -203,6 +203,19 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       setProgress({ phase: 'clustering', current: 0, total: det.faces.length, message: `聚类 ${det.faces.length} 个人脸...` });
       const res = recluster(det, threshold, photos);
       setResult(res);
+
+      // 上报结果摘要（供“一键分析结果报告页”展示）
+      onResultSummary?.({
+        tool: 'faceCluster',
+        hasResult: res.clusters.length > 0,
+        count: res.clusters.length,
+        subCount: res.photosWithFaces,
+        label: res.clusters.length > 0
+          ? t('home.organize.faceCluster.summaryFound', { clusters: res.clusters.length, faces: res.photosWithFaces, defaultValue: '识别出 {{clusters}} 个人脸组，涉及 {{faces}} 张照片' })
+          : t('home.organize.faceCluster.summaryNone', { defaultValue: '未检测到人脸' }),
+        targetTool: 'faceCluster',
+        color: 'violet',
+      });
 
       if (res.clusters.length > 0) {
         addToast({
@@ -392,23 +405,19 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
 
       {/* ── 顶部：距离阈值滑块 + 操作按钮 ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-          <label className="text-xs text-[var(--color-text-secondary)] whitespace-nowrap">
+        <div className="flex-1 min-w-[220px]">
+          <label className="text-xs text-[var(--color-text-secondary)] block mb-1">
             {t('home.organize.faceCluster.threshold', '识别灵敏度')}
           </label>
-          <input
-            type="range"
+          <RangeSlider
             min={0.3}
             max={0.9}
             step={0.05}
             value={threshold}
-            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            onChange={(v) => setThreshold(v)}
             disabled={running}
-            className="face-sensitivity-range flex-1"
+            accent="#8B6BB0"
           />
-          <span className="text-xs font-mono text-[var(--color-gray-600)] w-10 text-right">
-            {threshold.toFixed(2)}
-          </span>
         </div>
         {!running ? (
           <PrimaryButton onClick={handleStart} disabled={photos.length === 0}>

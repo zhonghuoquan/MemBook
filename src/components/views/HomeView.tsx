@@ -13,7 +13,7 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { HomeOnboardingTour, shouldShowHomeOnboarding } from '../editor/OnboardingTour';
 import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
-import { createAndSaveProject, savePhotos, loadPhotos, setCurrentProjectId } from '../../db';
+import { createAndSaveProject, savePhotos, loadPhotos, loadProject, setCurrentProjectId } from '../../db';
 import { restoreDirectoryHandle, makeDirectPhotoUrl, acquirePhotoUrl } from '../../engine/storage-engine';
 import { photoService } from '../../services/photoService';
 
@@ -551,7 +551,13 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             )}
             {/* 整理面板始终挂载，仅用 CSS 隐藏，避免切换 Tab 时丢失已选文件夹路径 */}
             <div className={activeNav === 'organize' ? 'h-full' : 'hidden'}>
-              <OrganizePanel active={activeNav === 'organize'} />
+              <OrganizePanel
+                active={activeNav === 'organize'}
+                onOpenProject={async (projectId) => {
+                  const proj = await loadProject(projectId);
+                  if (proj) await handleOpenProject(proj);
+                }}
+              />
             </div>
           </div>
         </div>

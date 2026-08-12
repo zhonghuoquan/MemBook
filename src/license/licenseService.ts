@@ -16,6 +16,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { LICENSE_PUBLIC_KEY } from './publicKey';
 import type { ActivationResult, LicenseFeature, TrialRecord } from './types';
+import { isFeatureAvailableForTier } from './tiers';
 import { logger } from '../utils/logger';
 import i18n from '../i18n';
 
@@ -354,10 +355,9 @@ export function canCreateProject(currentProjectCount: number): boolean {
 
 /** 检查某功能是否可用 */
 export function isFeatureAvailable(feature: LicenseFeature): boolean {
-  void feature;
-  // 已激活或试用期内 → 所有功能可用
-  // 试用期结束且未激活 → 所有高级功能不可用
-  return isActivated();
+  // 已激活（Pro）或试用期内 → 所有功能可用
+  // 试用期结束且未激活 → Free 档：Pro 专属功能不可用，基础功能仍可用
+  return isFeatureAvailableForTier(isActivated(), feature);
 }
 
 /** 获取许可证信息（用于 UI 展示） */
