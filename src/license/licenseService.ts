@@ -343,7 +343,7 @@ export function isActivated(): boolean {
 }
 
 /** 普通用户（未激活）最多可创建的相册数量 */
-const FREE_USER_PROJECT_LIMIT = 3;
+const FREE_USER_PROJECT_LIMIT = 10;
 
 /** 普通用户是否可以继续创建项目 */
 export function canCreateProject(currentProjectCount: number): boolean {

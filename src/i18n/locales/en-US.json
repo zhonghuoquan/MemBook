@@ -821,7 +821,8 @@
       "pro": "Pro",
       "upgradeHint": "Activate Pro to unlock all features",
       "proActive": "You have unlocked all Pro features"
-    }
+    },
+    "photoToolRequiresPro": "This feature is Pro-only. Activate to unlock."
   },
   "organize": {
     "title": "Photo Organize",
@@ -880,7 +881,7 @@
       "running": "Analyzing…",
       "empty": "Please add a photo path first",
       "busy": "A tool is already running, please wait",
-      "start": "Starting one-click analyze: Dedupe → Face Recognition → Similar Photos",
+      "start": "One-click analysis: {{seq}}",
       "done": "One-click analyze complete"
     },
     "analyzeReport": {

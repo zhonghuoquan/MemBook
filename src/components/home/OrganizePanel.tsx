@@ -29,6 +29,8 @@ import {
   type DedupeResult,
 } from '../../photo-tools';
 import { useUIStore } from '../../store';
+import { useLicenseStore } from '../../license';
+import type { LicenseFeature } from '../../license/types';
 import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
 import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
@@ -244,6 +246,24 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const { t } = useTranslation();
   const addToast = useUIStore((s) => s.addToast);
 
+  // 照片整理工具的 Pro 专属授权映射：哪些工具需要激活 Pro 才能使用
+  // Free 免费可用：去重、归类、截图识别、重命名、时间线、日历、Exif 查看
+  // Pro 专属：人脸识别、相似照片分析、格式转换、EXIF 批量修改
+  const TOOL_PRO_FEATURE: Partial<Record<ToolId, LicenseFeature>> = {
+    faceCluster: 'faceCluster',
+    similar: 'similar',
+    convert: 'convert',
+    exif: 'exifBatch',
+  };
+  // 检查某工具是否被 Pro 锁定（未激活且该工具属于 Pro 专属）
+  const isFeatureAvailable = useLicenseStore((s) => s.isFeatureAvailable);
+  const checkFeature = useLicenseStore((s) => s.checkFeature);
+  const isToolLocked = (id: ToolId): boolean => {
+    const feat = TOOL_PRO_FEATURE[id];
+    if (!feat) return false;
+    return !isFeatureAvailable(feat);
+  };
+
   // ---- 多路径标签状态 ----
   // 使用 lazy initializer 在初始化时同步恢复 localStorage 中的标签，避免 effect 中 setState
   const [tabs, setTabs] = useState<PathTab[]>(restoreTabsFromStorage);
@@ -314,7 +334,12 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const scanningAny = tabs.some((t) => t.scanning);
 
   // ── “一键分析”状态：自动依次运行 去重 → 人脸识别 → 相似照片 → 截图识别 ──
-  const AUTO_ANALYZE_TOOLS: ToolId[] = ['dedupe', 'faceCluster', 'similar', 'screenshot'];
+  // 对 Free 用户自动剔除 Pro 专属工具（人脸识别/相似照片），仅在授权可用时才纳入序列
+  const AUTO_ANALYZE_TOOLS: ToolId[] = useMemo(
+    () => (['dedupe', 'faceCluster', 'similar', 'screenshot'] as ToolId[]).filter((id) => !isToolLocked(id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isFeatureAvailable],
+  );
   // 当前“一键分析”进行到的工具（'idle' 表示未在运行）
   const [autoAnalyzeStep, setAutoAnalyzeStep] = useState<ToolId | 'idle'>('idle');
   // 触发令牌：每次推进/启动都递增，各工具据此自动开始
@@ -354,9 +379,17 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     setAutoAnalyzeStep('dedupe');
     setAutoAnalyzeToken((n) => n + 1);
     setActiveTool('dedupe');
-    addToast({ type: 'info', message: t('organize.autoAnalyze.start', '开始一键分析：去重 → 人脸识别 → 相似照片 → 截图识别') });
+    // 按实际参与序列（已剔除 Pro 专属工具）拼接提示文案
+    const stepName: Partial<Record<ToolId, string>> = {
+      dedupe: t('home.organize.dedupe.title'),
+      faceCluster: t('home.organize.faceCluster.title'),
+      similar: t('home.organize.similar.title'),
+      screenshot: t('home.organize.screenshot.title'),
+    };
+    const seq = AUTO_ANALYZE_TOOLS.map((id) => stepName[id] ?? id).join(' → ');
+    addToast({ type: 'info', message: t('organize.autoAnalyze.start', { defaultValue: '开始一键分析：{{seq}}', seq }) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, autoAnalyzeRunning, isAnyToolBusy, addToast, t]);
+  }, [activeTab, autoAnalyzeRunning, isAnyToolBusy, addToast, t, AUTO_ANALYZE_TOOLS]);
 
   // “一键分析”推进：当前目标工具真正开始并完成后，才自动切到下一个工具
   useEffect(() => {
@@ -1427,6 +1460,12 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               onSelect={(id) => {
                 // 用户手动切换工具：标记为“用户有操作”，一键分析不再强制自动跳转
                 if (autoAnalyzeRunning) userNavigatedRef.current = true;
+                // Pro 专属工具：未激活时拦截并弹出激活窗口，避免进入空/受限界面
+                if (isToolLocked(id)) {
+                  const feat = TOOL_PRO_FEATURE[id]!;
+                  checkFeature(feat, t('license.photoToolRequiresPro'));
+                  return;
+                }
                 setActiveTool(id);
                 // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
                 setSelectedPhotoIds(new Set());

@@ -38,16 +38,16 @@ export const TIER_FEATURES: TierFeature[] = [
   {
     key: 'createProject',
     label: '创建相册',
-    freeLabel: '最多 3 个',
+    freeLabel: '最多 10 个',
     proLabel: '不限数量',
     proOnly: false,
   },
   {
     key: 'dataImport',
-    label: '照片导入',
-    freeLabel: '基础导入',
+    label: '数据导入 / 迁移',
+    freeLabel: '—',
     proLabel: '完整导入',
-    proOnly: false,
+    proOnly: true,
   },
   {
     key: 'smartLayout',
@@ -72,10 +72,10 @@ export const TIER_FEATURES: TierFeature[] = [
   },
   {
     key: 'exportFile',
-    label: '高清导出 / PDF',
+    label: '导出 / PDF / 打印',
     freeLabel: '标清导出',
     proLabel: '高清无限制',
-    proOnly: true,
+    proOnly: false,
   },
   {
     key: 'photoShuffle',
@@ -89,6 +89,34 @@ export const TIER_FEATURES: TierFeature[] = [
     label: '时间水印',
     freeLabel: '—',
     proLabel: '可用',
+    proOnly: true,
+  },
+  {
+    key: 'faceCluster',
+    label: '人脸识别 / 按人归档',
+    freeLabel: '—',
+    proLabel: '可用',
+    proOnly: true,
+  },
+  {
+    key: 'similar',
+    label: '相似照片分析',
+    freeLabel: '—',
+    proLabel: '可用',
+    proOnly: true,
+  },
+  {
+    key: 'convert',
+    label: '格式转换',
+    freeLabel: '—',
+    proLabel: '可用',
+    proOnly: true,
+  },
+  {
+    key: 'exifBatch',
+    label: 'EXIF 批量修改',
+    freeLabel: '查看',
+    proLabel: '批量修改 + GPS',
     proOnly: true,
   },
 ];
