@@ -252,10 +252,11 @@ export function buildCoverTextElements(
   return els;
 }
 
-/** 构建封底文字元素（居中落款，更简单） */
+/** 构建封底文字元素（居中落款，更简单）。坐标基于百分比（0-100），传入 pageMm 时换算为 mm。 */
 export function buildBackCoverTextElements(
   fields: { backText?: string; date?: string; author?: string },
   palette: CoverPalette,
+  pageMm?: { width: number; height: number },
 ): PageTextElement[] {
   const els: PageTextElement[] = [];
   let y = 70;
@@ -287,7 +288,106 @@ export function buildBackCoverTextElements(
       rotation: 0, zIndex: 99,
     });
   }
+  // 传入页面尺寸时换算为 mm 坐标（供 store 更新文字层直接使用）
+  if (pageMm) {
+    return els.map((el) => ({
+      ...el,
+      x: (el.x / 100) * pageMm.width,
+      y: (el.y / 100) * pageMm.height,
+      width: (el.width / 100) * pageMm.width,
+      height: (el.height / 100) * pageMm.height,
+    }));
+  }
   return els;
+}
+
+/* ══════════════════════ 一键换设计（重新智能生成） ══════════════════════ */
+
+/**
+ * 一键换设计：在当前封面基础上生成"下一个候选设计"，给用户"再给我一个"的探索体验。
+ * 规则（保持美学底线）：
+ *   - 模板：切换到下一款封面版式（循环）；
+ *   - 主图：从候选池（按美学分排序）中选下一张（换主图）；
+ *   - 配色：若换主图则重新按新主图取色，否则保持当前配色，避免无意义抖动。
+ * 返回一个新的封面页（保留用户已填的标题/副标题/作者/日期文案）。
+ */
+export function regenerateCoverDesign(
+  currentPage: AlbumPage,
+  input: CoverGenerateInput,
+  contents: Map<string, PhotoContentInfo> = new Map(),
+  pageMm: { width: number; height: number },
+  step = 1,
+): CoverPageResult {
+  // 1. 模板循环：当前模板 → 下一款封面版式
+  const curIdx = Math.max(0, COVER_TEMPLATES.findIndex((t) => t.id === currentPage.templateId));
+  const nextTemplate = COVER_TEMPLATES[(curIdx + step + COVER_TEMPLATES.length) % COVER_TEMPLATES.length];
+
+  // 2. 主图候选池（按美学分降序）
+  const candidates = (input.photos ?? [])
+    .map((p) => ({ p, score: coverScore(p, contents) }))
+    .filter((c) => c.score >= 0) // 过滤废图
+    .sort((a, b) => b.score - a.score)
+    .map((c) => c.p.id);
+
+  // 3. 换主图：跳过当前主图，取下一个候选（不足则复用当前）
+  let coverPhotoId: string | null = null;
+  if (candidates.length > 0) {
+    const cur = currentPage.placements.find((pl) => pl.slotId === 'main')?.photoId;
+    const startIdx = cur ? candidates.indexOf(cur) : -1;
+    if (candidates.length === 1) {
+      coverPhotoId = candidates[0];
+    } else if (startIdx >= 0) {
+      coverPhotoId = candidates[(startIdx + step + candidates.length) % candidates.length];
+    } else {
+      coverPhotoId = candidates[0];
+    }
+  }
+
+  // 4. 生成新封面页（保留用户文案）
+  const result = generateCoverPage(
+    {
+      ...input,
+      coverPhotoId: coverPhotoId ?? undefined,
+      templateId: nextTemplate.id,
+    },
+    contents,
+    pageMm,
+  );
+
+  // 5. 保留用户已编辑的封面元信息（标题/副标题/作者/日期/封底文案）
+  const cf = currentPage.coverFields ?? {};
+  if (cf.title) result.page.coverFields = { ...result.page.coverFields, title: cf.title };
+  if (cf.subtitle) result.page.coverFields = { ...result.page.coverFields, subtitle: cf.subtitle };
+  if (cf.author) result.page.coverFields = { ...result.page.coverFields, author: cf.author };
+  if (cf.dateText) result.page.coverFields = { ...result.page.coverFields, dateText: cf.dateText };
+
+  // 6. 按用户文案重建文字元素（保持三档层级，若用户改了标题/日期等则同步更新文字层）
+  result.page.textElements = buildCoverTextElements(
+    nextTemplate,
+    {
+      title: cf.title ?? result.page.coverFields?.title ?? (input.albumName.replace(/相册$/u, '') || '回忆'),
+      date: cf.dateText ?? result.page.coverFields?.dateText,
+      subtitle: cf.subtitle ?? result.page.coverFields?.subtitle,
+      author: cf.author ?? result.page.coverFields?.author,
+    },
+    result.palette,
+  ).map((el) => ({
+    ...el,
+    x: (el.x / 100) * pageMm.width,
+    y: (el.y / 100) * pageMm.height,
+    width: (el.width / 100) * pageMm.width,
+    height: (el.height / 100) * pageMm.height,
+  }));
+
+  return result;
+}
+
+/** 封面美学分（供一键换设计的候选池排序复用） */
+function coverScore(p: Photo, contents: Map<string, PhotoContentInfo>): number {
+  const c = contents.get(p.id) ?? (p.clarityScore != null ? { ...DEFAULT_CONTENT_INFO, clarityScore: p.clarityScore } : DEFAULT_CONTENT_INFO);
+  if (c.clarityScore < 0.35) return -1; // 废图排除
+  const centrality = 1 - Math.abs(c.focusX - 0.5) * 2 - Math.abs(c.focusY - 0.5) * 2;
+  return c.faceCount * 1.0 + c.clarityScore * 1.2 + Math.max(0, centrality) * 0.8;
 }
 
 /* ══════════════════════ 主入口 ══════════════════════ */

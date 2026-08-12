@@ -4,6 +4,8 @@ import {
   generateBackCoverPage,
   buildCoverPalette,
   pickCoverPhoto,
+  regenerateCoverDesign,
+  buildBackCoverTextElements,
 } from './cover-generator';
 import type { Photo, AlbumPage } from '../types';
 
@@ -64,5 +66,42 @@ describe('cover-generator 本地规则引擎', () => {
     const dark = buildCoverPalette([30, 30, 30], true);
     expect(dark.dark).toBe(true);
     expect(dark.titleColor).toBe('#FFF8EC');
+  });
+
+  it('一键换设计：切换模板并保留用户文案', () => {
+    const photos = [makePhoto('p1', 0.9), makePhoto('p2', 0.8)];
+    const first = generateCoverPage({ photos, albumName: 'X', templateId: 'cover-1' }, new Map(), PAGE_MM);
+    // 用户改标题
+    first.page.coverFields = { ...first.page.coverFields, title: '自定义标题' };
+    const next = regenerateCoverDesign(first.page, { photos, albumName: 'X' }, new Map(), PAGE_MM, 1);
+    // 模板已切换（cover-1 → cover-2）
+    expect(next.templateId).not.toBe('cover-1');
+    // 用户标题被保留
+    expect(next.page.coverFields?.title).toBe('自定义标题');
+    // 文字层标题同步更新
+    const titleEl = next.page.textElements?.find((el) => el.id.startsWith('cover-title-'));
+    expect(titleEl?.text).toBe('自定义标题');
+  });
+
+  it('一键换设计：主图循环切换（多照片时换一张）', () => {
+    const photos = [makePhoto('p1', 0.9), makePhoto('p2', 0.8)];
+    const first = generateCoverPage({ photos, albumName: 'X', templateId: 'cover-1' }, new Map(), PAGE_MM);
+    const main = first.page.placements.find((pl) => pl.slotId === 'main');
+    const next = regenerateCoverDesign(first.page, { photos, albumName: 'X' }, new Map(), PAGE_MM, 1);
+    const nextMain = next.page.placements.find((pl) => pl.slotId === 'main');
+    // 主图已更换（从 p1 切到 p2，或从 p2 切到 p1）
+    expect(nextMain?.photoId).not.toBe(main?.photoId);
+  });
+
+  it('buildBackCoverTextElements：生成封底落款文字层', () => {
+    const els = buildBackCoverTextElements(
+      { backText: '愿时光珍藏', date: '2023-2024', author: '小明' },
+      { background: '#6C63FF', dark: true, titleColor: '#FFF8EC', bodyColor: 'rgba(255,248,236,0.82)' },
+      PAGE_MM,
+    );
+    const textEl = els.find((el) => el.id.startsWith('back-text-'));
+    const sigEl = els.find((el) => el.id.startsWith('back-sig-'));
+    expect(textEl?.text).toBe('愿时光珍藏');
+    expect(sigEl?.text).toContain('小明');
   });
 });

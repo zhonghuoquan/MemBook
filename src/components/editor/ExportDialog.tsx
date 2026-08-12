@@ -152,6 +152,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [endPage, setEndPage] = useState(1);
   const [quality, setQuality] = useState(90);
   const [dpi, setDpi] = useState(300);
+  const [bleed, setBleed] = useState(0);
+  const [spineWidth, setSpineWidth] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -241,6 +243,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       pageRange: pageRange === 'all' ? { start: 1, end: pages.length } : { start: startPage, end: endPage },
       projectName: (fileName || defaultName),
       outputPath: exportPath || undefined,
+      bleed,
+      spineWidth,
       onProgress: (current, total) => {
         setCurrentPage(current);
         setTotalPages(total);
@@ -282,7 +286,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       setIsExporting(false);
       setProgress(0);
     }
-  }, [format, quality, dpi, pageRange, startPage, endPage, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
+  }, [format, quality, dpi, bleed, spineWidth, pageRange, startPage, endPage, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
 
   const handleOpenFile = useCallback(async () => {
     if (!exportResult?.path) return;
@@ -421,6 +425,29 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                     </label>
                     <input type="range" min={10} max={100} value={quality} onChange={(e) => setQuality(Number(e.target.value))}
                       className="w-full h-1 rounded-full appearance-none bg-[var(--color-gray-200)] outline-none accent-[var(--color-primary-600)] cursor-pointer" />
+                  </div>
+                )}
+
+                {/* 印刷增强：出血 + 书脊（仅 PDF） */}
+                {format === 'pdf' && (
+                  <div className="pt-2 border-t border-[var(--color-border-light)]">
+                    <div className="text-[12px] font-[600] text-[var(--color-gray-700)] mb-2">{t('editor.exportDialog.printEnhance')}</div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-600)] mb-1">{t('editor.print.bleed')} · <span className="text-[var(--color-primary-600)]">{bleed} mm</span></label>
+                        <input type="range" min={0} max={10} step={1} value={bleed}
+                          onChange={(e) => setBleed(Number(e.target.value))}
+                          className="w-full accent-[var(--color-brand)]" />
+                        <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.bleedHint')}</p>
+                      </div>
+                      <div>
+                        <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-600)] mb-1">{t('editor.print.spine')} · <span className="text-[var(--color-primary-600)]">{spineWidth} mm</span></label>
+                        <input type="range" min={0} max={20} step={1} value={spineWidth}
+                          onChange={(e) => setSpineWidth(Number(e.target.value))}
+                          className="w-full accent-[var(--color-brand)]" />
+                        <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.spineHint')}</p>
+                      </div>
+                    </div>
                   </div>
                 )}
 

@@ -31,6 +31,10 @@ export interface PrintOptions {
   paperSize: PrintPaperSize;
   orientation: PrintOrientation;
   printer?: string;
+  /** 印刷级出血（mm）：打印 PDF 四周扩展出血边，供印刷裁切 */
+  bleed?: number;
+  /** 书脊宽度（mm）：封面向右偏移半书脊、封底向左偏移半书脊，模拟装订翻阅观感 */
+  spineWidth?: number;
   onProgress?: (current: number, total: number) => void;
 }
 
@@ -82,7 +86,7 @@ async function renderPagesForPrint(
     const page = pages[i];
     if (!page) continue;
     const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-    const url = await renderPage(page, dpi, photoImages, photoDataMap);
+    const url = await renderPage(page, dpi, photoImages, photoDataMap, { bleed: 0, spineWidth: 0 });
     dataUrls.push(url);
     pageIndices.push(i);
     // 流式回调：每生成一页立即通知调用方，支持增量渲染
@@ -141,6 +145,7 @@ export async function printPages(options: PrintOptions): Promise<void> {
     PRINT_DPI,
     options.color === 'grayscale',
     options.onProgress,
+    { bleed: options.bleed, spineWidth: options.spineWidth },
   );
 
   const dir = await tempDir();

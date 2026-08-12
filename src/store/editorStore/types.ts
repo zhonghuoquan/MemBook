@@ -65,6 +65,12 @@ export interface PageSlice {
   addCoverPage: (options?: { templateId?: string; coverPhotoId?: string }) => void;
   /** 智能生成封底页并插入到尾部（复用封面配色） */
   addBackCoverPage: () => void;
+  /** 一键换设计：基于当前封面重新智能生成下一款设计（切换版式/主图/配色），保留用户文案 */
+  regenerateCoverPage: (step?: number) => void;
+  /** 更新封面/封底页的结构化元信息（标题/副标题/作者/日期/封底文案），并同步文字层 */
+  updateCoverFields: (pageIndex: number, patch: Partial<NonNullable<AlbumPage['coverFields']>>) => void;
+  /** 切换封面版式：在当前封面上应用另一款封面模板，保留主图与文案 */
+  switchCoverTemplate: (pageIndex: number, templateId: string) => void;
 }
 
 /* ── 槽位/照片编辑 ──
