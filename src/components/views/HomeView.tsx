@@ -337,50 +337,51 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
 
     if (project.pages && project.pages.length > 0) {
       setPages(project.pages);
-
-      // 加载当前项目的照片（修复首次进入编辑器照片不显示的 bug）
-      const savedPhotos = await loadPhotos(project.id);
-      if (savedPhotos.length > 0) {
-        const hasDirect = savedPhotos.some((p) => p.storageMode === 'direct');
-        if (hasDirect) {
-          await restoreDirectoryHandle();
-        }
-        await Promise.all(
-          savedPhotos.map(async (p) => {
-            // 确保运行时 albumId 与当前项目一致
-            p.albumId = project.id;
-            if (p.storageMode === 'direct') {
-              // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
-              // P0-fix-2: 用 acquirePhotoUrl（refCount=1）替代 readPhotoFromDB（refCount=0），
-              //   pin 住 URL 防止 LRU 淘汰后被 revoke，彻底解决第一页偶现空白问题。
-              //   退出编辑器时 cleanupProjectResources → revokeAllBlobUrls 会强制释放。
-              const previewId = p.previewBlobId;
-              let url: string | null = null;
-              if (previewId) {
-                url = await acquirePhotoUrl(previewId);
-              }
-              if (!url && hasDirect) {
-                url = await makeDirectPhotoUrl(p);
-              }
-              if (url) p.src = url;
-            } else if (p.storageMode === 'import') {
-              const previewId = p.previewBlobId || p.blobId;
-              if (previewId) {
-                const url = await acquirePhotoUrl(previewId);
-                if (url) p.src = url;
-              }
-            }
-          }),
-        );
-        setPhotos(savedPhotos);
-      } else {
-        setPhotos([]);
-      }
     } else {
       // 项目没有任何页面时进入编辑器空状态，由用户点击添加第一张页面
       setPages([]);
       // P0-fix: 重置 currentPageIndex，避免越界索引导致 Canvas 首次渲染 hook 数量不一致（React #310）
       useEditorStore.setState({ currentPageIndex: 0 });
+    }
+
+    // 加载当前项目的照片（修复首次进入编辑器照片不显示的 bug）
+    // 注意：必须无页面（如“照片整理-加入相册”新建的相册，尚无页面）也加载照片，
+    // 否则通过整理工具加入相册的照片在相册中看不到（表现为“照片未加入成功”）。
+    const savedPhotos = await loadPhotos(project.id);
+    if (savedPhotos.length > 0) {
+      const hasDirect = savedPhotos.some((p) => p.storageMode === 'direct');
+      if (hasDirect) {
+        await restoreDirectoryHandle();
+      }
+      await Promise.all(
+        savedPhotos.map(async (p) => {
+          // 确保运行时 albumId 与当前项目一致
+          p.albumId = project.id;
+          if (p.storageMode === 'direct') {
+            // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
+            // P0-fix-2: 用 acquirePhotoUrl（refCount=1）替代 readPhotoFromDB（refCount=0），
+            //   pin 住 URL 防止 LRU 淘汰后被 revoke，彻底解决第一页偶现空白问题。
+            //   退出编辑器时 cleanupProjectResources → revokeAllBlobUrls 会强制释放。
+            const previewId = p.previewBlobId;
+            let url: string | null = null;
+            if (previewId) {
+              url = await acquirePhotoUrl(previewId);
+            }
+            if (!url && hasDirect) {
+              url = await makeDirectPhotoUrl(p);
+            }
+            if (url) p.src = url;
+          } else if (p.storageMode === 'import') {
+            const previewId = p.previewBlobId || p.blobId;
+            if (previewId) {
+              const url = await acquirePhotoUrl(previewId);
+              if (url) p.src = url;
+            }
+          }
+        }),
+      );
+      setPhotos(savedPhotos);
+    } else {
       setPhotos([]);
     }
     clearSmartLayoutState();
@@ -550,7 +551,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             )}
             {/* 整理面板始终挂载，仅用 CSS 隐藏，避免切换 Tab 时丢失已选文件夹路径 */}
             <div className={activeNav === 'organize' ? 'h-full' : 'hidden'}>
-              <OrganizePanel />
+              <OrganizePanel active={activeNav === 'organize'} />
             </div>
           </div>
         </div>
