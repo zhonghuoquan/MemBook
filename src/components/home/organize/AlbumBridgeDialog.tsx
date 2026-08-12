@@ -205,7 +205,10 @@ export function AlbumBridgeDialog({
                 orientation: orientationOf(imgWidth, imgHeight),
                 fileSize: p.size,
                 storageMode: 'direct',
-                relativePath: p.relativePath || p.path || '',
+                // Tauri 桌面端相册通过 convertFileSrc 读取照片，必须使用绝对路径
+                // （app 常规直接模式 import 也用绝对路径作为 relativePath）。
+                // 优先取 p.path（绝对路径），避免保存相对路径导致相册中无法加载。
+                relativePath: p.path || p.relativePath || '',
                 latitude: p.gpsLat,
                 longitude: p.gpsLon,
                 albumId: selectedProjectId,

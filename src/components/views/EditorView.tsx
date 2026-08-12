@@ -253,53 +253,54 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
               setPages(project.pages);
               useHistoryStore.getState().clear();
               useHistoryStore.getState().pushSnapshot(project.pages, null);
-              const savedPhotos = await loadPhotos(savedId);
-              if (savedPhotos.length > 0) {
-                const hasDirect = savedPhotos.some((p) => p.storageMode === 'direct');
-                if (hasDirect) {
-                  await restoreDirectoryHandle();
-                }
-                let restoredCount = 0;
-                let failedCount = 0;
-                await Promise.all(
-                  savedPhotos.map(async (p) => {
-                    p.albumId = savedId;
-                    if (p.storageMode === 'direct') {
-                      // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
-                      // P0-fix-2: 用 acquirePhotoUrl（refCount=1）pin 住 URL，防止 LRU 淘汰后被 revoke。
-                      const previewId = p.previewBlobId;
-                      let url: string | null = null;
-                      if (previewId) {
-                        url = await acquirePhotoUrl(previewId);
-                      }
-                      if (!url && hasDirect) {
-                        url = await makeDirectPhotoUrl(p);
-                      }
-                      if (url) { p.src = url; restoredCount++; }
-                      else { failedCount++; }
-                    } else if (p.storageMode === 'import') {
-                      const previewId = p.previewBlobId || p.blobId;
-                      if (previewId) {
-                        const url = await acquirePhotoUrl(previewId);
-                        if (url) { p.src = url; restoredCount++; }
-                        else { failedCount++; }
-                      }
-                    }
-                  }),
-                );
-                if (failedCount > 0) {
-                  logger.warn(`照片恢复: ${restoredCount} 张成功, ${failedCount} 张失败 (IndexedDB 数据丢失)`);
-                  addToast({ type: 'warning', message: t('editor.project.photosLoadFailed', { count: failedCount }) });
-                }
-                setPhotos(savedPhotos);
-              } else {
-                setPhotos([]);
-              }
             } else {
               // 项目无页面：进入空状态，等待用户添加第一张页面
               setPages([]);
-              setPhotos([]);
               useHistoryStore.getState().clear();
+            }
+            // 无论是否有页面都加载照片，确保“照片整理-加入相册”新建的相册
+            // 也能在照片面板中看到已加入的照片（避免表现为“照片未加入成功”）。
+            const savedPhotos = await loadPhotos(savedId);
+            if (savedPhotos.length > 0) {
+              const hasDirect = savedPhotos.some((p) => p.storageMode === 'direct');
+              if (hasDirect) {
+                await restoreDirectoryHandle();
+              }
+              let restoredCount = 0;
+              let failedCount = 0;
+              await Promise.all(
+                savedPhotos.map(async (p) => {
+                  p.albumId = savedId;
+                  if (p.storageMode === 'direct') {
+                    // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
+                    // P0-fix-2: 用 acquirePhotoUrl（refCount=1）pin 住 URL，防止 LRU 淘汰后被 revoke。
+                    const previewId = p.previewBlobId;
+                    let url: string | null = null;
+                    if (previewId) {
+                      url = await acquirePhotoUrl(previewId);
+                    }
+                    if (!url && hasDirect) {
+                      url = await makeDirectPhotoUrl(p);
+                    }
+                    if (url) { p.src = url; restoredCount++; }
+                    else { failedCount++; }
+                  } else if (p.storageMode === 'import') {
+                    const previewId = p.previewBlobId || p.blobId;
+                    if (previewId) {
+                      const url = await acquirePhotoUrl(previewId);
+                      if (url) { p.src = url; restoredCount++; }
+                      else { failedCount++; }
+                    }
+                  }
+                }),
+              );
+              if (failedCount > 0) {
+                logger.warn(`照片恢复: ${restoredCount} 张成功, ${failedCount} 张失败 (IndexedDB 数据丢失)`);
+                addToast({ type: 'warning', message: t('editor.project.photosLoadFailed', { count: failedCount }) });
+              }
+              setPhotos(savedPhotos);
+            } else {
+              setPhotos([]);
             }
             addToast({ type: 'success', message: t('editor.project.opened', { name: project.name }) });
             return;
