@@ -50,6 +50,24 @@ export const COVER_TEMPLATES: Template[] = [
     slots: [{ id: 'main', x: 15, y: 34, width: 70, height: 56 }],
     preview: 'full', tags: ['cover', 'albumtype'],
   },
+  /* G. 双图对页 —— 多元素构图：主图横贯上部 + 右下竖图小槽，标题压主图下方 */
+  {
+    id: 'cover-7', name: '双图对页', category: 'personality',
+    slots: [
+      { id: 'main', x: 0, y: 0, width: 100, height: 58 },
+      { id: 'accent', x: 74, y: 74, width: 22, height: 22 },
+    ],
+    preview: 'full', tags: ['cover', 'dualframe', 'collage'],
+  },
+  /* H. 色块卡片 —— 大图圆角卡片 + 右侧竖长装饰槽，标题在左下留白 */
+  {
+    id: 'cover-8', name: '色块卡片', category: 'personality',
+    slots: [
+      { id: 'main', x: 6, y: 6, width: 68, height: 62 },
+      { id: 'accent', x: 80, y: 72, width: 16, height: 22 },
+    ],
+    preview: 'full', tags: ['cover', 'colorblock', 'modern'],
+  },
 ];
 
 /** 封底版式池（更简单：纯色/浅背景 + 居中纪念语 + 可选一张合影小图） */
@@ -63,6 +81,16 @@ export const BACK_COVER_TEMPLATES: Template[] = [
     id: 'backcover-2', name: '居中落款', category: 'personality',
     slots: [],
     preview: 'full', tags: ['backcover', 'minimal'],
+  },
+  {
+    id: 'backcover-3', name: '合影小图', category: 'personality',
+    slots: [{ id: 'main', x: 24, y: 12, width: 52, height: 40 }],
+    preview: 'full', tags: ['backcover', 'memory'],
+  },
+  {
+    id: 'backcover-4', name: '落款横幅', category: 'personality',
+    slots: [{ id: 'main', x: 18, y: 58, width: 64, height: 26 }],
+    preview: 'full', tags: ['backcover', 'signature'],
   },
 ];
 

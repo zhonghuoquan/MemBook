@@ -105,3 +105,45 @@ describe('cover-generator 本地规则引擎', () => {
     expect(sigEl?.text).toContain('小明');
   });
 });
+
+describe('P0-P3 封面封底优化进阶', () => {
+  it('P1 选主图做方向匹配：竖版模板优先选竖图', () => {
+    // cover-3 黄金分割双栏主图槽 62×90（竖长），应优先选竖图
+    const portrait = { ...makePhoto('portrait', 0.7), width: 800, height: 1200, orientation: 'portrait' as const };
+    const landscape = { ...makePhoto('landscape', 0.9), width: 1200, height: 800, orientation: 'landscape' as const };
+    const picked = pickCoverPhoto([portrait, landscape], new Map(), { id: 'cover-3', name: '', category: 'personality', slots: [{ id: 'main', x: 0, y: 5, width: 62, height: 90 }], preview: 'full' });
+    // 竖图在竖槽上获得方向加权，应被选中（尽管 landscape 清晰度更高，方向加分补足画质差）
+    expect(picked).toBe('portrait');
+  });
+
+  it('P2 HSL 配色：高亮照片不再被 clamp 成死白，背景保持彩色且暗判断正确', () => {
+    // 接近白色的浅蓝天空，旧算法三通道放大会 clamp 成 255 → 灰白
+    const pal = buildCoverPalette([238, 244, 250]);
+    // 背景是合法 hex
+    expect(pal.background).toMatch(/^#[0-9a-fA-F]{6}$/);
+    // 高亮底 → 走浅色文字
+    expect(pal.dark).toBe(false);
+    expect(pal.titleColor).toBe('#2B2A4A');
+  });
+
+  it('P2 封底引言与封面区分：首尾情绪落差', () => {
+    const cover = generateCoverPage({ photos: [], albumName: '我们的旅行', albumType: 'travel' }, new Map(), PAGE_MM);
+    const back = generateBackCoverPage({ photos: [], albumName: '我们的旅行', albumType: 'travel' }, cover.palette, PAGE_MM);
+    // 封面引言（开场热烈）与封底落款（结尾安静）应不同
+    // cover 的 subtitle 即封面引言（开场热烈），backText 是封底落款（结尾安静）
+    expect(back.coverFields?.backText).not.toBe(cover.page.coverFields?.subtitle);
+    expect(back.coverFields?.backText).toContain('回忆');
+    expect(cover.page.coverFields?.subtitle ?? '').toContain('风景');
+  });
+
+  it('P3 新增多元素构图封面模板（双槽位）可正常生成', () => {
+    const res = generateCoverPage({ photos: [], albumName: 'X', templateId: 'cover-7' }, new Map(), PAGE_MM);
+    expect(res.templateId).toBe('cover-7');
+    // 双槽位：main 与 accent 都应有 placement
+    const slotIds = res.page.placements.map((pl) => pl.slotId);
+    expect(slotIds).toContain('main');
+    expect(slotIds).toContain('accent');
+    // 文字层仍有三档层级（标题存在）
+    expect(res.page.textElements?.some((el) => el.id.startsWith('cover-title-'))).toBe(true);
+  });
+});

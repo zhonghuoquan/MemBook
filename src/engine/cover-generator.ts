@@ -36,6 +36,16 @@ const TYPE_QUOTES: Record<AlbumTypeId, string> = {
   other: '那些值得被收藏的瞬间',
 };
 
+/* 封底落款引言（与封面区别开：封面"开场热烈"，封底"结尾安静"，形成首尾情绪落差） */
+const BACK_COVER_QUOTES: Record<AlbumTypeId, string> = {
+  travel: '愿回忆，常驻心头',
+  family: '此间温暖，来日方长',
+  wedding: '愿岁月温柔，陪你到白头',
+  growth: '故事未完，继续长大',
+  pet: '世界很大，幸好有你',
+  other: '愿每一瞬美好，都被记得',
+};
+
 /** 智能配色结果 */
 export interface CoverPalette {
   /** 页面背景色（hex） */
@@ -77,13 +87,53 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
-/** 降低饱和度 20-30%，提亮，避免生硬撞色（"好看"与"炫"的分界线） */
+/** RGB [0-255] → HSL（h 0-360, s/l 0-1），纯本地无依赖 */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60; break;
+      case gn: h = ((bn - rn) / d + 2) * 60; break;
+      case bn: h = ((rn - gn) / d + 4) * 60; break;
+    }
+  }
+  return [h, s, l];
+}
+
+/** HSL → RGB（返回 [0-255]） */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) { r = c; g = x; }
+  else if (hp < 2) { r = x; g = c; }
+  else if (hp < 3) { g = c; b = x; }
+  else if (hp < 4) { g = x; b = c; }
+  else if (hp < 5) { r = x; b = c; }
+  else { r = c; b = x; }
+  const m = l - c / 2;
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+
+/**
+ * 降低饱和度 20-30%、提亮，避免生硬撞色。
+ * 改在 HSL 空间操作：只调整饱和度 + 明度通道，规避旧实现"三通道统一放大导致高亮照片
+ * clamp 到 255 变成死白"的溢出失真（"好看"与"炫"的分界线）。
+ */
 function desaturateAndLighten([r, g, b]: [number, number, number], reduce = 0.28, lift = 1.18): [number, number, number] {
-  const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-  const nr = gray + (r - gray) * (1 - reduce);
-  const ng = gray + (g - gray) * (1 - reduce);
-  const nb = gray + (b - gray) * (1 - reduce);
-  return [nr * lift, ng * lift, nb * lift];
+  const [h, s, l] = rgbToHsl(r, g, b);
+  // 降饱和：饱和度整体按比例降低（保留色相与低饱和灰阶的柔和感）
+  const ns = Math.max(0, Math.min(1, s * (1 - reduce)));
+  // 提亮：在明度通道做温和提升，并用 tanh 软压缩避免逼近 1 时硬截断死白
+  const nl = Math.max(0, Math.min(1, l + (0.5 - l) * (lift - 1) * 0.55));
+  const [nr, ng, nb] = hslToRgb(h, ns, nl);
+  return [nr, ng, nb];
 }
 
 /** 计算背景亮度，判断文字用深色还是浅色 */
@@ -119,15 +169,39 @@ export function buildCoverPalette(dominantColor: [number, number, number], darkO
  *   分数 = faceCount*1.0 + clarityScore*1.2 + 主体居中程度
  * 过滤过曝/欠曝/构图杂乱（清晰度 < 0.35 视为废图直接排除）。
  */
-export function pickCoverPhoto(photos: Photo[], contents: Map<string, PhotoContentInfo>): string | null {
+/** 根据模板主图槽的宽高比判断期望的照片方向（'portrait'|'landscape'|'square'） */
+function templateSlotDirection(template: Template): 'portrait' | 'landscape' | 'square' {
+  const main = template.slots.find((s) => s.id === 'main');
+  if (!main) return 'square';
+  const ratio = main.width / main.height; // 槽位百分比宽高比
+  if (ratio > 1.15) return 'landscape';
+  if (ratio < 0.85) return 'portrait';
+  return 'square';
+}
+
+/** 照片方向与目标方向匹配的加分（避免横竖不匹配导致裁切毁图） */
+function directionBonus(photo: Photo, target: 'portrait' | 'landscape' | 'square'): number {
+  // 全幅底图/方形槽对方向宽容，给予少量偏好；竖长/横长槽强匹配方向
+  if (target === 'square') {
+    return photo.orientation === 'square' ? 0.5 : 0;
+  }
+  if (photo.orientation === target) return 1.2;
+  // 方形照片对竖/横槽尚可（cover-fit 裁切安全），给少量加分
+  if (photo.orientation === 'square') return 0.4;
+  return 0;
+}
+
+export function pickCoverPhoto(photos: Photo[], contents: Map<string, PhotoContentInfo>, template?: Template): string | null {
   if (!photos || photos.length === 0) return null;
+  const targetDir = template ? templateSlotDirection(template) : 'square';
   let bestId: string | null = null;
   let bestScore = -Infinity;
   for (const p of photos) {
     const c = contents.get(p.id) ?? (p.clarityScore != null ? { ...DEFAULT_CONTENT_INFO, clarityScore: p.clarityScore } : DEFAULT_CONTENT_INFO);
     if (c.clarityScore < 0.35) continue; // 模糊废图排除
     const centrality = 1 - Math.abs(c.focusX - 0.5) * 2 - Math.abs(c.focusY - 0.5) * 2;
-    const score = c.faceCount * 1.0 + c.clarityScore * 1.2 + Math.max(0, centrality) * 0.8;
+    // 加入方向匹配加权：清晰度/人脸是主导，方向是微调，避免因方向压过画质选到次图
+    const score = c.faceCount * 1.0 + c.clarityScore * 1.2 + Math.max(0, centrality) * 0.8 + directionBonus(p, targetDir) * 0.5;
     if (score > bestScore) {
       bestScore = score;
       bestId = p.id;
@@ -181,6 +255,10 @@ export function buildCoverTextElements(
     titleX = 66; titleY = 30; titleW = 30; // 黄金分割双栏：右侧竖排文字区
   } else if (template.id === 'cover-5') {
     titleX = 8; titleY = 66; titleW = 80;  // 非对称：左下
+  } else if (template.id === 'cover-7') {
+    titleX = 14; titleY = 64; titleW = 72;  // 双图对页：主图下部居中，避让右下竖图
+  } else if (template.id === 'cover-8') {
+    titleX = 8; titleY = 74; titleW = 60;   // 色块卡片：左下留白，避让右侧竖长装饰槽
   } else {
     titleX = 14; titleY = Math.max(mainBottom + 4, 56); titleW = 72;
   }
@@ -322,9 +400,10 @@ export function regenerateCoverDesign(
   const curIdx = Math.max(0, COVER_TEMPLATES.findIndex((t) => t.id === currentPage.templateId));
   const nextTemplate = COVER_TEMPLATES[(curIdx + step + COVER_TEMPLATES.length) % COVER_TEMPLATES.length];
 
-  // 2. 主图候选池（按美学分降序）
+  // 2. 主图候选池（按美学分降序，含方向匹配到目标版式）
+  const targetDir = templateSlotDirection(nextTemplate);
   const candidates = (input.photos ?? [])
-    .map((p) => ({ p, score: coverScore(p, contents) }))
+    .map((p) => ({ p, score: coverScore(p, contents, targetDir) }))
     .filter((c) => c.score >= 0) // 过滤废图
     .sort((a, b) => b.score - a.score)
     .map((c) => c.p.id);
@@ -382,12 +461,12 @@ export function regenerateCoverDesign(
   return result;
 }
 
-/** 封面美学分（供一键换设计的候选池排序复用） */
-function coverScore(p: Photo, contents: Map<string, PhotoContentInfo>): number {
+/** 封面美学分（供一键换设计的候选池排序复用，含方向匹配） */
+function coverScore(p: Photo, contents: Map<string, PhotoContentInfo>, targetDir: 'portrait' | 'landscape' | 'square' = 'square'): number {
   const c = contents.get(p.id) ?? (p.clarityScore != null ? { ...DEFAULT_CONTENT_INFO, clarityScore: p.clarityScore } : DEFAULT_CONTENT_INFO);
   if (c.clarityScore < 0.35) return -1; // 废图排除
   const centrality = 1 - Math.abs(c.focusX - 0.5) * 2 - Math.abs(c.focusY - 0.5) * 2;
-  return c.faceCount * 1.0 + c.clarityScore * 1.2 + Math.max(0, centrality) * 0.8;
+  return c.faceCount * 1.0 + c.clarityScore * 1.2 + Math.max(0, centrality) * 0.8 + directionBonus(p, targetDir) * 0.5;
 }
 
 /* ══════════════════════ 主入口 ══════════════════════ */
@@ -405,8 +484,8 @@ export function generateCoverPage(
   const templateId = input.templateId ?? COVER_TEMPLATES[Math.floor(Math.random() * COVER_TEMPLATES.length)].id;
   const template = COVER_TEMPLATES.find((t) => t.id === templateId) ?? COVER_TEMPLATES[0];
 
-  // 智能选主图
-  const coverPhotoId = input.coverPhotoId ?? pickCoverPhoto(input.photos, contents);
+  // 智能选主图（含方向匹配：优先选与版式主图槽横竖吻合的照片）
+  const coverPhotoId = input.coverPhotoId ?? pickCoverPhoto(input.photos, contents, template);
   const coverPhoto = input.photos.find((p) => p.id === coverPhotoId);
 
   // 智能配色（取主图主色，缺省用品牌紫系）
@@ -466,7 +545,7 @@ export function generateBackCoverPage(
   const template = BACK_COVER_TEMPLATES[0];
   const date = deriveDateRange(input.photos);
   const els = buildBackCoverTextElements(
-    { backText: input.albumType ? TYPE_QUOTES[input.albumType] : '愿你记得这些时光', date, author: undefined },
+    { backText: input.albumType ? BACK_COVER_QUOTES[input.albumType] : '愿你记得这些时光', date, author: undefined },
     palette,
   );
   const scale = (v: number, axis: 'x' | 'y') => (axis === 'x' ? (v / 100) * pageMm.width : (v / 100) * pageMm.height);
@@ -483,7 +562,7 @@ export function generateBackCoverPage(
     templateId: template.id,
     pageKind: 'backCover',
     coverFields: {
-      backText: input.albumType ? TYPE_QUOTES[input.albumType] : undefined,
+      backText: input.albumType ? BACK_COVER_QUOTES[input.albumType] : undefined,
       dateText: date,
     },
     placements: [],

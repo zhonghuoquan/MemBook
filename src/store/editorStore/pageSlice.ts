@@ -3,7 +3,8 @@ import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById } from
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
-import { generateCoverPage, generateBackCoverPage, buildCoverPalette, regenerateCoverDesign, buildBackCoverTextElements } from '../../engine/cover-generator';
+import { generateCoverPage, generateBackCoverPage, buildCoverPalette, regenerateCoverDesign, buildBackCoverTextElements, buildCoverTextElements } from '../../engine/cover-generator';
+import { findCoverTemplateById } from '../../types/cover-templates';
 import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
 
@@ -373,6 +374,27 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       if (!page || !page.pageKind || page.pageKind === 'content') return s;
       const cf = { ...(page.coverFields ?? {}), ...patch } as NonNullable<AlbumPage['coverFields']>;
       np[pageIndex] = { ...page, coverFields: cf };
+      // 封面：重建文字层（标题/副标题/作者/日期），修复"改了没反应"的体验 bug
+      if (page.pageKind === 'cover') {
+        const palette = page.background
+          ? { background: page.background, dark: luminanceOf(page.background) < 0.45, titleColor: '#FFF8EC', bodyColor: 'rgba(255,248,236,0.82)' }
+          : { background: '#FFFFFF', dark: false, titleColor: '#2B2A4A', bodyColor: 'rgba(43,42,74,0.72)' };
+        const template = findCoverTemplateById(page.templateId);
+        if (template) {
+          const els = buildCoverTextElements(
+            template,
+            { title: cf.title ?? '', date: cf.dateText, subtitle: cf.subtitle, author: cf.author },
+            palette,
+          ).map((el) => ({
+            ...el,
+            x: (el.x / 100) * pageMm.width,
+            y: (el.y / 100) * pageMm.height,
+            width: (el.width / 100) * pageMm.width,
+            height: (el.height / 100) * pageMm.height,
+          }));
+          np[pageIndex] = { ...np[pageIndex], textElements: els };
+        }
+      }
       // 封底：直接更新落款文字层
       if (page.pageKind === 'backCover') {
         const palette = page.background
