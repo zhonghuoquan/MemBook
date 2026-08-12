@@ -5,7 +5,7 @@
  * Phase 4  ：视觉相似匹配（pHash 汉明距离 ≤ 阈值，识别 EXIF 差异/重新压缩等衍生文件）
  *
  * 用户交互：
- * - 算法计算 keepIndex 作为建议保留项（★ 蓝色标记）
+ * - 算法计算 keepIndex 作为默认保留项（绿色 ✓ 标记）
  * - 用户可点击卡片切换保留(绿✓)/删除(红✗)，覆盖算法建议
  * - 点击缩略图打开 PhotoQuickView 大图预览
  * - 组头提供"按建议重置"、"全部保留"快捷操作
@@ -451,10 +451,6 @@ function DedupeResults({
       {/* 图例 + 全部重置 */}
       <div className="flex items-center gap-3 text-[11px] text-[var(--color-gray-500)] flex-wrap">
         <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded-full bg-blue-500 inline-flex items-center justify-center text-white text-[8px] font-bold">★</span>
-          {t('home.organize.dedupe.legendSuggest')}
-        </span>
-        <span className="inline-flex items-center gap-1">
           <span className="w-3 h-3 rounded-full bg-green-500 inline-flex items-center justify-center text-white text-[8px] font-bold">✓</span>
           {t('home.organize.dedupe.legendKeep')}
         </span>
@@ -536,8 +532,7 @@ function DedupeResults({
                   <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
                     {g.files.map((f, i) => {
                       const isKeep = keepSet.has(i);
-                      const isSuggest = i === g.keepIndex && !isOverridden;
-                      const stateIcon = isSuggest ? '★' : isKeep ? '✓' : '✗';
+                      const stateIcon = isKeep ? '✓' : '✗';
                       return (
                         <div
                           key={f.id}
@@ -551,7 +546,7 @@ function DedupeResults({
                           <div
                             className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ring-2 ring-white"
                             style={{
-                              background: isSuggest ? '#3b82f6' : isKeep ? '#22c55e' : '#ef4444',
+                              background: isKeep ? '#22c55e' : '#ef4444',
                               textShadow: '0 0 2px rgba(0,0,0,0.5)',
                             }}
                           >
