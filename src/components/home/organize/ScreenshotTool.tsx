@@ -24,6 +24,7 @@ import {
   AddToAlbumButton,
   ThumbImage,
   deletePhotos,
+  useTabCachedResult,
   type ToolProps,
 } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
@@ -47,18 +48,19 @@ interface ScreenshotToolProps extends ToolProps {
 }
 
 export function ScreenshotTool({
-  photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate,
+  photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId,
   autoRunToken, isAutoRunTarget,
 }: ScreenshotToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  const [scanned, setScanned] = useState(false);
+  // 识别结果按标签缓存，切换路径时保留各路径的截图识别结果
+  const [scanned, setScanned] = useTabCachedResult<boolean>(tabId, false);
   // 识别结果
-  const [screenshots, setScreenshots] = useState<ScreenshotItem[]>([]);
-  const [suspects, setSuspects] = useState<ScreenshotItem[]>([]);
-  const [normalPhotos, setNormalPhotos] = useState<PhotoFileInfo[]>([]);
-  const [failedPhotos, setFailedPhotos] = useState(0);
+  const [screenshots, setScreenshots] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
+  const [suspects, setSuspects] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
+  const [normalPhotos, setNormalPhotos] = useTabCachedResult<PhotoFileInfo[]>(tabId, []);
+  const [failedPhotos, setFailedPhotos] = useTabCachedResult<number>(tabId, 0);
   // 当前展示 Tab
   const [tab, setTab] = useState<'screenshots' | 'suspects' | 'normal'>('screenshots');
   // 多选（勾选）的照片 ID

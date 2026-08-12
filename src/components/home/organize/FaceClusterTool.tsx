@@ -30,7 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, useTabCachedResult, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
@@ -69,18 +69,19 @@ function getClusterColor(index: number) {
   return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
 }
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  const [result, setResult] = useState<FaceClusterResult | null>(null);
+  // 检测/聚类结果按标签缓存：切换路径标签时保留各路径的人脸识别结果
+  const [result, setResult] = useTabCachedResult<FaceClusterResult | null>(tabId, null);
   /**
    * 距离阈值（欧氏距离）：值越小越严格（分出更多组），值越大越宽松（合并更多）
    * 默认 0.5，兼顾准确率与召回（欧氏距离越小越严格、越不易误合并）
    */
   const [threshold, setThreshold] = useState(0.5);
-  // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测
-  const [detection, setDetection] = useState<FaceDetectionResult | null>(null);
+  // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测；按标签缓存
+  const [detection, setDetection] = useTabCachedResult<FaceDetectionResult | null>(tabId, null);
   // 选中的照片 ID 集合
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 无人脸照片区域折叠状态

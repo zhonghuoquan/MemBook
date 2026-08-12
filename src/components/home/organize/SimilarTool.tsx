@@ -21,25 +21,26 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, ThumbImage, useTabCachedResult, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
-export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  const [groups, setGroups] = useState<SimilarGroup[]>([]);
+  // 相似分组 / 是否已扫描 / 标记删除 均按标签缓存，切换路径时保留各路径结果
+  const [groups, setGroups] = useTabCachedResult<SimilarGroup[]>(tabId, []);
   const [deleting, setDeleting] = useState(false);
-  const [scanned, setScanned] = useState(false);
+  const [scanned, setScanned] = useTabCachedResult<boolean>(tabId, false);
   // 相似程度：只用一个滑块调节上限（越严格/越宽松）。
   // 下限固定为 6（≤6 属于“重复”，交给照片去重功能处理），用户无需调节。
   const MIN_DISTANCE = 6;
   const [maxDistance, setMaxDistance] = useState(15);
   // 加入相册对话框
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
-  // 用户标记删除的索引：groupId → Set<文件索引>
-  const [markedDelete, setMarkedDelete] = useState<Record<string, Set<number>>>({});
+  // 用户标记删除的索引：groupId → Set<文件索引>（按标签缓存）
+  const [markedDelete, setMarkedDelete] = useTabCachedResult<Record<string, Set<number>>>(tabId, {});
   const abortRef = useRef<AbortController | null>(null);
 
   // 通知父组件工具执行状态（running / deleting），用于禁用标签切换
