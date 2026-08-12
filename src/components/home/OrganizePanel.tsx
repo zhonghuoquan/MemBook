@@ -31,7 +31,7 @@ import {
 import { useUIStore } from '../../store';
 import { useLicenseStore } from '../../license';
 import type { LicenseFeature } from '../../license/types';
-import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
+import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, useTabCachedResult, type ToolProps } from './organize/shared';
 import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
 import { ExifTool } from './organize/ExifTool';
@@ -356,7 +356,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 若用户有操作则不自动跳转（分析照常在后台跑，但不强制切走用户正在看的界面）
   const userNavigatedRef = useRef(false);
   // 一键分析结果报告：本轮分析各工具的上报摘要 + 是否展示报告页
-  const [analyzeReport, setAnalyzeReport] = useState<ToolResultSummary[]>([]);
+  // 按标签（路径）缓存：切换路径时恢复各自的分析报告，避免串到其他路径的报告
+  const [analyzeReport, setAnalyzeReport] = useTabCachedResult<ToolResultSummary[]>(activeTabId ?? undefined, []);
   const [showAnalyzeReport, setShowAnalyzeReport] = useState(false);
 
   /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片 → 截图识别 */
@@ -461,6 +462,9 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 且扫描结果由各工具内部 useTabCachedResult 按标签缓存，切回时自动恢复，无需卸载重挂。
   useEffect(() => {
     setSelectedPhotoIds(new Set());
+    // 切换路径（标签）时关闭报告页：报告按标签缓存，但展示页不跨标签自动弹出，
+    // 避免切到其他路径时仍停留在上一路径的报告视图，需重新点击「查看报告」进入。
+    setShowAnalyzeReport(false);
   }, [activeTabId]);
 
   // 访问新工具时加入 visitedTools（懒挂载：首次访问才渲染，之后保持挂载保留状态）
