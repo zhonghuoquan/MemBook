@@ -47,7 +47,7 @@ function formatDateForInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange }: ToolProps) {
+export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature }: ToolProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'date' | 'gps'>('date');
 
@@ -123,6 +123,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
 
   const handleGeocode = async () => {
     if (!placeName.trim()) return;
+    // Pro 授权守卫：点击“定位”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     setGeocoding(true);
     try {
       const result = await geocode(placeName);
@@ -148,6 +152,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
   const handleExecute = async () => {
     const targetPhotos = effectivePhotos;
     if (targetPhotos.length === 0 || !canExecute) return;
+    // Pro 授权守卫：点击“应用修改”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     setRunning(true);
     let ok = 0, fail = 0;
 
@@ -202,6 +210,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       addToast({ type: 'info', message: t('home.organize.exif.convertAllNoTarget') });
       return;
     }
+    // Pro 授权守卫：点击“全部转换”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     setConvertingAll(true);
     let ok = 0, fail = 0;
     try {
@@ -254,7 +266,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       setConvertingAll(false);
       setProgress(null);
     }
-  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t]);
+  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
 
   // 全部修改：批量把所有「无日期、已识别到日期、且已是 JPEG」的照片写入拍摄日期
   // 非 JPEG 照片需先点「全部转换」，转换后再点「全部修改」
@@ -265,6 +277,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     });
     if (targets.length === 0) {
       addToast({ type: 'info', message: t('home.organize.exif.writeAllNoTarget') });
+      return;
+    }
+    // Pro 授权守卫：点击“全部修改”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
       return;
     }
     setWritingAll(true);
@@ -305,7 +321,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       setWritingAll(false);
       setProgress(null);
     }
-  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t]);
+  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
 
   const isDesktop = isTauri();
 
