@@ -349,11 +349,11 @@ export function PhotoPreview({ photos, initialIndex, onClose }: PhotoPreviewProp
       {/* ── 上一张：左侧垂直居中（固定位置） ── */}
       {index > 0 && (
         <button
-          className="absolute left-5 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-[8px] text-white/70 hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-200 z-30 border-none cursor-pointer"
+          className="absolute left-5 top-1/2 -translate-y-1/2 w-36 h-36 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-[8px] text-white/70 hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-200 z-30 border-none cursor-pointer"
           onClick={(e) => { e.stopPropagation(); goPrev(); }}
           title={t('editor.photoPreview.prev')}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-18 h-18">
             <path d="M15 5l-7 7 7 7" />
           </svg>
         </button>
@@ -362,11 +362,11 @@ export function PhotoPreview({ photos, initialIndex, onClose }: PhotoPreviewProp
       {/* ── 下一张：右侧垂直居中（固定位置） ── */}
       {index < photos.length - 1 && (
         <button
-          className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-[8px] text-white/70 hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-200 z-30 border-none cursor-pointer"
+          className="absolute right-5 top-1/2 -translate-y-1/2 w-36 h-36 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-[8px] text-white/70 hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-200 z-30 border-none cursor-pointer"
           onClick={(e) => { e.stopPropagation(); goNext(); }}
           title={t('editor.photoPreview.next')}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-18 h-18">
             <path d="M9 5l7 7-7 7" />
           </svg>
         </button>
