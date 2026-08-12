@@ -186,7 +186,8 @@ async function analyzePhoto(
         h = size.height;
       }
     }
-    if (w > 0 && h > 0) {
+    // 真实相机照片（有 Make/Model 等拍摄信息）绝不判为截图分辨率/比例，避免误判正常照片
+    if (w > 0 && h > 0 && !hasCameraInfo) {
       if (isScreenResolution(w, h)) signals.push('screenRes');
       else if (isScreenRatio(w, h)) signals.push('screenRatio');
     }
@@ -208,14 +209,20 @@ function classify(signals: ScreenshotSignal[]): { confidence: 'high' | 'suspect'
   // 高置信度：文件名命中，或 EXIF 软件特征 + 分辨率特征组合命中
   const hasFilename = signals.includes('filename');
   const hasSoftware = signals.includes('software');
-  const hasRes = signals.includes('screenRes') || signals.includes('screenRatio');
+  // 精确匹配常见屏幕分辨率是强信号；仅宽高比接近（screenRatio）是弱信号，不单独用于高置信度判定
+  const hasExactRes = signals.includes('screenRes');
+  const hasRatio = signals.includes('screenRatio');
   const hasNoCamera = signals.includes('noCamera');
   const hasPng = signals.includes('pngNoExif');
 
   let high = hasFilename;
-  if (hasSoftware && hasRes) high = true;
-  if (hasNoCamera && hasRes && (hasPng || hasSoftware)) high = true;
-  // 精确屏幕分辨率 + 无相机信息 → 大概率截图
+  // 软件特征 + 精确屏幕分辨率 → 截图特征明显
+  if (hasSoftware && hasExactRes) high = true;
+  // 软件特征 + 屏幕比例（弱信号，仅与软件特征组合时提升到高置信度）
+  if (hasSoftware && hasRatio) high = true;
+  // 精确屏幕分辨率 + 无相机信息 + （PNG 无 EXIF 或软件特征）→ 大概率截图
+  if (hasNoCamera && hasExactRes && (hasPng || hasSoftware)) high = true;
+  // 精确屏幕分辨率 + 无相机信息 → 大概率截图（比例接近不再提升到高置信度，避免正常照片误判）
   if (signals.includes('screenRes') && hasNoCamera) high = true;
 
   return {

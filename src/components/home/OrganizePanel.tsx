@@ -301,8 +301,8 @@ export function OrganizePanel() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const scanningAny = tabs.some((t) => t.scanning);
 
-  // ── “一键分析”状态：自动依次运行 去重 → 人脸识别 → 相似照片分析 ──
-  const AUTO_ANALYZE_TOOLS: ToolId[] = ['dedupe', 'faceCluster', 'similar'];
+  // ── “一键分析”状态：自动依次运行 去重 → 人脸识别 → 相似照片 → 截图识别 ──
+  const AUTO_ANALYZE_TOOLS: ToolId[] = ['dedupe', 'faceCluster', 'similar', 'screenshot'];
   // 当前“一键分析”进行到的工具（'idle' 表示未在运行）
   const [autoAnalyzeStep, setAutoAnalyzeStep] = useState<ToolId | 'idle'>('idle');
   // 触发令牌：每次推进/启动都递增，各工具据此自动开始
@@ -310,8 +310,11 @@ export function OrganizePanel() {
   const [autoAnalyzeRunning, setAutoAnalyzeRunning] = useState(false);
   // 记录本轮“一键分析”中已真正开始运行的工具（用于区分“尚未开始”与“已完成”）
   const autoAnalyzeStartedRef = useRef<Set<ToolId>>(new Set());
+  // 用户是否在一键分析过程中手动操作了（切换到其他工具等）。
+  // 若用户有操作则不自动跳转（分析照常在后台跑，但不强制切走用户正在看的界面）
+  const userNavigatedRef = useRef(false);
 
-  /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片分析 */
+  /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片 → 截图识别 */
   const handleOneClickAnalyze = useCallback(() => {
     const photos = activeTab?.photos ?? [];
     if (photos.length === 0) {
@@ -323,11 +326,18 @@ export function OrganizePanel() {
       return;
     }
     autoAnalyzeStartedRef.current = new Set();
+    userNavigatedRef.current = false;
+    // 预挂载所有参与一键分析的工具，保证即使不自动跳转也能在后台完成扫描
+    setVisitedTools((prev) => {
+      const next = new Set(prev);
+      AUTO_ANALYZE_TOOLS.forEach((id) => next.add(id));
+      return next;
+    });
     setAutoAnalyzeRunning(true);
     setAutoAnalyzeStep('dedupe');
     setAutoAnalyzeToken((n) => n + 1);
     setActiveTool('dedupe');
-    addToast({ type: 'info', message: t('organize.autoAnalyze.start', '开始一键分析：去重 → 人脸识别 → 相似照片') });
+    addToast({ type: 'info', message: t('organize.autoAnalyze.start', '开始一键分析：去重 → 人脸识别 → 相似照片 → 截图识别') });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, autoAnalyzeRunning, isAnyToolBusy, addToast, t]);
 
@@ -349,7 +359,8 @@ export function OrganizePanel() {
           const next = AUTO_ANALYZE_TOOLS[idx + 1];
           setAutoAnalyzeStep(next);
           setAutoAnalyzeToken((n) => n + 1);
-          setActiveTool(next);
+          // 用户有操作时不自动跳转（分析照常在后台跑）
+          if (!userNavigatedRef.current) setActiveTool(next);
         } else {
           setAutoAnalyzeRunning(false);
           setAutoAnalyzeStep('idle');
@@ -366,13 +377,15 @@ export function OrganizePanel() {
       setAutoAnalyzeRunning(false);
       setAutoAnalyzeStep('idle');
       autoAnalyzeStartedRef.current = new Set();
+      userNavigatedRef.current = false;
       addToast({ type: 'success', message: t('organize.autoAnalyze.done', '一键分析完成') });
       return;
     }
     const next = AUTO_ANALYZE_TOOLS[idx + 1];
     setAutoAnalyzeStep(next);
     setAutoAnalyzeToken((n) => n + 1);
-    setActiveTool(next);
+    // 用户有操作时不自动跳转（分析照常在后台跑）
+    if (!userNavigatedRef.current) setActiveTool(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAnalyzeRunning, autoAnalyzeStep, busyTools, addToast, t]);
 
@@ -1371,6 +1384,8 @@ export function OrganizePanel() {
               activeTool={activeTool}
               toolStatuses={toolStatuses}
               onSelect={(id) => {
+                // 用户手动切换工具：标记为“用户有操作”，一键分析不再强制自动跳转
+                if (autoAnalyzeRunning) userNavigatedRef.current = true;
                 setActiveTool(id);
                 // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
                 setSelectedPhotoIds(new Set());
@@ -1431,7 +1446,7 @@ export function OrganizePanel() {
             )}
             {visitedTools.has('screenshot') && (
               <div className={activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ScreenshotTool key={`screenshot-${activeTabId}`} {...toolProps} />
+                <ScreenshotTool key={`screenshot-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
               </div>
             )}
             {visitedTools.has('exif') && (
