@@ -24,6 +24,7 @@ import {
   readExifDateWithFallback,
   type PhotoFileInfo,
   type ToolProgress,
+  type ToolResultSummary,
   type DataSourceMode,
   type DedupeResult,
 } from '../../photo-tools';
@@ -42,6 +43,8 @@ import { CalendarView } from './organize/CalendarView';
 import { AlbumBridgeDialog } from './organize/AlbumBridgeDialog';
 import { LibraryPickerDialog } from './organize/LibraryPickerDialog';
 import { ToolSidebar, type ToolId, type ToolStatus } from './organize/ToolSidebar';
+import { AnalyzeReportPanel } from './organize/AnalyzeReportPanel';
+import { OneClickAlbumWizard } from './organize/OneClickAlbumWizard';
 import { loadPhotos } from '../../db';
 import type { AlbumProject, Photo } from '../../types';
 import { logger } from '../../utils/logger';
@@ -233,9 +236,11 @@ function photoToFileInfo(p: Photo): PhotoFileInfo {
 interface OrganizePanelProps {
   /** 当前整理面板是否处于可见（激活）状态；仅当用户真正进入“照片整理”页时才触发恢复扫描 */
   active?: boolean;
+  /** 一键成册创建相册后，打开编辑器（由 HomeView 注入） */
+  onOpenProject?: (projectId: string) => void;
 }
 
-export function OrganizePanel({ active = false }: OrganizePanelProps) {
+export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelProps) {
   const { t } = useTranslation();
   const addToast = useUIStore((s) => s.addToast);
 
@@ -265,6 +270,8 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
   const [activeTool, setActiveTool] = useState<ToolId>('dedupe');
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
+  // 一键成册 3 步向导
+  const [oneClickAlbumOpen, setOneClickAlbumOpen] = useState(false);
   // 时间线 → 日历跳转的初始月份（跳转后清空，避免后续切换日历视图时仍定位到旧月份）
   const [calendarInitialView, setCalendarInitialView] = useState<{ year: number; month: number } | undefined>();
 
@@ -318,6 +325,9 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
   // 用户是否在一键分析过程中手动操作了（切换到其他工具等）。
   // 若用户有操作则不自动跳转（分析照常在后台跑，但不强制切走用户正在看的界面）
   const userNavigatedRef = useRef(false);
+  // 一键分析结果报告：本轮分析各工具的上报摘要 + 是否展示报告页
+  const [analyzeReport, setAnalyzeReport] = useState<ToolResultSummary[]>([]);
+  const [showAnalyzeReport, setShowAnalyzeReport] = useState(false);
 
   /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片 → 截图识别 */
   const handleOneClickAnalyze = useCallback(() => {
@@ -332,6 +342,8 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
     }
     autoAnalyzeStartedRef.current = new Set();
     userNavigatedRef.current = false;
+    setAnalyzeReport([]);
+    setShowAnalyzeReport(false);
     // 预挂载所有参与一键分析的工具，保证即使不自动跳转也能在后台完成扫描
     setVisitedTools((prev) => {
       const next = new Set(prev);
@@ -383,6 +395,8 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
       setAutoAnalyzeStep('idle');
       autoAnalyzeStartedRef.current = new Set();
       userNavigatedRef.current = false;
+      // 展示一键分析结果报告页（若用户没有手动操作，自动切到报告页；有操作则保留报告数据，用户可手动打开）
+      setShowAnalyzeReport(true);
       addToast({ type: 'success', message: t('organize.autoAnalyze.done', '一键分析完成') });
       return;
     }
@@ -1097,6 +1111,23 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
     });
   }, []);
 
+  /**
+   * 一键分析结果摘要收集：各工具完成扫描后上报，汇总成结果报告页
+   * 只收集“一键分析”运行期间（autoAnalyzeRunning）各工具的摘要，避免普通手动扫描也堆积
+   */
+  const handleResultSummary = useCallback((summary: ToolResultSummary) => {
+    setAnalyzeReport((prev) => {
+      // 去重：同一工具只保留最新一次上报（覆盖旧值）
+      const others = prev.filter((s) => s.tool !== summary.tool);
+      return [...others, summary];
+    });
+  }, []);
+
+  /** 关闭一键分析结果报告页 */
+  const closeAnalyzeReport = useCallback(() => {
+    setShowAnalyzeReport(false);
+  }, []);
+
   // 子工具共享 props（基于激活标签）
   // useMemo 稳定引用：扫描进度更新不会重建此对象，避免工具组件不必要重渲染
   const toolProps = useMemo<ToolProps>(() => ({
@@ -1109,9 +1140,10 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
     onRescan: handleRescan,
     tabId: activeTabId ?? undefined,
     onBusyChange: handleBusyChange,
+    onResultSummary: handleResultSummary,
   }), [
     activeTab?.photos, activeTab?.rootPath, activeTab?.sourceMode,
-    readPhotoData, onPhotosUpdate, addToast, handleRescan, activeTabId, handleBusyChange,
+    readPhotoData, onPhotosUpdate, addToast, handleRescan, activeTabId, handleBusyChange, handleResultSummary,
   ]);
 
   // ── 渲染 ──────────────────────────────────────────────
@@ -1404,22 +1436,63 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
 
           {/* 右侧工作区：无外层标题框，直接渲染工具内容（ToolCard 自带色块标题） */}
           <div className="flex-1 min-w-0 flex flex-col relative">
-            {/* 加入相册浮动按钮（仅 timeline/calendar 显示，固定在右上角） */}
-            {showAlbumButton && (
-              <div className="absolute top-2 right-3 z-20">
-                <AddToAlbumButton
-                  count={selectedPhotoIds.size}
+            {/* 一键成册 + 加入相册浮动按钮（选中照片后显示，固定在右上角） */}
+            {(showAlbumButton || selectedPhotoIds.size > 0) && (
+              <div className="absolute top-2 right-3 z-20 flex items-center gap-2">
+                {/* 一键成册：把选中照片一键排版成可导出的相册 */}
+                <button
+                  type="button"
                   onClick={() => {
                     if (selectedPhotoIds.size === 0) {
                       addToast({
                         type: 'warning',
-                        message: t('home.organize.albumBridge.selectPhotosFirst', {
-                          defaultValue: '请先选择照片',
+                        message: t('organize.oneClickAlbum.selectPhotosFirst', {
+                          defaultValue: '请先在时间线/日历中选择照片',
                         }),
                       });
                       return;
                     }
-                    setAlbumBridgeOpen(true);
+                    setOneClickAlbumOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-[600] transition-all cursor-pointer
+                    border border-[var(--color-brand)] text-[var(--color-brand)] bg-white hover:bg-[var(--color-brand)] hover:text-white
+                    active:scale-95 shadow-sm"
+                  title={t('organize.oneClickAlbum.title', '一键成册')}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <path d="M2 4h4l1-2h3l1 2h3v9H2z" />
+                    <circle cx="8" cy="9" r="2.5" />
+                  </svg>
+                  {t('organize.oneClickAlbum.title', '一键成册')}
+                </button>
+                {showAlbumButton && (
+                  <AddToAlbumButton
+                    count={selectedPhotoIds.size}
+                    onClick={() => {
+                      if (selectedPhotoIds.size === 0) {
+                        addToast({
+                          type: 'warning',
+                          message: t('home.organize.albumBridge.selectPhotosFirst', {
+                            defaultValue: '请先选择照片',
+                          }),
+                        });
+                        return;
+                      }
+                      setAlbumBridgeOpen(true);
+                    }}
+                  />
+                )}
+              </div>
+            )}
+            {/* 一键分析结果报告页：分析完成后展示各工具整理结果汇总，可一键跳转处理 */}
+            {showAnalyzeReport && (
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                <AnalyzeReportPanel
+                  report={analyzeReport}
+                  onClose={closeAnalyzeReport}
+                  onJump={(tool) => {
+                    setActiveTool(tool as ToolId);
+                    setShowAnalyzeReport(false);
                   }}
                 />
               </div>
@@ -1548,6 +1621,18 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
         sourceMode={activeTab?.sourceMode ?? 'folder'}
         addToast={addToast}
         readPhotoData={readPhotoData}
+      />
+
+      {/* 一键成册 3 步向导：选中照片 → 一键排版成册 → 打开编辑器导出 */}
+      <OneClickAlbumWizard
+        open={oneClickAlbumOpen}
+        onClose={() => setOneClickAlbumOpen(false)}
+        photos={selectedPhotos}
+        readPhotoData={readPhotoData}
+        addToast={addToast}
+        onOpenInEditor={(projectId) => {
+          if (onOpenProject) onOpenProject(projectId);
+        }}
       />
 
       {/* 项目库选择弹窗 */}
