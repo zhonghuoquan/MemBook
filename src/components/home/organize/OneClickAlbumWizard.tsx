@@ -209,7 +209,7 @@ export function OneClickAlbumWizard({
       onClick={onClose}
     >
       <div
-        className="bg-[var(--color-card)] rounded-2xl shadow-2xl max-w-lg w-full border border-[var(--color-border)] overflow-hidden"
+        className="bg-[var(--color-card)] rounded-2xl shadow-2xl max-w-2xl w-full border border-[var(--color-border)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -243,7 +243,7 @@ export function OneClickAlbumWizard({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4 bg-[var(--color-surface)] max-h-[60vh] overflow-y-auto custom-scrollbar">
+        <div className="px-6 py-5 space-y-4 bg-[var(--color-surface)] max-h-[70vh] overflow-y-auto custom-scrollbar">
           {step === 1 && (
             <div className="space-y-4">
               <div>
@@ -315,7 +315,7 @@ export function OneClickAlbumWizard({
                   })}
                 </div>
               )}
-              <div className="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-6 gap-1.5 max-h-64 overflow-y-auto custom-scrollbar">
                 {photos.slice(0, 40).map((p) => (
                   <div key={p.id} className="aspect-square rounded-md bg-[var(--color-gray-100)] overflow-hidden">
                     <ThumbImage
