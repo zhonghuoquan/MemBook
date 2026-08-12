@@ -87,7 +87,7 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
       onClick={onClose}
     >
       <div
-        className="bg-[var(--color-card)] rounded-2xl shadow-2xl max-w-lg w-full border border-[var(--color-border)] overflow-hidden"
+        className="bg-[var(--color-card)] rounded-2xl shadow-2xl max-w-2xl w-full border border-[var(--color-border)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
