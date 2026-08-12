@@ -16,7 +16,7 @@ import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, dow
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
-export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange }: ToolProps) {
+export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature }: ToolProps) {
   const { t } = useTranslation();
   const [quality, setQuality] = useState(0.95);
   const [deleteOriginal, setDeleteOriginal] = useState(false);
@@ -58,6 +58,10 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
 
   const handleExecute = async () => {
     if (selectedPhotos.length === 0) return;
+    // Pro 授权守卫：点击“开始转换”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     setRunning(true);
     let ok = 0, fail = 0;
     const convertedIds: string[] = [];

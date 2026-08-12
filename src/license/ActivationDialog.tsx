@@ -108,7 +108,7 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4 bg-[var(--color-surface)]">
+        <div className="px-6 py-5 space-y-4 bg-[var(--color-surface)] max-h-[calc(100vh-140px)] overflow-y-auto">
           {hasLicense ? (
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-[var(--color-success-light)] border border-[var(--color-success-border)] text-[var(--color-success-dark)]">
@@ -196,11 +196,11 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
                   value={signature}
                   onChange={(e) => setSignature(e.target.value)}
                   placeholder={t('license.activation.signaturePlaceholder')}
-                  rows={3}
+                  rows={5}
                   className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)]
-                             bg-[var(--color-surface-raised)] text-[var(--color-text-primary)] text-[12px] font-mono
+                             bg-[var(--color-surface-raised)] text-[var(--color-text-primary)] text-[12px] font-mono leading-relaxed
                              focus:outline-none focus:border-[var(--color-primary-400)] focus:ring-2 focus:ring-[var(--color-primary-100)]
-                             placeholder:text-[var(--color-text-tertiary)] resize-none"
+                             placeholder:text-[var(--color-text-tertiary)] resize-y min-h-[96px] max-h-[180px]"
                 />
               </div>
               {error && (
@@ -208,8 +208,8 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
                   {error}
                 </div>
               )}
-              <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-secondary)]">
-                <span className="truncate">{t('license.activation.machineIdLabel', { machineId })}</span>
+              <div className="flex items-start gap-2 text-[11px] text-[var(--color-text-secondary)]">
+                <span className="flex-1 min-w-0 break-all leading-relaxed">{t('license.activation.machineIdLabel', { machineId })}</span>
                 <button
                   type="button"
                   onClick={handleCopyMachineId}
@@ -261,17 +261,8 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
             </form>
           )}
 
-          {/* 版本阶梯对比：让用户清楚 Free/Pro 各自能力差异 */}
+          {/* 版本阶梯对比：让用户清楚 Free/Pro 各自能力差异（默认折叠，点击后展开） */}
           <div className="mt-4">
-            <div className="flex items-center gap-2 mb-2">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-[var(--color-primary-500)]">
-                <path d="M8 2h4l1 3h4a1 1 0 011 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V6a1 1 0 011-1h4l1-3z" />
-                <path d="M10 11l1.5 1.5L14 10" />
-              </svg>
-              <span className="text-[12px] font-[700] text-[var(--color-gray-800)]">
-                {t('license.tier.title', '版本对比')}
-              </span>
-            </div>
             <TierComparisonPanel currentTier={hasLicense || isActivated ? 'pro' : 'free'} />
           </div>
         </div>

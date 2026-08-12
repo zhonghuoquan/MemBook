@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo, ToolProgress, ToolResultSummary, DataSourceMode } from '../../../photo-tools';
+import type { LicenseFeature } from '../../../license/types';
 import { formatBytes, isTauri } from '../../../photo-tools';
 import { getThumbUrl, evictFromCache, type ThumbSize } from './thumbCache';
 
@@ -169,6 +170,10 @@ export interface ToolProps {
   onBusyChange?: (toolName: string, busy: boolean) => void;
   /** 工具扫描结果摘要上报（供“一键分析结果报告页”汇总展示） */
   onResultSummary?: (summary: ToolResultSummary) => void;
+  /** 工具对应的 Pro 专属功能标识（若为 Pro 专属工具则需授权才能使用） */
+  proFeature?: LicenseFeature;
+  /** Pro 授权守卫：返回该功能是否可用；不可用时弹出激活窗口并返回 false */
+  checkProFeature?: (feature: LicenseFeature, hint?: string) => boolean;
 }
 
 // ── 共享 UI 组件 ────────────────────────────────────────

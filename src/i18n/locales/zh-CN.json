@@ -821,7 +821,10 @@
       "free": "Free",
       "pro": "Pro",
       "upgradeHint": "激活 Pro 解锁全部能力",
-      "proActive": "您已解锁全部 Pro 能力"
+      "proActive": "您已解锁全部 Pro 能力",
+      "comparison": "版本对比",
+      "expand": "展开对比",
+      "collapse": "收起"
     },
     "photoToolRequiresPro": "该功能为 Pro 专属，激活后解锁"
   },
@@ -898,6 +901,9 @@
       "jumpHint": "发现 {{count}} 项{{sub}}",
       "subCount": "（涉及 {{sub}}）",
       "cleanHint": "该项无需处理",
+      "cleanRate": "整理完成度",
+      "foundBadge": "已发现",
+      "cleanBadge": "无需处理",
       "handle": "去处理",
       "reanalyze": "重新分析"
     },
