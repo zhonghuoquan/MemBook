@@ -630,10 +630,7 @@
         "expand": "Expand",
         "collapse": "Collapse",
         "unknownDate": "Unknown date",
-        "overflowSuffix": "",
-        "empty": "No photos with recognizable dates",
-        "viewAll": "View all {{count}}",
-        "collapseAll": "Collapse all"
+        "empty": "No photos with recognizable dates"
       },
       "calendar": {
         "prevMonth": "Previous",
