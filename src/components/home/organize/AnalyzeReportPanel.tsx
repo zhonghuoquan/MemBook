@@ -154,14 +154,14 @@ function CheckIcon({ size = 40 }: { size?: number }) {
       {/* 脉冲光环 */}
       <div
         className="absolute inset-0 rounded-full animate-ping opacity-20"
-        style={{ background: 'var(--color-brand)', animationDuration: '2.5s' }}
+        style={{ background: '#4CAF50', animationDuration: '2.5s' }}
       />
       {/* 渐变圆底 */}
       <div
         className="absolute inset-0 rounded-full flex items-center justify-center"
         style={{
-          background: 'linear-gradient(135deg, #8C85FF 0%, #6C63FF 50%, #5046E5 100%)',
-          boxShadow: '0 4px 16px rgba(108, 99, 255, 0.35)',
+          background: 'linear-gradient(135deg, #A8E6A8 0%, #6CC46C 50%, #3DAF4E 100%)',
+          boxShadow: '0 4px 16px rgba(76, 175, 80, 0.35)',
         }}
       >
         <svg
@@ -182,12 +182,10 @@ function CheckIcon({ size = 40 }: { size?: number }) {
 
 export function AnalyzeReportPanel({
   report,
-  onClose,
   onJump,
   onReanalyze,
 }: {
   report: ToolResultSummary[];
-  onClose: () => void;
   onJump: (tool: string) => void;
   onReanalyze?: () => void;
 }) {
@@ -200,7 +198,7 @@ export function AnalyzeReportPanel({
           <CheckIcon size={56} />
         </div>
         <h3 className="text-lg font-[700] text-[var(--color-gray-800)] mb-1.5">
-          {t('organize.analyzeReport.emptyTitle', '分析报告')}
+          {t('organize.analyzeReport.emptyTitle', '智能分析报告')}
         </h3>
         <p className="text-sm text-[var(--color-text-secondary)]">
           {t('organize.analyzeReport.emptyHint', '暂无可展示的分析结果，请先点击"一键分析"')}
@@ -217,13 +215,13 @@ export function AnalyzeReportPanel({
   const cleanRate = totalTools > 0 ? Math.round((cleanCount / totalTools) * 100) : 0;
 
   return (
-    <div className="max-w-2xl mx-auto py-2 animate-[fadeIn_0.4s_ease]">
+    <div className="w-full py-2 animate-[fadeIn_0.4s_ease]">
       {/* ═══ 头部横幅 ═══ */}
       <div
         className="relative overflow-hidden rounded-2xl mb-5 p-6"
         style={{
-          background: 'linear-gradient(135deg, #E8E3FF 0%, #D9D0FF 45%, #C8BCFF 100%)',
-          boxShadow: '0 8px 32px rgba(108, 99, 255, 0.15)',
+          background: 'linear-gradient(135deg, #E8FFE0 0%, #D0FFC8 45%, #BCFFB0 100%)',
+          boxShadow: '0 8px 32px rgba(76, 175, 80, 0.15)',
         }}
       >
         {/* 装饰圆点 */}
@@ -241,7 +239,7 @@ export function AnalyzeReportPanel({
           {/* 标题 + 副标题 */}
           <div className="flex-1 min-w-0">
             <h3 className="text-xl font-[800] text-[var(--color-gray-800)] tracking-tight">
-              {t('organize.analyzeReport.title', '一键分析完成')}
+              {t('organize.analyzeReport.title', '智能分析报告')}
             </h3>
             <p className="text-sm text-[var(--color-gray-600)] mt-0.5">
               {t('organize.analyzeReport.subtitle', '以下是本次整理发现的结果，点击即可跳转处理')}
@@ -254,30 +252,18 @@ export function AnalyzeReportPanel({
               <button
                 type="button"
                 onClick={onReanalyze}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-[600] cursor-pointer
-                  bg-white text-[var(--color-brand)] border border-white/60 hover:shadow-[var(--shadow-sm)]
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-[700] cursor-pointer
+                  bg-white text-[#3DAF4E] border border-white/60 shadow-sm hover:shadow-[var(--shadow-md)]
                   hover:-translate-y-px active:scale-95 transition-all"
                 title={t('organize.analyzeReport.reanalyze', '重新分析')}
               >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                   <path d="M13.5 8a5.5 5.5 0 11-1.6-3.9" />
                   <path d="M13.5 3v3h-3" />
                 </svg>
                 {t('organize.analyzeReport.reanalyze', '重新分析')}
               </button>
             )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-[600] cursor-pointer
-                bg-white/60 text-[var(--color-gray-600)] border border-white/40 hover:bg-white/90 hover:-translate-y-px active:scale-95 transition-all"
-              title={t('common.close', '关闭')}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-              {t('common.close', '关闭')}
-            </button>
           </div>
         </div>
       </div>
@@ -298,12 +284,13 @@ export function AnalyzeReportPanel({
         <StatCard
           label={t('organize.analyzeReport.hasIssue', '发现可处理项')}
           value={hasIssueCount}
-          gradient="linear-gradient(135deg, #FFE8E8 0%, #FFD4D4 100%)"
-          textColor="#D1513B"
+          gradient="linear-gradient(135deg, #E0F4FF 0%, #C6E9FF 100%)"
+          textColor="#3D8FD6"
           icon={
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-              <path d="M10 3l7 13H3z" />
-              <path d="M10 9v3M10 14v.5" />
+              <circle cx="10" cy="10" r="7" />
+              <path d="M10 7v4" />
+              <path d="M10 14v.5" />
             </svg>
           }
         />

@@ -255,6 +255,27 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 取消分析 */
   const handleCancel = () => abortRef.current?.abort();
 
+  // 结果变化后重新上报摘要（同步更新报告页数据）：
+  // 当用户处理完人脸分组/删除照片后，报告页应反映最新状态
+  const lastReportRef = useRef<string>('');
+  useEffect(() => {
+    if (!result) return;
+    const key = `${result.clusters.length}|${result.photosWithFaces}`;
+    if (lastReportRef.current === key) return;
+    lastReportRef.current = key;
+    onResultSummary?.({
+      tool: 'faceCluster',
+      hasResult: result.clusters.length > 0,
+      count: result.clusters.length,
+      subCount: result.photosWithFaces,
+      label: result.clusters.length > 0
+        ? t('home.organize.faceCluster.summaryFound', { clusters: result.clusters.length, faces: result.photosWithFaces, defaultValue: '识别出 {{clusters}} 个人脸组，涉及 {{faces}} 张照片' })
+        : t('home.organize.faceCluster.summaryNone', { defaultValue: '未检测到人脸' }),
+      targetTool: 'faceCluster',
+      color: 'violet',
+    });
+  }, [result, onResultSummary, t]);
+
   // “一键分析”自动触发：仅当本工具是当前分析目标且令牌变化时，自动开始人脸识别
   const prevToken = useRef(0);
   useEffect(() => {

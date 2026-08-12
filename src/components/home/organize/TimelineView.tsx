@@ -166,16 +166,20 @@ const THUMB_GAP = 8;
  */
 function CollapsedRow({
   items,
+  selected,
   anomalyIds,
   anomalyLabel,
   readPhotoData,
+  onClickThumb,
   onView,
   onDelete,
 }: {
   items: PhotoFileInfo[];
+  selected: Set<string>;
   anomalyIds: Set<string>;
   anomalyLabel: string;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  onClickThumb: (id: string) => void;
   onView: (index: number) => void;
   onDelete: (photo: PhotoFileInfo) => void;
 }) {
@@ -215,11 +219,11 @@ function CollapsedRow({
         <div key={p.id} className="shrink-0" style={{ width: THUMB_SIZE }}>
           <Thumb
             photo={p}
-            selected={false}
+            selected={selected.has(p.id)}
             anomaly={anomalyIds.has(p.id)}
             anomalyLabel={anomalyLabel}
             readPhotoData={readPhotoData}
-            onClick={() => {}}
+            onClick={() => onClickThumb(p.id)}
             onView={() => onView(i)}
             onDelete={() => onDelete(p)}
           />
@@ -279,9 +283,11 @@ function PhotoRow({
     return (
       <CollapsedRow
         items={items}
+        selected={selected}
         anomalyIds={anomalyIds}
         anomalyLabel={anomalyLabel}
         readPhotoData={readPhotoData}
+        onClickThumb={onClickThumb}
         onView={onView}
         onDelete={onDelete}
       />
