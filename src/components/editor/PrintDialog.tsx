@@ -32,6 +32,8 @@ export function PrintDialog({ isOpen, onClose }: Props) {
   const [duplex, setDuplex] = useState<PrintDuplex>('single');
   const [paperSize, setPaperSize] = useState<PrintPaperSize>('auto');
   const [orientation, setOrientation] = useState<PrintOrientation>('auto');
+  const [bleed, setBleed] = useState(0);
+  const [spineWidth, setSpineWidth] = useState(0);
   const [selectedPrinter, setSelectedPrinter] = useState<string>('');
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
 
@@ -140,6 +142,8 @@ export function PrintDialog({ isOpen, onClose }: Props) {
           pagesPerSheet: 1,
           paperSize,
           orientation,
+          bleed,
+          spineWidth,
         },
         onPage,
         onProgress,
@@ -193,6 +197,8 @@ export function PrintDialog({ isOpen, onClose }: Props) {
         pagesPerSheet: 1,
         paperSize,
         orientation,
+        bleed,
+        spineWidth,
         printer: selectedPrinter,
         onProgress: () => {},
       });
@@ -206,7 +212,7 @@ export function PrintDialog({ isOpen, onClose }: Props) {
     } finally {
       setIsPrinting(false);
     }
-  }, [range, startPage, endPage, color, duplex, copies, paperSize, orientation, selectedPrinter, totalPages, addToast, onClose, isPrinting]);
+  }, [range, startPage, endPage, color, duplex, copies, paperSize, orientation, bleed, spineWidth, selectedPrinter, totalPages, addToast, onClose, isPrinting]);
 
   // Enter 确认 / Esc 取消快捷键（替换原有仅 Esc 的监听）
   useDialogHotkeys({ onConfirm: handlePrint, onCancel: onClose, enabled: isOpen, confirmDisabled: isPrinting || totalPages === 0 });
@@ -449,6 +455,40 @@ export function PrintDialog({ isOpen, onClose }: Props) {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-700)] mb-1.5">{t('editor.print.bleed')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    step="1"
+                    value={bleed}
+                    onChange={(e) => setBleed(Number(e.target.value))}
+                    className="flex-1 accent-[var(--color-brand)]"
+                  />
+                  <span className="w-16 text-right text-[var(--text-caption)] text-[var(--color-gray-500)]">{bleed} mm</span>
+                </div>
+                <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.bleedHint')}</p>
+              </div>
+
+              <div>
+                <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-700)] mb-1.5">{t('editor.print.spine')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value={spineWidth}
+                    onChange={(e) => setSpineWidth(Number(e.target.value))}
+                    className="flex-1 accent-[var(--color-brand)]"
+                  />
+                  <span className="w-16 text-right text-[var(--text-caption)] text-[var(--color-gray-500)]">{spineWidth} mm</span>
+                </div>
+                <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.spineHint')}</p>
               </div>
 
               <div>

@@ -46,6 +46,23 @@ const STAGES: Array<{ phase: string; label: string }> = [
 const MAX_THUMBS = 6;
 
 /**
+ * 识别灵敏度档位（整数 1~13）→ 欧氏距离阈值（0.3~0.9）的映射。
+ * 滑块以整数档位显示，避免小数（0.3/0.35/...）与滑块原点、刻度不对齐；
+ * 每个整数档位对应一个 0.05 的欧氏距离步进：
+ *   档位越小阈值越小 → 识别越严格（分组更多更精细）；
+ *   档位越大阈值越大 → 识别越宽松（同一个人更易归为一组）。
+ */
+const LEVEL_MIN = 1;
+const LEVEL_MAX = 13;
+const THRESHOLD_MIN = 0.3;
+const THRESHOLD_STEP = 0.05;
+/** 默认档位：对应欧氏距离 0.5（兼顾准确率与召回） */
+const DEFAULT_LEVEL = 5;
+/** 档位 → 欧氏距离阈值 */
+const levelToThreshold = (level: number) =>
+  THRESHOLD_MIN + (level - LEVEL_MIN) * THRESHOLD_STEP;
+
+/**
  * 人脸组编号色板 — 每个分组使用独立的高饱和配色，
  * 与浅色底色形成明显区分，避免色块与底色重合导致不美观。
  * index 超过色板长度时循环取色。
@@ -76,10 +93,12 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   // 检测/聚类结果按标签缓存：切换路径标签时保留各路径的人脸识别结果
   const [result, setResult] = useTabCachedResult<FaceClusterResult | null>(tabId, null);
   /**
-   * 距离阈值（欧氏距离）：值越小越严格（分出更多组），值越大越宽松（合并更多）
-   * 默认 0.5，兼顾准确率与召回（欧氏距离越小越严格、越不易误合并）
+   * 识别灵敏度档位（整数 1~13）：档位越小越严格（分出更多组），档位越大越宽松（合并更多）
+   * 默认 5 档，对应欧氏距离 0.5，兼顾准确率与召回
    */
-  const [threshold, setThreshold] = useState(0.5);
+  const [level, setLevel] = useState(DEFAULT_LEVEL);
+  // 由档位映射出的欧氏距离阈值（供 recluster 使用）
+  const threshold = levelToThreshold(level);
   // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测；按标签缓存
   const [detection, setDetection] = useTabCachedResult<FaceDetectionResult | null>(tabId, null);
   // 选中的照片 ID 集合
@@ -435,11 +454,11 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             {t('home.organize.faceCluster.threshold', '识别灵敏度')}
           </label>
           <RangeSlider
-            min={0.3}
-            max={0.9}
-            step={0.05}
-            value={threshold}
-            onChange={(v) => setThreshold(v)}
+            min={LEVEL_MIN}
+            max={LEVEL_MAX}
+            step={1}
+            value={level}
+            onChange={(v) => setLevel(v)}
             disabled={running}
             accent="#8B6BB0"
           />
@@ -457,7 +476,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         )}
       </div>
       <p className="text-[11px] text-[var(--color-gray-500)] mt-1">
-        {t('home.organize.faceCluster.thresholdHint', '数值越小识别越严格（分组更多更精细），数值越大识别越宽松（同一个人更易被归为一组）')}
+        {t('home.organize.faceCluster.thresholdHint', '档位越小识别越严格（分组更多更精细），档位越大识别越宽松（同一个人更易被归为一组）')}
       </p>
 
       {/* ── 中部：进度条 + 三阶段指示 ── */}

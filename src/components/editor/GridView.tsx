@@ -8,6 +8,7 @@ import { Toolbar } from './Toolbar';
 import { FullscreenView } from './FullscreenView';
 import { useWheel } from '../../hooks/useWheel';
 import type { AlbumPage } from '../../types';
+import { isCoverPage, isBackCoverPage } from '../../types';
 
 /** 4-5 图的随机模板池 */
 const RANDOM_4_5_TEMPLATES = [
@@ -591,7 +592,33 @@ export function GridView({ onBack }: GridViewProps) {
       >
         {visiblePages.length === 0 ? (
           <div className="flex flex-col items-center justify-center w-full h-full text-[var(--color-gray-500)]">
-            <span className="text-sm">{pages.length === 0 ? t('editor.gridView.noPages') : t('editor.gridView.allPagesHidden')}</span>
+            {pages.length === 0 ? (
+              <>
+                <span className="text-sm mb-3">{t('editor.gridView.noPages')}</span>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addCoverPage(); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
+                  >
+                    📕 {t('editor.gridView.addCover')}
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addPage(); }}
+                  >
+                    {t('editor.gridView.addPage')}
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addBackCoverPage(); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
+                  >
+                    📗 {t('editor.gridView.addBackCover')}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <span className="text-sm">{t('editor.gridView.allPagesHidden')}</span>
+            )}
             {hiddenGridPageIds.length > 0 && (
               <button
                 className="mt-3 px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors"
@@ -684,6 +711,56 @@ export function GridView({ onBack }: GridViewProps) {
             className="fixed z-[9999] bg-white border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-[var(--shadow-md)] py-1 min-w-[140px] animate-in fade-in zoom-in-95 duration-150 origin-top-right"
             style={{ right: window.innerWidth - pageMenu.x, top: pageMenu.y }}
           >
+            {/* 封面/封底专属操作：编辑 / 重新生成 */}
+            {(() => {
+              const pg = pages[pageMenu.originalIndex];
+              if (!pg) return null;
+              if (isCoverPage(pg)) {
+                return (
+                  <>
+                    <MenuButton
+                      icon={EditCoverIcon}
+                      label={t('editor.gridView.editCover')}
+                      onClick={() => {
+                        const idx = pageMenu.originalIndex;
+                        setPageMenu(null);
+                        setCurrentPage(idx);
+                        setViewMode('single');
+                      }}
+                    />
+                    <MenuButton
+                      icon={ShuffleIcon}
+                      label={t('editor.gridView.regenerateCover')}
+                      onClick={() => {
+                        useEditorStore.getState().regenerateCoverPage(1);
+                        invalidatePageThumbnail(pg.id);
+                        setPageMenu(null);
+                        addToast({ type: 'success', message: t('editor.gridView.coverRegenerated') });
+                      }}
+                    />
+                    <div className="h-px bg-[var(--color-border-light)] my-1" />
+                  </>
+                );
+              }
+              if (isBackCoverPage(pg)) {
+                return (
+                  <>
+                    <MenuButton
+                      icon={EditCoverIcon}
+                      label={t('editor.gridView.editBackCover')}
+                      onClick={() => {
+                        const idx = pageMenu.originalIndex;
+                        setPageMenu(null);
+                        setCurrentPage(idx);
+                        setViewMode('single');
+                      }}
+                    />
+                    <div className="h-px bg-[var(--color-border-light)] my-1" />
+                  </>
+                );
+              }
+              return null;
+            })()}
             <MenuButton
               icon={CopyIcon}
               label={t('editor.gridView.copyPage')}
@@ -1070,6 +1147,21 @@ const HideIcon = (
     <path d="M2 7c1.5-2.5 4-4 5-4s3.5 1.5 5 4c-1.5 2.5-4 4-5 4s-3.5-1.5-5-4z" />
     <circle cx="7" cy="7" r="1.8" />
     <path d="M3 11l8-8" />
+  </svg>
+);
+
+const EditCoverIcon = (
+  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+    <path d="M2 2h6l4 4v6H2z" />
+    <path d="M8 2v4h4" />
+    <path d="M5 8h4M5 10h3" />
+  </svg>
+);
+
+const ShuffleIcon = (
+  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+    <path d="M12.5 3.5L8 8M11.5 5V3h-2" />
+    <path d="M2 12L6 8M3 8H2M12 11h-1M2 4h1" />
   </svg>
 );
 

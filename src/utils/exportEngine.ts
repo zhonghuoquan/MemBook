@@ -29,6 +29,8 @@ import {
 import { createTextureCanvas } from '../components/editor/canvas/constants';
 import {
   resolveTemplate,
+  isCoverPage,
+  isBackCoverPage,
 } from '../types';
 import {
   shouldShowWatermark,
@@ -59,6 +61,10 @@ export interface ExportOptions {
   projectName: string;
   outputPath?: string;
   onProgress?: (current: number, total: number) => void;
+  /** 印刷级出血（mm，默认 0）：导出 PDF 时四周扩展出血边，供印刷裁切 */
+  bleed?: number;
+  /** 书脊宽度（mm，默认 0）：封面向右偏移半个书脊、封底向左偏移，模拟装订翻阅观感 */
+  spineWidth?: number;
 }
 
 interface ExportWarning {
@@ -1255,29 +1261,58 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
  * @param photoImages 预加载的照片映射
  * @returns JPEG dataURL
  */
+export interface RenderPageOptions {
+  /** 出血边（mm）：四周扩展出血，页面内容偏移到出血区外沿 */
+  bleed?: number;
+  /** 书脊宽度（mm）：封面向右偏移半书脊、封底向左偏移半书脊，模拟装订翻阅观感 */
+  spineWidth?: number;
+}
+
 export async function renderPage(
   page: AlbumPage,
   dpi: number,
   photoImages: Map<string, CanvasImageSource>,
   photoDataMap: Map<string, Photo>,
+  opts: RenderPageOptions = {},
 ): Promise<string> {
   const pageMM = getPageSizeMM();
+  const bleed = opts.bleed ?? 0;
+  const spine = opts.spineWidth ?? 0;
   const pxPerMM = dpi / 25.4;
-  const canvasW = Math.round(pageMM.w * pxPerMM);
-  const canvasH = Math.round(pageMM.h * pxPerMM);
+  // 出血时画布四周扩展出血边
+  const canvasW = Math.round((pageMM.w + bleed * 2) * pxPerMM);
+  const canvasH = Math.round((pageMM.h + bleed * 2) * pxPerMM);
 
   const canvas = document.createElement('canvas');
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext('2d')!;
 
-  // 编辑器逻辑坐标 → 导出像素坐标的缩放因子
+  // 先铺满画布底色（含出血区），避免四周露白
+  ctx.fillStyle = page.background || '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 编辑器逻辑坐标 → 导出像素坐标的缩放因子（基于内容区 = 页面尺寸）
   const logicalW = pageMM.w * MM_TO_PX;
   const logicalH = pageMM.h * MM_TO_PX;
-  const scale = canvasW / logicalW;
+  const scale = canvasW / (logicalW + bleed * 2 * MM_TO_PX);
 
-  // 在缩放后的坐标系中绘制
   ctx.scale(scale, scale);
+
+  // 出血偏移：内容在内容区内绘制，出血边留空（由上方底色铺满）
+  const bleedPx = bleed * MM_TO_PX;
+  ctx.translate(bleedPx, bleedPx);
+
+  // 书脊偏移：封面向右、封底向左偏移半书脊（仅竖版书刊有意义，横版不偏移）
+  const spinePx = spine * MM_TO_PX;
+  if (spine > 0 && pageMM.w < pageMM.h) {
+    if (isCoverPage(page)) {
+      ctx.translate(spinePx / 2, 0);
+    } else if (isBackCoverPage(page)) {
+      ctx.translate(-spinePx / 2, 0);
+    }
+  }
+
   await drawPage(ctx, page, logicalW, logicalH, photoImages, photoDataMap);
 
   try {
@@ -1300,7 +1335,11 @@ export interface ExportResult {
 
 export async function exportToPDF(options: ExportOptions): Promise<ExportResult> {
   const { pageRange, dpi, projectName, outputPath, onProgress } = options;
+  const bleed = options.bleed ?? 0;
+  const spine = options.spineWidth ?? 0;
   const pageMM = getPageSizeMM();
+  const pdfW = pageMM.w + bleed * 2;
+  const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
 
   const task = beginTask();
@@ -1319,10 +1358,10 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
   const uniqueExportPhotos = Array.from(new Map(exportPhotos.map(p => [p.id, p])).values());
   await preheatContentAnalysis(uniqueExportPhotos);
   // 滑动窗口加载：仅缓存当前页 ±N 页的照片位图，控制内存峰值
-  const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
+  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: pdfW, h: pdfH }, dpi));
   const pdf = new jsPDF({
-    orientation: pageMM.w > pageMM.h ? 'landscape' : 'portrait',
-    unit: 'mm', format: [pageMM.w, pageMM.h], compress: true,
+    orientation: pdfW > pdfH ? 'landscape' : 'portrait',
+    unit: 'mm', format: [pdfW, pdfH], compress: true,
   });
   logger.info('[Export] jsPDF 实例创建完成');
 
@@ -1345,13 +1384,13 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
       await sleep(0);
 
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap);
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
 
       // 直接用 data URL 添加到 PDF，避免 jsPDF 处理 HTMLImageElement 时同步阻塞或挂起
       if (pageAdded) {
-        pdf.addPage([pageMM.w, pageMM.h], pageMM.w > pageMM.h ? 'landscape' : 'portrait');
+        pdf.addPage([pdfW, pdfH], pdfW > pdfH ? 'landscape' : 'portrait');
       }
-      pdf.addImage(jpgURL, 'JPEG', 0, 0, pageMM.w, pageMM.h);
+      pdf.addImage(jpgURL, 'JPEG', 0, 0, pdfW, pdfH);
       pageAdded = true;
 
       onProgress?.(current, total);
@@ -1382,22 +1421,35 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
  * 生成打印用的 PDF Blob（不弹保存对话框）。
  * 与 exportToPDF 复用同一套渲染管线，可额外应用灰度。
  */
+export interface PdfOptions {
+  grayscale?: boolean;
+  bleed?: number;
+  spineWidth?: number;
+  onProgress?: (current: number, total: number) => void;
+}
+
 export async function generatePdfBlob(
   pageRange: { start: number; end: number },
   dpi: number,
   grayscale = false,
   onProgress?: (current: number, total: number) => void,
+  printOpts?: PdfOptions,
 ): Promise<Blob> {
   const pageMM = getPageSizeMM();
+  const bleed = printOpts?.bleed ?? 0;
+  const spine = printOpts?.spineWidth ?? 0;
+  // 有出血时 PDF 页面向四周扩展出血边（印刷裁切用）
+  const pdfW = pageMM.w + bleed * 2;
+  const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
 
   const { pages } = useEditorStore.getState();
   const { photos } = usePhotoStore.getState();
   const photoDataMap = new Map(photos.map(p => [p.id, p]));
-  const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
+  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: pdfW, h: pdfH }, dpi));
   const pdf = new jsPDF({
-    orientation: pageMM.w > pageMM.h ? 'landscape' : 'portrait',
-    unit: 'mm', format: [pageMM.w, pageMM.h], compress: true,
+    orientation: pdfW > pdfH ? 'landscape' : 'portrait',
+    unit: 'mm', format: [pdfW, pdfH], compress: true,
   });
 
   let current = 0;
@@ -1417,15 +1469,15 @@ export async function generatePdfBlob(
       await sleep(0);
 
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      let jpgURL = await renderPage(page, dpi, photoImages, photoDataMap);
+      let jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
       if (grayscale) {
         jpgURL = await applyGrayscale(jpgURL);
       }
 
       if (pageAdded) {
-        pdf.addPage([pageMM.w, pageMM.h], pageMM.w > pageMM.h ? 'landscape' : 'portrait');
+        pdf.addPage([pdfW, pdfH], pdfW > pdfH ? 'landscape' : 'portrait');
       }
-      pdf.addImage(jpgURL, 'JPEG', 0, 0, pageMM.w, pageMM.h);
+      pdf.addImage(jpgURL, 'JPEG', 0, 0, pdfW, pdfH);
       pageAdded = true;
 
       onProgress?.(current, total);
