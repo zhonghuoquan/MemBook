@@ -674,7 +674,7 @@
         "description": "Group photos by person, auto-identifying different photos of the same person, can be added to albums",
         "sidebarDesc": "Auto-group by person",
         "threshold": "Recognition Sensitivity",
-        "thresholdHint": "Lower = stricter (more, finer groups), Higher = looser (the same person is more easily grouped together)",
+        "thresholdHint": "Lower level = stricter (more, finer groups), Higher level = looser (the same person is more easily grouped together)",
         "start": "Start Recognition",
         "redetect": "Redetect",
         "cancel": "Cancel",
