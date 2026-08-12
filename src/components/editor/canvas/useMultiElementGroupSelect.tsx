@@ -31,7 +31,7 @@ export interface UseMultiElementGroupSelectOptions {
   template: Template | undefined;
   currentPage: AlbumPage | undefined;
   currentPageIndex: number;
-  multiSelectedElements: { type: 'slot' | 'text' | 'sticky' | 'sticker'; id: string }[];
+  multiSelectedElements: { type: 'slot' | 'text' | 'sticky' | 'sticker' | 'shape'; id: string }[];
   canvasZoom: number;
   groupOX: number;
   groupOY: number;
@@ -94,6 +94,17 @@ function collectElementRects(
         y: (st.y - st.height / 2) * MM_TO_PX,
         width: st.width * MM_TO_PX,
         height: st.height * MM_TO_PX,
+      });
+    } else if (m.type === 'shape') {
+      const sh = currentPage.shapeElements?.find((s) => s.id === m.id);
+      if (!sh) continue;
+      // ShapeElement.x/y 是中心点，需转换为左上角
+      rects.push({
+        id: m.id,
+        x: (sh.x - sh.width / 2) * MM_TO_PX,
+        y: (sh.y - sh.height / 2) * MM_TO_PX,
+        width: sh.width * MM_TO_PX,
+        height: sh.height * MM_TO_PX,
       });
     }
   }
@@ -194,6 +205,13 @@ export function useMultiElementGroupSelect({
         }, false);
       } else if (sel.type === 'sticker') {
         store.updateStickerElement(currentPageIndex, r.id, {
+          x: r.x / MM_TO_PX,
+          y: r.y / MM_TO_PX,
+          width: r.width / MM_TO_PX,
+          height: r.height / MM_TO_PX,
+        }, false);
+      } else if (sel.type === 'shape') {
+        store.updateShapeElement(currentPageIndex, r.id, {
           x: r.x / MM_TO_PX,
           y: r.y / MM_TO_PX,
           width: r.width / MM_TO_PX,

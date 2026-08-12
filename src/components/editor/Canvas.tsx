@@ -7,7 +7,7 @@ import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE
 import { BRAND_ACCENT } from '../../utils/coverDecoration';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
-import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement } from '../../types';
+import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement, ShapeElement } from '../../types';
 import type { GuideLine, GuideType, AlignBounds } from '../../engine/alignment-engine';
 import { findSnap } from '../../engine/alignment-engine';
 import { dragState } from '../../engine/drag-manager';
@@ -29,6 +29,7 @@ import { RotationIcon } from './canvas/RotationIcon';
 import { StickyNoteNode } from './canvas/StickyNoteNode';
 import { TextElementNode } from './canvas/TextElementNode';
 import { StickerNode } from './canvas/StickerNode';
+import { ShapeNode } from './canvas/ShapeNode';
 import { CanvasPhotoRenderer, DragPreviewPhoto } from './canvas/CanvasPhotoRenderer';
 import { useCanvasCentering } from './canvas/useCanvasCentering';
 import { useCanvasWheel } from './canvas/useCanvasWheel';
@@ -191,6 +192,8 @@ export function Canvas() {
   const addStickerElement = useEditorStore((s) => s.addStickerElement);
   const updateStickerElement = useEditorStore((s) => s.updateStickerElement);
   const removeStickerElement = useEditorStore((s) => s.removeStickerElement);
+  const updateShapeElement = useEditorStore((s) => s.updateShapeElement);
+  const removeShapeElement = useEditorStore((s) => s.removeShapeElement);
   const bringToFront = useEditorStore((s) => s.bringToFront);
   const sendToBack = useEditorStore((s) => s.sendToBack);
   const bringSlotToFront = useEditorStore((s) => s.bringSlotToFront);
@@ -224,6 +227,8 @@ export function Canvas() {
 
   /* ── 贴纸选中状态 ── */
   const selectedStickerId = useEditorStore((s) => s.selectedStickerId);
+  const selectedShapeId = useEditorStore((s) => s.selectedShapeId);
+  const setSelectedShapeId = useEditorStore((s) => s.setSelectedShapeId);
   const setSelectedStickerId = useEditorStore((s) => s.setSelectedStickerId);
 
   /* ── 时间水印选中&编辑状态 ── */
@@ -467,12 +472,12 @@ export function Canvas() {
   useCanvasKeyboard({
     shiftKeyRef, altKeyRef, containerRef,
     canvasZoom, selectedSlotId, currentPageIndex, editFlyoutOpen,
-    editingTextId, selectedTextId, selectedStickyId, selectedStickerId,
+    editingTextId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId,
     multiSelectedElements, clearMultiSelect,
     CANVAS_W, CANVAS_H,
     setSelectedSlot, setCanvasZoom,
-    setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId,
-    addToast, removeTextElement, removeStickyNote, removeStickerElement,
+    setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId, setSelectedShapeId,
+    addToast, removeTextElement, removeStickyNote, removeStickerElement, removeShapeElement,
   });
 
   // ── 拖拽缩略图跟随鼠标（含点击偏移用于居中）──
@@ -499,6 +504,12 @@ export function Canvas() {
       setSelectedStickerId(null);
     }
   }, [selectedStickerId, currentPage, setSelectedStickerId]);
+
+  useEffect(() => {
+    if (selectedShapeId && currentPage && !currentPage.shapeElements?.some((s) => s.id === selectedShapeId)) {
+      setSelectedShapeId(null);
+    }
+  }, [selectedShapeId, currentPage, setSelectedShapeId]);
 
   // ── 贴纸拖放：监听 sticker-drag 系统，鼠标释放时在画布上添加贴纸 ──
   // P0-fix 性能优化：原实现将 stickerDragPreview 作为 React state，每次 mousemove 都
@@ -1620,6 +1631,33 @@ export function Canvas() {
           }}
         />,
       });
+    (currentPage.shapeElements || []).forEach((sh) => {
+      const isMultiSelected = multiSelectedElements.some((m) => m.type === 'shape' && m.id === sh.id);
+      const previewRect = multiPreviewRectMap.get(sh.id);
+      const shWithPreview: ShapeElement = previewRect
+        ? { ...sh, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+        : sh;
+      const inMultiSelectMode = multiSelectedElements.length >= 2;
+      items.push({
+        z: sh.zIndex || 0,
+        typeOrder: 1,
+        render: <ShapeNode
+          key={sh.id} shape={shWithPreview} mmToPx={MM_TO_PX}
+          isSelected={selectedShapeId === sh.id || isMultiSelected}
+          showHandles={!inMultiSelectMode}
+          interactive={!isToolMode}
+          onUpdate={(p: Partial<ShapeElement>, rh?: boolean) => updateShapeElement(currentPageIndex, sh.id, p, rh)}
+          onRemove={() => { removeShapeElement(currentPageIndex, sh.id); setSelectedShapeId(null); }}
+          onSelect={(e) => {
+            if (e.evt.ctrlKey || e.evt.metaKey) {
+              toggleMultiSelect({ type: 'shape', id: sh.id });
+            } else {
+              setSelectedShapeId(sh.id);
+            }
+          }}
+        />,
+      });
+    });
     });
     // 排序：先按 z 升序（z 小的渲染在下层），z 相同时 typeOrder 小的（槽位）排前（渲染在装饰下方）
     const sorted = items.sort((a, b) => {
@@ -2547,6 +2585,40 @@ export function Canvas() {
           );
         })()}
 
+        {/* ── 形状浮动工具栏（置顶/置底/删除） ── */}
+        {selectedShapeId && (() => {
+          const sh = currentPage?.shapeElements?.find((s) => s.id === selectedShapeId);
+          if (!sh) return null;
+          const rad = (sh.rotation ?? 0) * Math.PI / 180;
+          const halfW = sh.width / 2;
+          const halfH = sh.height / 2;
+          const bboxTopMm = sh.y - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
+          const offsetMm = 48 / (MM_TO_PX * canvasZoom);
+          const toolX = sh.x * MM_TO_PX * canvasZoom + groupOX;
+          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
+          return (
+            <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
+              style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
+              <button onClick={() => bringToFront(currentPageIndex, 'shape', sh.id)}
+                className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('editor.toolbar.bringToFront')}>
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><line x1="6" y1="1.5" x2="6" y2="7"/><polyline points="3,4.5 6,1.5 9,4.5"/><line x1="2" y1="10.5" x2="10" y2="10.5"/></svg>
+                <span className="text-[10px]">{t('editor.toolbar.bringToFront')}</span>
+              </button>
+              <button onClick={() => sendToBack(currentPageIndex, 'shape', sh.id)}
+                className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('editor.toolbar.sendToBack')}>
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><line x1="6" y1="10.5" x2="6" y2="5"/><polyline points="3,7.5 6,10.5 9,7.5"/><line x1="2" y1="1.5" x2="10" y2="1.5"/></svg>
+                <span className="text-[10px]">{t('editor.toolbar.sendToBack')}</span>
+              </button>
+              <div className="w-px h-4 bg-[var(--color-border)] mx-0.5" />
+              <button onClick={() => { removeShapeElement(currentPageIndex, sh.id); setSelectedShapeId(null); }}
+                className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-error-light)] hover:text-[var(--color-error)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('common.delete')}>
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><path d="M2 3h8M4 3V2a1 1 0 011-1h2a1 1 0 011 1v1M9 3v6a1 1 0 01-1 1H4a1 1 0 01-1-1V3"/></svg>
+                <span className="text-[10px]">{t('common.delete')}</span>
+              </button>
+            </div>
+          );
+        })()}
+
         {/* ── 时间水印浮动工具栏 ── */}
         {selectedWatermark && !editingWatermark && (() => {
           if (!currentPage || !albumSize) return null;
@@ -2750,6 +2822,14 @@ export function Canvas() {
               y = (st.y - st.height / 2) * MM_TO_PX;
               w = st.width * MM_TO_PX;
               h = st.height * MM_TO_PX;
+            } else if (m.type === 'shape') {
+              const sh = currentPage?.shapeElements?.find((s) => s.id === m.id);
+              if (!sh) continue;
+              // ShapeElement.x/y 是中心点，需转换为左上角
+              x = (sh.x - sh.width / 2) * MM_TO_PX;
+              y = (sh.y - sh.height / 2) * MM_TO_PX;
+              w = sh.width * MM_TO_PX;
+              h = sh.height * MM_TO_PX;
             }
             if (x < minX) minX = x;
             if (y < minY) minY = y;
@@ -2783,6 +2863,7 @@ export function Canvas() {
               else if (m.type === 'text') removeTextElement(currentPageIndex, m.id);
               else if (m.type === 'sticky') removeStickyNote(currentPageIndex, m.id);
               else if (m.type === 'sticker') removeStickerElement(currentPageIndex, m.id);
+              else if (m.type === 'shape') removeShapeElement(currentPageIndex, m.id);
             }
             clearMultiSelect();
             addToast({ type: 'success', message: t('editor.toolbar.batchDeleted', { count: multiSelectedElements.length }) });

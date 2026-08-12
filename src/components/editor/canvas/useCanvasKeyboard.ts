@@ -24,6 +24,7 @@ interface UseCanvasKeyboardOptions {
   selectedTextId: string | null;
   selectedStickyId: string | null;
   selectedStickerId: string | null;
+  selectedShapeId: string | null;
   multiSelectedElements: SelectedElement[];
   CANVAS_W: number;
   CANVAS_H: number;
@@ -33,23 +34,25 @@ interface UseCanvasKeyboardOptions {
   setSelectedTextId: (id: string | null) => void;
   setSelectedStickyId: (id: string | null) => void;
   setSelectedStickerId: (id: string | null) => void;
+  setSelectedShapeId: (id: string | null) => void;
   clearMultiSelect: () => void;
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeTextElement: (pageIndex: number, id: string) => void;
   removeStickyNote: (pageIndex: number, id: string) => void;
   removeStickerElement: (pageIndex: number, id: string) => void;
+  removeShapeElement: (pageIndex: number, id: string) => void;
 }
 
 export function useCanvasKeyboard({
   shiftKeyRef, altKeyRef, containerRef,
   canvasZoom, selectedSlotId, currentPageIndex, editFlyoutOpen,
-  editingTextId, selectedTextId, selectedStickyId, selectedStickerId,
+  editingTextId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId,
   multiSelectedElements,
   CANVAS_W, CANVAS_H,
   setSelectedSlot, setCanvasZoom,
-  setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId,
+  setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId, setSelectedShapeId,
   clearMultiSelect,
-  addToast, removeTextElement, removeStickyNote, removeStickerElement,
+  addToast, removeTextElement, removeStickyNote, removeStickerElement, removeShapeElement,
 }: UseCanvasKeyboardOptions) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -198,6 +201,7 @@ export function useCanvasKeyboard({
             else if (m.type === 'text') removeTextElement(currentPageIndex, m.id);
             else if (m.type === 'sticky') removeStickyNote(currentPageIndex, m.id);
             else if (m.type === 'sticker') removeStickerElement(currentPageIndex, m.id);
+            else if (m.type === 'shape') removeShapeElement(currentPageIndex, m.id);
           }
           clearMultiSelect();
           return;
@@ -224,6 +228,12 @@ export function useCanvasKeyboard({
           setSelectedStickerId(null);
           return;
         }
+        // 删除选中的形状
+        if (selectedShapeId && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+          removeShapeElement(currentPageIndex, selectedShapeId);
+          setSelectedShapeId(null);
+          return;
+        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -233,8 +243,8 @@ export function useCanvasKeyboard({
       window.removeEventListener('keyup', up);
     };
   }, [canvasZoom, selectedSlotId, currentPageIndex, setSelectedSlot, setCanvasZoom, addToast, editFlyoutOpen,
-      editingTextId, selectedTextId, selectedStickyId, selectedStickerId,
+      editingTextId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId,
       multiSelectedElements, clearMultiSelect,
-      setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId,
-      removeTextElement, removeStickyNote, removeStickerElement]);
+      setEditingTextId, setSelectedTextId, setSelectedStickyId, setSelectedStickerId, setSelectedShapeId,
+      removeTextElement, removeStickyNote, removeStickerElement, removeShapeElement]);
 }
