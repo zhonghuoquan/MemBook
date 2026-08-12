@@ -11,7 +11,7 @@
  * 顶部用按月分组（TimelineGroup）统计当月照片数，作为月份切换栏的辅助信息。
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolvePhotoDate, type PhotoFileInfo, type TimelineGroup } from '../../../photo-tools';
 import { ThumbImage, ThumbWithMenu, deletePhotos } from './shared';
@@ -172,20 +172,50 @@ export function CalendarView({
 
   const today = new Date();
   // 当前查看的年/月（合并为单一状态，便于函数式更新）；支持 initialView 跳转
-  const [view, setView] = useState(() =>
-    initialView
-      ? { year: initialView.year, month: initialView.month - 1 } // initialView.month 是 1-12，Date month 是 0-11
-      : { year: today.getFullYear(), month: today.getMonth() },
-  );
+  const [view, setView] = useState(() => {
+    if (initialView) {
+      // initialView.month 是 1-12，Date month 是 0-11
+      return { year: initialView.year, month: initialView.month - 1 };
+    }
+    // 无 initialView（从侧栏直接进入日历）时，默认跳转到时间线的第一个月份（与时间线排序一致的最新月份）
+    if (monthGroups.length > 0) {
+      const first = monthGroups[0];
+      return { year: first.year, month: first.month - 1 };
+    }
+    return { year: today.getFullYear(), month: today.getMonth() };
+  });
   // 选中的日期
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
+  // 默认跳转标记：进入日历后仅执行一次"定位到时间线第一个月份"，之后用户手动导航则不再覆盖
+  const defaultJumpedRef = useRef(false);
+
   // 响应 initialView 变化：从时间线“在日历中查看”跳转后，即使日历已挂载也能重新定位到目标月份
+  // 用 setTimeout 包裹，避免在 effect 内同步 setState 触发级联渲染。
   useEffect(() => {
     if (!initialView) return;
-    setView({ year: initialView.year, month: initialView.month - 1 });
-    setSelectedDay(null);
+    const id = setTimeout(() => {
+      setView({ year: initialView.year, month: initialView.month - 1 });
+      setSelectedDay(null);
+    }, 0);
+    return () => clearTimeout(id);
   }, [initialView]);
+
+  // 无 initialView（从侧栏直接进入日历）时，照片加载完成后默认跳转到时间线的第一个月份；
+  // 仅在首次定位时生效，用户手动切换月份后不再覆盖。
+  // 用 setTimeout 包裹，避免在 effect 内同步 setState 触发级联渲染。
+  useEffect(() => {
+    if (defaultJumpedRef.current) return;
+    if (initialView) return;
+    if (monthGroups.length === 0) return;
+    defaultJumpedRef.current = true;
+    const first = monthGroups[0];
+    const id = setTimeout(() => {
+      setView({ year: first.year, month: first.month - 1 });
+      setSelectedDay(null);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [initialView, monthGroups]);
 
   // 上一月 / 下一月
   const goPrevMonth = () => {
