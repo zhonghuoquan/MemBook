@@ -22,7 +22,7 @@ import {
   ProgressBar,
   PrimaryButton,
   AddToAlbumButton,
-  ThumbImage,
+  PhotoCard,
   deletePhotos,
   useTabCachedResult,
   type ToolProps,
@@ -265,78 +265,52 @@ export function ScreenshotTool({
     setSelectedIds(new Set());
   };
 
-  // 渲染单个缩略图（带左上角勾选 + 删除按钮，点击查看大图）
+  // 渲染单个缩略图（统一为 PhotoCard 样式：点击卡片切换选中，点击缩略图预览，右上角 hover 单张删除）
   const renderThumb = (item: ScreenshotItem, list: ScreenshotItem[], idx: number) => {
     const photo = item.photo;
     const isSelected = selectedIds.has(photo.id);
     return (
-      <div key={photo.id} className="relative">
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => openPreview(list.map((s) => s.photo), idx)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openPreview(list.map((s) => s.photo), idx); }}
-          className={`relative rounded-lg overflow-hidden group cursor-zoom-in border-2 transition-all ${
-            isSelected ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]' : 'border-transparent hover:border-[var(--color-border)]'
-          }`}
+      <div key={photo.id} className="relative group">
+        <PhotoCard
+          photo={photo}
+          readPhotoData={readPhotoData}
+          onPreview={() => openPreview(list.map((s) => s.photo), idx)}
+          onToggle={() => toggleSelect(photo.id)}
+          state={isSelected ? 'select' : 'none'}
           title={photo.name}
+          extraFooter={
+            item.reasons.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {item.reasons.slice(0, 3).map((r) => (
+                  <span
+                    key={r}
+                    className="text-[9px] px-1 py-0.5 rounded bg-[var(--color-brand-bg)] text-[var(--color-brand)] font-[500]"
+                  >
+                    {t(`home.organize.screenshot.signal.${SIGNAL_KEY[r] ?? r}`)}
+                  </span>
+                ))}
+              </div>
+            ) : undefined
+          }
+        />
+        {/* 右上角：单张删除（hover 显示，替代原三点菜单） */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
+              handleDelete(photo);
+            }
+          }}
+          className="absolute top-1 right-1 z-20 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
+          title={t('home.organize.shared.delete')}
         >
-          <ThumbImage photo={photo} readPhotoData={readPhotoData} size="medium" />
-
-          {/* 左上角：勾选按钮 */}
-          <div className="absolute top-1 left-1 z-10 flex items-center gap-1">
-            {/* 勾选添加/删除 */}
-            <span
-              role="checkbox"
-              aria-checked={isSelected}
-              tabIndex={-1}
-              onClick={(e) => { e.stopPropagation(); toggleSelect(photo.id); }}
-              className={`w-5 h-5 flex items-center justify-center rounded-full border-2 transition-all cursor-pointer shadow-sm ${
-                isSelected
-                  ? 'bg-[var(--color-brand)] border-[var(--color-brand)] text-white'
-                  : 'bg-white/80 border-[var(--color-gray-300)] text-transparent hover:border-[var(--color-brand)]'
-              }`}
-              title={t('home.organize.screenshot.selectForAlbum', { defaultValue: '勾选：加入相册或删除' })}
-            >
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                <path d="M2 6l3 3 5-6" />
-              </svg>
-            </span>
-          </div>
-
-          {/* 右上角：单张删除（替代原三点菜单） */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
-                handleDelete(photo);
-              }
-            }}
-            className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
-            title={t('home.organize.shared.delete')}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-              <path d="M4 7h16" />
-              <path d="M9 7V4h6v3" />
-              <path d="M6 7l1 13h10l1-13" />
-            </svg>
-          </button>
-        </div>
-
-        {/* 判定依据信号标签 */}
-        {item.reasons.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {item.reasons.slice(0, 3).map((r) => (
-              <span
-                key={r}
-                className="text-[9px] px-1 py-0.5 rounded bg-[var(--color-brand-bg)] text-[var(--color-brand)] font-[500]"
-              >
-                {t(`home.organize.screenshot.signal.${SIGNAL_KEY[r] ?? r}`)}
-              </span>
-            ))}
-          </div>
-        )}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+            <path d="M4 7h16" />
+            <path d="M9 7V4h6v3" />
+            <path d="M6 7l1 13h10l1-13" />
+          </svg>
+        </button>
       </div>
     );
   };
@@ -344,36 +318,32 @@ export function ScreenshotTool({
   // 渲染普通照片缩略图（点击查看大图 + 单张删除）
   const renderNormalThumb = (photo: PhotoFileInfo, list: PhotoFileInfo[], idx: number) => {
     return (
-      <div key={photo.id} className="relative">
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => openPreview(list, idx)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openPreview(list, idx); }}
-          className="relative rounded-lg overflow-hidden group cursor-zoom-in border-2 border-transparent hover:border-[var(--color-border)] transition-all"
+      <div key={photo.id} className="relative group">
+        <PhotoCard
+          photo={photo}
+          readPhotoData={readPhotoData}
+          onPreview={() => openPreview(list, idx)}
           title={photo.name}
+        />
+        {/* 单张删除（右上角 hover 显示） */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
+              void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
+              setNormalPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+            }
+          }}
+          className="absolute top-1 right-1 z-20 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
+          title={t('home.organize.shared.delete')}
         >
-          <ThumbImage photo={photo} readPhotoData={readPhotoData} size="medium" />
-          {/* 单张删除（右上角） */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
-                void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
-                setNormalPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-              }
-            }}
-            className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
-            title={t('home.organize.shared.delete')}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-              <path d="M4 7h16" />
-              <path d="M9 7V4h6v3" />
-              <path d="M6 7l1 13h10l1-13" />
-            </svg>
-          </button>
-        </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+            <path d="M4 7h16" />
+            <path d="M9 7V4h6v3" />
+            <path d="M6 7l1 13h10l1-13" />
+          </svg>
+        </button>
       </div>
     );
   };

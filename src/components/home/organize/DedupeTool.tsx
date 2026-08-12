@@ -22,7 +22,7 @@ import {
   type DedupeGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, PhotoCard, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { evictFromCache } from './thumbCache';
 
@@ -408,34 +408,13 @@ function DedupeResults({
   deleting: boolean;
 }) {
   const { t } = useTranslation();
-  // 照片路径显示：只显示目录，避免与上方文件名重复
-  //  - 照片在当前根目录下（relativePath 不含子目录）→ 显示当前路径 rootPath
-  //  - 照片在子目录下 → 只显示目录路径（去掉文件名，不重复名称）
-  const getPathDisplay = (f: PhotoFileInfo): string => {
-    const lastSep = (s: string) => {
-      const a = s.lastIndexOf('/');
-      const b = s.lastIndexOf('\\');
-      return Math.max(a, b);
-    };
-    const rel = f.relativePath;
-    if (rel) {
-      const idx = lastSep(rel);
-      if (idx > 0) return rel.slice(0, idx); // 子目录相对路径（不含文件名）
-      return rootPath || rel; // 就在当前路径下，显示当前路径
-    }
-    if (f.path) {
-      const idx = lastSep(f.path);
-      return idx > 0 ? f.path.slice(0, idx) : f.path;
-    }
-    return '';
-  };
   // 扫描完成后默认全部展开，方便用户一眼看到所有重复组
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(result.groups.map((g) => g.groupId)));
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
 
@@ -556,68 +535,17 @@ function DedupeResults({
                   <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
                     {g.files.map((f, i) => {
                       const isKeep = keepSet.has(i);
-                      const stateIcon = isKeep ? '✓' : '✗';
                       return (
-                        <div
+                        <PhotoCard
                           key={f.id}
-                          className={`relative rounded-lg border-2 overflow-hidden cursor-pointer transition-all hover:shadow-md ${
-                            isKeep ? 'border-green-400' : 'border-red-300'
-                          }`}
-                          onClick={() => onToggleKeep(g, i)}
-                          title={t('home.organize.dedupe.clickToToggle')}
-                        >
-                          {/* 状态徽章（右上角，白色描边 + 阴影，在图片上更显眼） */}
-                          <div
-                            className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ring-2 ring-white"
-                            style={{
-                              background: isKeep ? '#22c55e' : '#ef4444',
-                              textShadow: '0 0 2px rgba(0,0,0,0.5)',
-                            }}
-                          >
-                            {stateIcon}
-                          </div>
-
-                          {/* 缩略图（可点击预览，不触发切换） */}
-                          <ThumbImage
-                            photo={f}
-                            onPreview={() => onPreview(g, i)}
-                            readPhotoData={readPhotoData}
-                            aspect="4/3"
-                            size="medium"
-                          />
-
-                          {/* 日期标识（右下角，叠在缩略图上；与保留徽章同高、无底色框） */}
-                          <div className="absolute bottom-1.5 right-1.5 z-10">
-                            <span
-                              title={
-                                f.dateTaken
-                                  ? t('home.organize.dedupe.hasDateTooltip')
-                                  : t('home.organize.dedupe.noDateTooltip')
-                              }
-                              className={`w-7 h-7 rounded-full flex items-center justify-center drop-shadow ${f.dateTaken ? 'text-green-600' : 'text-red-500'}`}
-                            >
-                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                <circle cx="8" cy="8" r="6.25" />
-                                <path d="M8 4.6V8l2.4 1.5" />
-                              </svg>
-                            </span>
-                          </div>
-
-                          {/* 文件信息 */}
-                          <div className="px-2 py-1.5 bg-[var(--color-surface)] text-[10px] leading-tight">
-                            <div className="font-medium text-[var(--color-gray-800)] truncate" title={f.name}>{f.name}</div>
-                            {(() => {
-                              const path = getPathDisplay(f);
-                              return path ? (
-                                <div className="text-[var(--color-gray-500)] truncate" title={path}>{path}</div>
-                              ) : null;
-                            })()}
-                            <div className="text-[var(--color-gray-400)] mt-0.5">
-                              {formatBytes(f.size)}
-                              {isKeep && <span className="ml-1 text-green-600 font-medium">{t('home.organize.dedupe.keep')}</span>}
-                            </div>
-                          </div>
-                        </div>
+                          photo={f}
+                          readPhotoData={readPhotoData}
+                          onPreview={() => onPreview(g, i)}
+                          onToggle={() => onToggleKeep(g, i)}
+                          state={isKeep ? 'keep' : 'delete'}
+                          stateLabel={isKeep ? t('home.organize.dedupe.keep') : undefined}
+                          rootPath={rootPath}
+                        />
                       );
                     })}
                   </div>

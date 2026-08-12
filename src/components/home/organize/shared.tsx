@@ -1217,3 +1217,159 @@ function DropdownMenu({
     </>
   );
 }
+
+// ── 统一照片卡片组件 ──────────────────────────────────
+
+/**
+ * 统一照片卡片：用于去重 / 相似照片 / 截图识别等整理工具，
+ * 保证各工具的照片展示样式与操作逻辑完全一致。
+ *
+ * 统一视觉元素：
+ * - 4/3 缩略图（ThumbImage），点击可预览大图
+ * - 右上角状态徽章（保留=绿✓ / 删除=红✗ / 选中=品牌蓝✓）
+ * - 右下角日期时钟标识（含拍摄日期=绿 / 缺失=红）
+ * - 底部信息栏：文件名 + 路径（当前路径或相对目录）+ 大小
+ *
+ * @param state 状态：'keep' 保留 | 'delete' 删除 | 'select' 选中 | 'none' 无
+ */
+export function PhotoCard({
+  photo,
+  readPhotoData,
+  onPreview,
+  onToggle,
+  state = 'none',
+  stateLabel,
+  rootPath,
+  size = 'medium',
+  aspect = '4/3',
+  showDateBadge = true,
+  extraFooter,
+  title,
+}: {
+  photo: PhotoFileInfo;
+  readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  onPreview?: () => void;
+  onToggle?: () => void;
+  state?: 'none' | 'keep' | 'delete' | 'select';
+  /** 状态徽章旁的附加文字（如“保留”），显示在大小右侧 */
+  stateLabel?: string;
+  /** 当前扫描根目录路径（用于路径显示：当前路径则显示根目录，子目录只显示相对目录） */
+  rootPath?: string | null;
+  size?: ThumbSize;
+  aspect?: 'square' | '4/3' | 'video';
+  showDateBadge?: boolean;
+  /** 底部信息栏之后追加的自定义内容（如判定依据标签） */
+  extraFooter?: React.ReactNode;
+  /** 自定义标题（默认 photo.name） */
+  title?: string;
+}) {
+  const { t } = useTranslation();
+  // 照片路径显示：与去重一致，只显示目录，避免与上方文件名重复
+  const getPathDisplay = (f: PhotoFileInfo): string => {
+    const lastSep = (s: string) => {
+      const a = s.lastIndexOf('/');
+      const b = s.lastIndexOf('\\');
+      return Math.max(a, b);
+    };
+    const rel = f.relativePath;
+    if (rel) {
+      const idx = lastSep(rel);
+      if (idx > 0) return rel.slice(0, idx);
+      return rootPath || rel;
+    }
+    if (f.path) {
+      const idx = lastSep(f.path);
+      return idx > 0 ? f.path.slice(0, idx) : f.path;
+    }
+    return '';
+  };
+
+  // 右上角状态徽章
+  let badge: React.ReactNode = null;
+  if (state === 'keep') {
+    badge = (
+      <div
+        className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ring-2 ring-white"
+        style={{ background: '#22c55e', textShadow: '0 0 2px rgba(0,0,0,0.5)' }}
+      >
+        ✓
+      </div>
+    );
+  } else if (state === 'delete') {
+    badge = (
+      <div
+        className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ring-2 ring-white"
+        style={{ background: '#ef4444', textShadow: '0 0 2px rgba(0,0,0,0.5)' }}
+      >
+        ✗
+      </div>
+    );
+  } else if (state === 'select') {
+    badge = (
+      <div
+        className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ring-2 ring-white"
+        style={{ background: 'var(--color-brand)', textShadow: '0 0 2px rgba(0,0,0,0.5)' }}
+      >
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+          <path d="M2 6l3 3 5-6" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 边框
+  const borderCls =
+    state === 'keep' ? 'border-green-400'
+      : state === 'delete' ? 'border-red-300'
+        : state === 'select' ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
+          : 'border-transparent';
+
+  const path = getPathDisplay(photo);
+
+  return (
+    <div
+      className={`relative rounded-lg border-2 overflow-hidden cursor-pointer transition-all hover:shadow-md ${borderCls}`}
+      onClick={onToggle}
+      title={onToggle ? t('home.organize.dedupe.clickToToggle') : (title || photo.name)}
+    >
+      {badge}
+
+      {/* 缩略图（可点击预览，不触发切换） */}
+      <ThumbImage
+        photo={photo}
+        onPreview={onPreview}
+        readPhotoData={readPhotoData}
+        aspect={aspect}
+        size={size}
+      />
+
+      {/* 日期标识（右下角，叠在缩略图上；与徽章同高、无底色框） */}
+      {showDateBadge && (
+        <div className="absolute bottom-1.5 right-1.5 z-10">
+          <span
+            title={photo.dateTaken ? t('home.organize.dedupe.hasDateTooltip') : t('home.organize.dedupe.noDateTooltip')}
+            className={`w-7 h-7 rounded-full flex items-center justify-center drop-shadow ${photo.dateTaken ? 'text-green-600' : 'text-red-500'}`}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <circle cx="8" cy="8" r="6.25" />
+              <path d="M8 4.6V8l2.4 1.5" />
+            </svg>
+          </span>
+        </div>
+      )}
+
+      {/* 文件信息 */}
+      <div className="px-2 py-1.5 bg-[var(--color-surface)] text-[10px] leading-tight">
+        <div className="font-medium text-[var(--color-gray-800)] truncate" title={title || photo.name}>{title || photo.name}</div>
+        {path ? (
+          <div className="text-[var(--color-gray-500)] truncate" title={path}>{path}</div>
+        ) : null}
+        <div className="text-[var(--color-gray-400)] mt-0.5">
+          {formatBytes(photo.size)}
+          {stateLabel && <span className="ml-1 text-green-600 font-medium">{stateLabel}</span>}
+        </div>
+        {extraFooter}
+      </div>
+    </div>
+  );
+}
