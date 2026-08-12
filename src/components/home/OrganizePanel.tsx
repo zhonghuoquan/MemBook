@@ -427,9 +427,13 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       setAutoAnalyzeRunning(false);
       setAutoAnalyzeStep('idle');
       autoAnalyzeStartedRef.current = new Set();
+      // 若用户在整个分析过程中没有手动操作 → 自动跳转到报告页；
+      // 若用户有操作（切到其他工具/标签等）→ 不强制跳转，按钮变为「查看报告」供用户手动进入
+      const userOperated = userNavigatedRef.current;
       userNavigatedRef.current = false;
-      // 展示一键分析结果报告页（若用户没有手动操作，自动切到报告页；有操作则保留报告数据，用户可手动打开）
-      setShowAnalyzeReport(true);
+      if (!userOperated) {
+        setShowAnalyzeReport(true);
+      }
       addToast({ type: 'success', message: t('organize.autoAnalyze.done', '一键分析完成') });
       return;
     }
@@ -1421,15 +1425,25 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
         <div className="flex-1 min-h-0 flex gap-4">
           {/* 左侧功能导航栏：一键分析按钮 + 工具列表 */}
           <div className="w-[210px] shrink-0 flex flex-col gap-3 min-h-0">
-            {/* 一键分析：自动依次运行 去重 → 人脸识别 → 相似照片分析 */}
+            {/* 一键分析：自动依次运行 去重 → 人脸识别 → 相似照片分析
+                分析完成后：若报告存在且未在运行，按钮变为「查看报告」，点击进入报告页 */}
             <button
               type="button"
-              onClick={handleOneClickAnalyze}
+              onClick={() => {
+                // 若已有报告且不在运行 → 点击进入报告页
+                if (!autoAnalyzeRunning && analyzeReport.length > 0) {
+                  setShowAnalyzeReport(true);
+                  return;
+                }
+                handleOneClickAnalyze();
+              }}
               disabled={autoAnalyzeRunning || isAnyToolBusy || (activeTab?.photos.length ?? 0) === 0}
               className={`group shrink-0 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-[700] transition-all border-none cursor-pointer ${
                 autoAnalyzeRunning
                   ? 'bg-[var(--color-brand-bg)] text-[var(--color-brand)]'
-                  : 'bg-gradient-to-br from-[var(--color-brand)] to-[#8b5cf6] text-white shadow-[0_3px_12px_rgba(108,99,255,0.28)] hover:shadow-[0_5px_18px_rgba(108,99,255,0.38)] hover:brightness-110'
+                  : analyzeReport.length > 0
+                    ? 'bg-gradient-to-br from-[#8b5cf6] to-[#6366f1] text-white shadow-[0_3px_12px_rgba(139,92,246,0.28)] hover:shadow-[0_5px_18px_rgba(139,92,246,0.38)] hover:brightness-110'
+                    : 'bg-gradient-to-br from-[var(--color-brand)] to-[#8b5cf6] text-white shadow-[0_3px_12px_rgba(108,99,255,0.28)] hover:shadow-[0_5px_18px_rgba(108,99,255,0.38)] hover:brightness-110'
               } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none`}
               title={t('organize.autoAnalyze.title', '一键分析：自动运行 去重 → 人脸识别 → 相似照片分析')}
             >
@@ -1440,6 +1454,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                     <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                   </svg>
                   {t('organize.autoAnalyze.running', '正在分析…')}
+                </>
+              ) : analyzeReport.length > 0 ? (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <path d="M3 3v18h18" />
+                    <path d="M7 15l3-4 3 2 4-6" />
+                    <circle cx="17" cy="7" r="1" fill="currentColor" />
+                  </svg>
+                  {t('organize.autoAnalyze.viewReport', '查看报告')}
                 </>
               ) : (
                 <>
@@ -1460,6 +1483,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               onSelect={(id) => {
                 // 用户手动切换工具：标记为“用户有操作”，一键分析不再强制自动跳转
                 if (autoAnalyzeRunning) userNavigatedRef.current = true;
+                // 用户从报告页切换到其他工具时关闭报告页（报告作为单独页，不与其他工具合并）
+                setShowAnalyzeReport(false);
                 // Pro 专属工具：未激活时拦截并弹出激活窗口，避免进入空/受限界面
                 if (isToolLocked(id)) {
                   const feat = TOOL_PRO_FEATURE[id]!;
@@ -1475,8 +1500,9 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
 
           {/* 右侧工作区：无外层标题框，直接渲染工具内容（ToolCard 自带色块标题） */}
           <div className="flex-1 min-w-0 flex flex-col relative">
-            {/* 一键成册 + 加入相册浮动按钮（选中照片后显示，固定在右上角） */}
-            {(showAlbumButton || selectedPhotoIds.size > 0) && (
+            {/* 一键成册 + 加入相册浮动按钮（选中照片后显示，固定在右上角）
+                显示报告页时隐藏，避免遮挡单独报告页 */}
+            {!showAnalyzeReport && (showAlbumButton || selectedPhotoIds.size > 0) && (
               <div className="absolute top-2 right-3 z-20 flex items-center gap-2">
                 {/* 一键成册：把选中照片一键排版成可导出的相册 */}
                 <button
@@ -1523,7 +1549,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                 )}
               </div>
             )}
-            {/* 一键分析结果报告页：分析完成后展示各工具整理结果汇总，可一键跳转处理 */}
+            {/* 一键分析结果报告页：分析完成后展示各工具整理结果汇总，可一键跳转处理
+                作为单独页显示：显示报告时不与其他工具合并，工具视图隐藏但保持挂载 */}
             {showAnalyzeReport && (
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <AnalyzeReportPanel
@@ -1533,12 +1560,18 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                     setActiveTool(tool as ToolId);
                     setShowAnalyzeReport(false);
                   }}
+                  onReanalyze={() => {
+                    // 重新分析：关闭报告页并触发新一轮一键分析
+                    setShowAnalyzeReport(false);
+                    handleOneClickAnalyze();
+                  }}
                 />
               </div>
             )}
-            {/* 工作区内容：每个工具独立滚动容器，hidden 隐藏非活跃工具以保留状态 */}
+            {/* 工作区内容：每个工具独立滚动容器，hidden 隐藏非活跃工具以保留状态
+                显示报告页时全部工具隐藏（报告作为单独页） */}
             {visitedTools.has('dedupe') && (
-              <div className={activeTool === 'dedupe' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'dedupe' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <DedupeTool
                   key="dedupe"
                   {...toolProps}
@@ -1551,42 +1584,42 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               </div>
             )}
             {visitedTools.has('organize') && (
-              <div className={activeTool === 'organize' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'organize' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <OrganizeTool key="organize" {...toolProps} />
               </div>
             )}
             {visitedTools.has('faceCluster') && (
-              <div className={activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <FaceClusterTool key="faceCluster" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
-              <div className={activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <SimilarTool key="similar" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('screenshot') && (
-              <div className={activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ScreenshotTool key="screenshot" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
               </div>
             )}
             {visitedTools.has('exif') && (
-              <div className={activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ExifTool key="exif" {...toolProps} />
               </div>
             )}
             {visitedTools.has('rename') && (
-              <div className={activeTool === 'rename' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'rename' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <RenameTool key="rename" {...toolProps} />
               </div>
             )}
             {visitedTools.has('convert') && (
-              <div className={activeTool === 'convert' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'convert' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ConvertTool key="convert" {...toolProps} />
               </div>
             )}
             {visitedTools.has('timeline') && (
-              <div className={activeTool === 'timeline' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'timeline' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ToolCard
                   title={t('home.organize.sidebar.timeline', '时间线')}
                   description={t('home.organize.sidebar.timelineDesc', '按月份或路径分组浏览照片')}
@@ -1620,7 +1653,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               </div>
             )}
             {visitedTools.has('calendar') && (
-              <div className={activeTool === 'calendar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+              <div className={!showAnalyzeReport && activeTool === 'calendar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ToolCard
                   title={t('home.organize.sidebar.calendar', '日历')}
                   description={t('home.organize.sidebar.calendarDesc', '按日期浏览照片')}
