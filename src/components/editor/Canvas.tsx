@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line } from 'react-konva';
 import Konva from 'konva';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
-import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, isCoverPage } from '../../types';
+import { BRAND_ACCENT } from '../../utils/coverDecoration';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement } from '../../types';
@@ -37,6 +38,46 @@ import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { slotEditService } from '../../services/slotEditService';
 import { useTranslation } from 'react-i18next';
+
+/**
+ * 封面装饰层（渲染层感知 pageKind）：在编辑器画布上叠加——
+ *   ① cover-2 全幅底图：标题区下方叠半透明渐变蒙版，保证压字可读；
+ *   ② 所有封面：主图空白角补一条品牌紫装饰线（记忆锚点）。
+ * 返回 Konva ReactNode，封面页返回装饰，非封面返回 null。
+ */
+function renderCoverDecoration(page: { templateId: string } | undefined, w: number, h: number): React.ReactNode {
+  if (!page || !isCoverPage(page)) return null;
+  const els: React.ReactNode[] = [];
+  if (page.templateId === 'cover-2') {
+    els.push(
+      <Rect
+        key="cover-mask"
+        x={0} y={h * 0.5}
+        width={w} height={h * 0.48}
+        fillLinearGradientStartPoint={{ x: 0, y: h * 0.5 }}
+        fillLinearGradientEndPoint={{ x: 0, y: h * 0.98 }}
+        fillLinearGradientColorStops={[0, 'rgba(0,0,0,0)', 1, 'rgba(0,0,0,0.38)']}
+        listening={false}
+      />,
+    );
+  }
+  const lineTop = h * 0.10;
+  const lineLength = Math.min(w * 0.14, 90);
+  const onRight = page.templateId !== 'cover-2';
+  const startX = onRight ? w - lineLength - w * 0.08 : w * 0.08;
+  els.push(
+    <Line
+      key="cover-line"
+      points={[startX, lineTop, startX + lineLength, lineTop]}
+      stroke={BRAND_ACCENT}
+      strokeWidth={Math.max(2.5, 1.2)}
+      lineCap="round"
+      opacity={0.55}
+      listening={false}
+    />,
+  );
+  return <Group>{els}</Group>;
+}
 
 export function Canvas() {
   const { resolved } = useTheme();
@@ -1581,10 +1622,18 @@ export function Canvas() {
       });
     });
     // 排序：先按 z 升序（z 小的渲染在下层），z 相同时 typeOrder 小的（槽位）排前（渲染在装饰下方）
-    return items.sort((a, b) => {
+    const sorted = items.sort((a, b) => {
       if (a.z !== b.z) return a.z - b.z;
       return a.typeOrder - b.typeOrder;
     }).map((item) => item.render);
+
+    // ── 封面装饰层（渲染层感知 pageKind）：全幅蒙版 + 品牌装饰线，画在最上层 ──
+    const coverDeco = renderCoverDecoration(currentPage, CANVAS_W, CANVAS_H);
+    if (coverDeco) {
+      sorted.push(coverDeco);
+    }
+
+    return sorted;
   })();
 
   return (
