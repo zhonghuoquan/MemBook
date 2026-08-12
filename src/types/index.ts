@@ -315,6 +315,7 @@ export type AlbumPage = {
   stickyNotes?: StickyNote[];
   textElements?: PageTextElement[];
   stickerElements?: StickerElement[];
+  shapeElements?: ShapeElement[];
   /** Google Photos 页面：引擎输出的原始 mm 坐标（用于页面设置变更时重新计算） */
   googlePhotosMmLayout?: Array<{ photoId: string; x: number; y: number; width: number; height: number }>;
   /** Google Photos 页面：未旋转的基准 mm 坐标（角度切换后用于排版变化重排） */
@@ -457,6 +458,43 @@ export type StickerElement = {
   zIndex: number;
 };
 
+/* ── 形状元素（页面内，类似 PPT 添加形状） ── */
+export type ShapeType =
+  | 'rectangle' | 'square' | 'circle' | 'ellipse'
+  | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
+  | 'star' | 'arrow' | 'line';
+
+/**
+ * 形状元素：可调整尺寸、填充色、描边、透明度、旋转。
+ * x/y 为页面内中心点（mm），width/height 为外形包围盒尺寸（mm）。
+ */
+export type ShapeElement = {
+  id: string;
+  x: number; y: number;        // mm，页面内位置（中心点）
+  width: number; height: number; // mm，外形包围盒
+  type: ShapeType;
+  /** 填充色（hex），支持空字符串表示无填充 */
+  fill: string;
+  /** 描边色（hex） */
+  stroke: string;
+  /** 描边粗细（px，渲染时随画布缩放） */
+  strokeWidth: number;
+  /** 整体透明度 0-1 */
+  opacity: number;
+  rotation: number;
+  zIndex: number;
+};
+
+/** 形状默认尺寸（mm） */
+export const DEFAULT_SHAPE_SIZE = { width: 60, height: 60 };
+
+/** 形状支持的类型列表（供工具面板展示） */
+export const SHAPE_TYPES: ShapeType[] = [
+  'rectangle', 'square', 'circle', 'ellipse',
+  'triangle', 'diamond', 'pentagon', 'hexagon',
+  'star', 'arrow', 'line',
+];
+
 /* ── 编辑器工具模式 ── */
 export type EditorTool = 'none' | 'brush' | 'eraser' | 'text' | 'sticky';
 
@@ -510,9 +548,9 @@ export type AlbumProject = {
 
 /* ── 编辑器状态 ── */
 export type ViewMode = 'single' | 'grid' | 'fullscreen';
-export type PanelTab = 'photos' | 'templates' | 'theme' | 'tools' | 'market' | 'stickers';
+export type PanelTab = 'photos' | 'templates' | 'theme' | 'tools' | 'market' | 'stickers' | 'covers';
 export type EditTab = 'crop' | 'adjust' | 'filter' | 'rotate';
-export type HomeTab = 'create' | 'albums' | 'templates' | 'organize' | 'stickers';
+export type HomeTab = 'create' | 'albums' | 'templates' | 'organize' | 'stickers' | 'covers';
 
 export type BottomNavState = 'expanded' | 'collapsed';
 

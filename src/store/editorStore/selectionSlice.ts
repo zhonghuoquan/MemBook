@@ -15,6 +15,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
   selectedTextId: null,
   selectedStickyId: null,
   selectedStickerId: null,
+  selectedShapeId: null,
   multiSelectedElements: [],
   // 单选严格跨类型互斥：选中任一元素时，清空其他类型的单选 + 所有多选
   setSelectedSlot: (slotId) => set({
@@ -22,6 +23,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedTextId: null,
     selectedStickyId: null,
     selectedStickerId: null,
+    selectedShapeId: null,
     multiSelectedSlots: [],
     multiSelectedElements: [],
   }),
@@ -32,6 +34,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedSlotId: null,
     selectedStickyId: null,
     selectedStickerId: null,
+    selectedShapeId: null,
     multiSelectedElements: [],
   }),
   setSelectedStickyId: (id) => set({
@@ -39,6 +42,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedSlotId: null,
     selectedTextId: null,
     selectedStickerId: null,
+    selectedShapeId: null,
     multiSelectedElements: [],
   }),
   setSelectedStickerId: (id) => set({
@@ -46,6 +50,15 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedSlotId: null,
     selectedTextId: null,
     selectedStickyId: null,
+    selectedShapeId: null,
+    multiSelectedElements: [],
+  }),
+  setSelectedShapeId: (id) => set({
+    selectedShapeId: id,
+    selectedSlotId: null,
+    selectedTextId: null,
+    selectedStickyId: null,
+    selectedStickerId: null,
     multiSelectedElements: [],
   }),
   /** Ctrl+click 切换多选：
@@ -62,6 +75,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
       else if (state.selectedTextId) list.push({ type: 'text', id: state.selectedTextId });
       else if (state.selectedStickyId) list.push({ type: 'sticky', id: state.selectedStickyId });
       else if (state.selectedStickerId) list.push({ type: 'sticker', id: state.selectedStickerId });
+      else if (state.selectedShapeId) list.push({ type: 'shape', id: state.selectedShapeId });
     }
 
     // toggle 目标元素
@@ -74,14 +88,15 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
 
     // 若 toggle 后只剩 0 或 1 个元素，回退到单选模式
     if (list.length === 0) {
-      set({ multiSelectedElements: [], selectedSlotId: null, selectedTextId: null, selectedStickyId: null, selectedStickerId: null });
+      set({ multiSelectedElements: [], selectedSlotId: null, selectedTextId: null, selectedStickyId: null, selectedStickerId: null, selectedShapeId: null });
     } else if (list.length === 1) {
       const only = list[0];
       const patch: Partial<SelectionSlice> = { multiSelectedElements: [] };
-      if (only.type === 'slot') { patch.selectedSlotId = only.id; patch.selectedTextId = null; patch.selectedStickyId = null; patch.selectedStickerId = null; }
-      else if (only.type === 'text') { patch.selectedTextId = only.id; patch.selectedSlotId = null; patch.selectedStickyId = null; patch.selectedStickerId = null; }
-      else if (only.type === 'sticky') { patch.selectedStickyId = only.id; patch.selectedSlotId = null; patch.selectedTextId = null; patch.selectedStickerId = null; }
-      else if (only.type === 'sticker') { patch.selectedStickerId = only.id; patch.selectedSlotId = null; patch.selectedTextId = null; patch.selectedStickyId = null; }
+      if (only.type === 'slot') { patch.selectedSlotId = only.id; patch.selectedTextId = null; patch.selectedStickyId = null; patch.selectedStickerId = null; patch.selectedShapeId = null; }
+      else if (only.type === 'text') { patch.selectedTextId = only.id; patch.selectedSlotId = null; patch.selectedStickyId = null; patch.selectedStickerId = null; patch.selectedShapeId = null; }
+      else if (only.type === 'sticky') { patch.selectedStickyId = only.id; patch.selectedSlotId = null; patch.selectedTextId = null; patch.selectedStickerId = null; patch.selectedShapeId = null; }
+      else if (only.type === 'sticker') { patch.selectedStickerId = only.id; patch.selectedSlotId = null; patch.selectedTextId = null; patch.selectedStickyId = null; patch.selectedShapeId = null; }
+      else if (only.type === 'shape') { patch.selectedShapeId = only.id; patch.selectedSlotId = null; patch.selectedTextId = null; patch.selectedStickyId = null; patch.selectedStickerId = null; }
       set(patch);
     } else {
       // 多选模式：清空所有单选字段
@@ -91,6 +106,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
         selectedTextId: null,
         selectedStickyId: null,
         selectedStickerId: null,
+        selectedShapeId: null,
         multiSelectedSlots: [],
       });
     }
@@ -101,6 +117,7 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedTextId: null,
     selectedStickyId: null,
     selectedStickerId: null,
+    selectedShapeId: null,
     multiSelectedSlots: [],
   }),
   clearMultiSelect: () => set({ multiSelectedElements: [] }),
@@ -112,5 +129,6 @@ export const createSelectionSlice: EditorSlice<SelectionSlice> = (set, get) => (
     selectedTextId: null,
     selectedStickyId: null,
     selectedStickerId: null,
+    selectedShapeId: null,
   }),
 });

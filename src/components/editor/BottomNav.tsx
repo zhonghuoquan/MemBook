@@ -3,7 +3,7 @@ import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../.
 import { GOOGLE_PHOTOS_TEMPLATE_ID, resolveTemplate, type SlotOverride, type SlotLayout } from '../../types';
 import { MM_TO_PX, computeZoomedScroll, computeCenteredScroll } from '../../utils/sharedRender';
 import CanvasPageThumbnail from '../common/CanvasPageThumbnail';
-import type { AlbumPage, Template, Photo, PhotoPlacement, PageTextElement, StickyNote, StickerElement } from '../../types';
+import type { AlbumPage, Template, Photo, PhotoPlacement, PageTextElement, StickyNote, StickerElement, ShapeElement } from '../../types';
 import { readPhotoFromDB, readDirectPhoto } from '../../engine/storage-engine';
 import { FullscreenView } from './FullscreenView';
 import { Tooltip } from '../common/Tooltip';
@@ -23,7 +23,8 @@ type ClipboardData =
   | { type: 'placement'; placement: PhotoPlacement; slotOverride?: SlotOverride; slotLayout?: SlotLayout }
   | { type: 'text'; element: PageTextElement }
   | { type: 'sticky'; note: StickyNote }
-  | { type: 'sticker'; sticker: StickerElement };
+  | { type: 'sticker'; sticker: StickerElement }
+  | { type: 'shape'; shape: ShapeElement };
 
 /** 粘贴单个元素时的位置偏移（mm） */
 const PASTE_OFFSET_MM = 10;
@@ -52,6 +53,7 @@ export function BottomNav() {
   const addTextElement = useEditorStore((s) => s.addTextElement);
   const addStickyNote = useEditorStore((s) => s.addStickyNote);
   const addStickerElement = useEditorStore((s) => s.addStickerElement);
+  const addShapeElement = useEditorStore((s) => s.addShapeElement);
   const photos = usePhotoStore((s) => s.photos);
   const bottomNav = useUIStore((s) => s.bottomNav);
   const toggleBottomNav = useUIStore((s) => s.toggleBottomNav);
@@ -362,19 +364,21 @@ export function BottomNav() {
       // 选中了元素（照片槽/文字/便利贴/贴纸）时交由画布的 useCanvasKeyboard 处理元素删除
       if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.altKey) {
         const state = useEditorStore.getState();
-        const { selectedSlotId, selectedTextId, selectedStickyId, selectedStickerId } = state;
+        const { selectedSlotId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId } = state;
         const page = state.pages[currentPageIndex];
         const hasSelectedElement =
           !!selectedSlotId ||
           !!selectedTextId ||
           !!selectedStickyId ||
-          !!selectedStickerId;
+          !!selectedStickerId ||
+          !!selectedShapeId;
         // 进一步校验选中元素在当前页确实存在（避免选中态残留导致 Delete 失效）
         const selectedExistsInPage = page && (
           (selectedSlotId && page.placements.some((p) => p.slotId === selectedSlotId)) ||
           (selectedTextId && page.textElements?.some((t) => t.id === selectedTextId)) ||
           (selectedStickyId && page.stickyNotes?.some((n) => n.id === selectedStickyId)) ||
-          (selectedStickerId && page.stickerElements?.some((s) => s.id === selectedStickerId))
+          (selectedStickerId && page.stickerElements?.some((s) => s.id === selectedStickerId)) ||
+          (selectedShapeId && page.shapeElements?.some((s) => s.id === selectedShapeId))
         );
         if (hasSelectedElement && selectedExistsInPage) {
           // 让画布处理器（冒泡阶段）处理元素删除
@@ -390,7 +394,7 @@ export function BottomNav() {
       if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
         e.preventDefault();
         const state = useEditorStore.getState();
-        const { selectedSlotId, selectedTextId, selectedStickyId, selectedStickerId } = state;
+        const { selectedSlotId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId } = state;
         const page = state.pages[currentPageIndex];
         if (!page) return;
 
@@ -444,7 +448,16 @@ export function BottomNav() {
             return;
           }
         }
-        // 5. 无选中元素：复制整页
+        // 5. 选中了形状：复制形状元素
+        if (selectedShapeId) {
+          const sh = page.shapeElements?.find((s) => s.id === selectedShapeId);
+          if (sh) {
+            clipboardRef.current = { type: 'shape', shape: JSON.parse(JSON.stringify(sh)) };
+            addToast({ type: 'success', message: t('editor.bottomNav.shapeCopied') });
+            return;
+          }
+        }
+        // 6. 无选中元素：复制整页
         clipboardRef.current = { type: 'page', page: JSON.parse(JSON.stringify(page)) };
         addToast({ type: 'success', message: t('editor.bottomNav.pageCopiedToast') });
         return;
@@ -620,12 +633,25 @@ export function BottomNav() {
           addToast({ type: 'success', message: t('editor.bottomNav.stickerPasted') });
           return;
         }
+
+        if (clip.type === 'shape') {
+          // 形状：新 ID + 位置偏移，zIndex 由 addShapeElement 自动分配
+          const newShape: ShapeElement = {
+            ...JSON.parse(JSON.stringify(clip.shape)),
+            id: `shape-el-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            x: clip.shape.x + PASTE_OFFSET_MM,
+            y: clip.shape.y + PASTE_OFFSET_MM,
+          };
+          addShapeElement(currentPageIndex, newShape);
+          addToast({ type: 'success', message: t('editor.bottomNav.shapePasted') });
+          return;
+        }
       }
     };
 
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentPageIndex, pages.length, menuOpenIndex, handleDeletePage, addToast, viewMode, addTextElement, addStickyNote, addStickerElement]);
+  }, [currentPageIndex, pages.length, menuOpenIndex, handleDeletePage, addToast, viewMode, addTextElement, addStickyNote, addStickerElement, addShapeElement]);
 
   const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 

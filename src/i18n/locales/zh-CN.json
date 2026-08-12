@@ -73,6 +73,7 @@
     "nav": {
       "albums": "相册",
       "templates": "布局",
+      "covers": "封面",
       "organize": "整理",
       "stickers": "贴纸"
     },
@@ -275,6 +276,17 @@
       "createTemplateCard": "创建新布局",
       "createTemplateDesc": "从零开始设计布局",
       "copySuffix": "(副本)"
+    },
+    "coverGallery": {
+      "title": "封面设计库",
+      "subtitle": "挑选一款好看的封面，轻松开始制作相册",
+      "coverSection": "封面模板",
+      "backCoverSection": "封底模板",
+      "coverBadge": "📕 封面",
+      "backCoverBadge": "📗 封底",
+      "use": "使用",
+      "defaultAlbumName": "我的相册",
+      "hint": "点击「使用」即以该封面新建相册并进入编辑器。封面版面会自动适应页面尺寸，进入后可自由修改照片、双击文字编辑，或使用「工具」面板添加形状、调整字体颜色。"
     },
     "emptyState": {
       "title": "还没有相册",
@@ -1053,12 +1065,27 @@
       "date": "日期",
       "datePlaceholder": "如 2023-2024",
       "backText": "封底文案",
-      "backTextPlaceholder": "版权 / 纪念语"
+      "backTextPlaceholder": "版权 / 纪念语",
+      "freeTextHint": "封面文字是自由的文字元素：双击文字即可编辑内容，拖拽移动位置，或使用「工具」面板调整字体、颜色、大小。可先添加文字再排版。"
+    },
+    "coverLibrary": {
+      "title": "封面 / 封底",
+      "coverSection": "封面模板",
+      "backCoverSection": "封底模板",
+      "coverBadge": "📕 封面",
+      "backCoverBadge": "📗 封底",
+      "switched": "已切换封面版式",
+      "coverAdded": "已添加封面页",
+      "backCoverAdded": "已添加封底页",
+      "onCoverPageHint": "当前为封面/封底页：点击上方模板可直接切换版式（保留照片与文字）。",
+      "onNormalPageHint": "当前为普通页：点击封面模板会插入新的封面/封底页。",
+      "hint": "封面模板的版面会自动适应页面尺寸。应用后可直接在画布上双击文字编辑，或使用「工具」面板调整。"
     },
     "toolbar": {
       "photos": "照片",
       "templates": "布局",
       "tools": "工具",
+      "covers": "封面",
       "stickers": "贴纸",
       "theme": "主题",
       "market": "市场",
@@ -1112,6 +1139,8 @@
       "textPasted": "已粘贴文字",
       "stickyPasted": "已粘贴便利贴",
       "stickerPasted": "已粘贴贴纸",
+      "shapeCopied": "已复制形状",
+      "shapePasted": "已粘贴形状",
       "noPages": "暂无页面",
       "pageActions": "页面操作",
       "zoomLevel": "缩放 {{percent}}",
@@ -1213,6 +1242,29 @@
       "stickyHint": "点击添加便利贴，双击编辑文字，拖拽移动",
       "textHint": "点击「添加文字」在页面上添加文字元素，双击编辑内容",
       "textStickyHint": "选中画布上的文字或便利贴后，此处显示对应属性设置",
+      "shapeSection": "形状",
+      "addShape": "添加形状",
+      "shapeProperties": "形状属性",
+      "shapeWidth": "宽",
+      "shapeHeight": "高",
+      "shapeFill": "填充色",
+      "shapeNoFill": "无填充",
+      "shapeStroke": "描边色",
+      "shapeStrokeWidth": "描边粗细",
+      "shapeRotation": "旋转",
+      "deleteShape": "删除形状",
+      "shapeHint": "点击上方形状图标添加到页面，可调整尺寸、颜色、描边、透明度",
+      "shape_rectangle": "矩形",
+      "shape_square": "正方形",
+      "shape_circle": "圆形",
+      "shape_ellipse": "椭圆",
+      "shape_triangle": "三角形",
+      "shape_diamond": "菱形",
+      "shape_pentagon": "五边形",
+      "shape_hexagon": "六边形",
+      "shape_star": "星形",
+      "shape_arrow": "箭头",
+      "shape_line": "直线",
       "backgroundSection": "背景",
       "background": {
         "tabSolid": "纯色",
@@ -1430,6 +1482,7 @@
       "photos": "照片",
       "templates": "布局",
       "tools": "工具",
+      "covers": "封面",
       "settings": "设置"
     },
     "bottomTabs": {

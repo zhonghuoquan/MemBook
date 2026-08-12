@@ -148,6 +148,18 @@ export function useMarqueeGroupSelect({
         });
       }
     }
+    // 形状（x/y 为中心点，需转换为左上角）
+    if (currentPage.shapeElements) {
+      for (const sh of currentPage.shapeElements) {
+        candidates.push({
+          id: sh.id, type: 'shape',
+          x: (sh.x - sh.width / 2) * MM_TO_PX,
+          y: (sh.y - sh.height / 2) * MM_TO_PX,
+          width: sh.width * MM_TO_PX,
+          height: sh.height * MM_TO_PX,
+        });
+      }
+    }
     // 命中检测：完全包含在框选矩形内的元素
     const hits = candidates.filter((s) => hitTestMarquee(marquee, s));
     setMarquee(null);
@@ -160,6 +172,7 @@ export function useMarqueeGroupSelect({
       else if (h.type === 'text') useEditorStore.getState().setSelectedTextId(h.id);
       else if (h.type === 'sticky') useEditorStore.getState().setSelectedStickyId(h.id);
       else if (h.type === 'sticker') useEditorStore.getState().setSelectedStickerId(h.id);
+      else if (h.type === 'shape') useEditorStore.getState().setSelectedShapeId(h.id);
     }
     return true;
   }, [isMarqueeSelecting, marquee, template, currentPage, CANVAS_W, CANVAS_H, setMultiSelectedElements]);

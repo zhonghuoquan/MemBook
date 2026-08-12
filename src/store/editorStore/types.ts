@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type {
   AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings, AlbumTypeId,
-  EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, WatermarkSettings,
+  EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, ShapeElement, WatermarkSettings,
 } from '../../types';
 
 /* ── Editor Store (当前编辑状态) ── */
@@ -13,7 +13,7 @@ import type {
  *   - 跨类型：不显示工具栏，仅支持整体移动
  * 单选时 multiSelectedElements 为空，使用 selectedSlotId/selectedTextId 等单选字段
  */
-export type SelectedElementType = 'slot' | 'text' | 'sticky' | 'sticker';
+export type SelectedElementType = 'slot' | 'text' | 'sticky' | 'sticker' | 'shape';
 export type SelectedElement = { type: SelectedElementType; id: string };
 
 export interface SelectionSlice {
@@ -24,6 +24,7 @@ export interface SelectionSlice {
   selectedTextId: string | null;
   selectedStickyId: string | null;
   selectedStickerId: string | null;
+  selectedShapeId: string | null;
   /* 通用多选列表：支持同类型/跨类型多选，与 multiSelectedSlots 并存（后者仅用于槽位框选兼容） */
   multiSelectedElements: SelectedElement[];
   setSelectedSlot: (slotId: string | null) => void;
@@ -32,6 +33,7 @@ export interface SelectionSlice {
   setSelectedTextId: (id: string | null) => void;
   setSelectedStickyId: (id: string | null) => void;
   setSelectedStickerId: (id: string | null) => void;
+  setSelectedShapeId: (id: string | null) => void;
   /** Ctrl+click 切换元素多选状态：加入或移出 multiSelectedElements */
   toggleMultiSelect: (element: SelectedElement) => void;
   /** 直接设置多选列表（框选等场景） */
@@ -64,13 +66,15 @@ export interface PageSlice {
   /** 智能生成封面页并插入到首部（复用 cover-generator 本地规则引擎） */
   addCoverPage: (options?: { templateId?: string; coverPhotoId?: string }) => void;
   /** 智能生成封底页并插入到尾部（复用封面配色） */
-  addBackCoverPage: () => void;
+  addBackCoverPage: (options?: { templateId?: string }) => void;
   /** 一键换设计：基于当前封面重新智能生成下一款设计（切换版式/主图/配色），保留用户文案 */
   regenerateCoverPage: (step?: number) => void;
   /** 更新封面/封底页的结构化元信息（标题/副标题/作者/日期/封底文案），并同步文字层 */
   updateCoverFields: (pageIndex: number, patch: Partial<NonNullable<AlbumPage['coverFields']>>) => void;
   /** 切换封面版式：在当前封面上应用另一款封面模板，保留主图与文案 */
   switchCoverTemplate: (pageIndex: number, templateId: string) => void;
+  /** 切换封底版式：在当前封底上应用另一款封底模板，保留文案 */
+  switchBackCoverTemplate: (pageIndex: number, templateId: string) => void;
 }
 
 /* ── 槽位/照片编辑 ──
@@ -164,9 +168,13 @@ export interface DecorationsSlice {
   addStickerElement: (pageIndex: number, sticker: StickerElement) => void;
   updateStickerElement: (pageIndex: number, stickerId: string, patch: Partial<StickerElement>, recordHistory?: boolean) => void;
   removeStickerElement: (pageIndex: number, stickerId: string) => void;
+  /* ── 形状 ── */
+  addShapeElement: (pageIndex: number, shape: ShapeElement) => void;
+  updateShapeElement: (pageIndex: number, shapeId: string, patch: Partial<ShapeElement>, recordHistory?: boolean) => void;
+  removeShapeElement: (pageIndex: number, shapeId: string) => void;
   /* ── 层级 ── */
-  bringToFront: (pageIndex: number, type: 'brush' | 'sticky' | 'text' | 'sticker', id: string) => void;
-  sendToBack: (pageIndex: number, type: 'brush' | 'sticky' | 'text' | 'sticker', id: string) => void;
+  bringToFront: (pageIndex: number, type: 'brush' | 'sticky' | 'text' | 'sticker' | 'shape', id: string) => void;
+  sendToBack: (pageIndex: number, type: 'brush' | 'sticky' | 'text' | 'sticker' | 'shape', id: string) => void;
 }
 
 /* ── 水印 ── */

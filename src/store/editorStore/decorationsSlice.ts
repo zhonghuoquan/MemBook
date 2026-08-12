@@ -160,6 +160,48 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
     pushSnapshot(get);
   },
 
+  /* ── 形状 ── */
+  addShapeElement: (pageIndex, shape) => {
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      const page = newPages[pageIndex];
+      const maxZ = getGlobalMaxZ(page);
+      newPages[pageIndex] = {
+        ...page,
+        shapeElements: [...(page.shapeElements || []), { ...shape, zIndex: maxZ + 1 }],
+      };
+      return { pages: newPages };
+    });
+    pushSnapshot(get);
+  },
+  updateShapeElement: (pageIndex, shapeId, patch, recordHistory?: boolean) => {
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        shapeElements: (newPages[pageIndex].shapeElements || []).map((sh) =>
+          sh.id === shapeId ? { ...sh, ...patch } : sh,
+        ),
+      };
+      return { pages: newPages };
+    });
+    if (recordHistory !== false) pushSnapshot(get);
+  },
+  removeShapeElement: (pageIndex, shapeId) => {
+    set((s) => {
+      const newPages = [...s.pages];
+      if (!newPages[pageIndex]) return s;
+      newPages[pageIndex] = {
+        ...newPages[pageIndex],
+        shapeElements: (newPages[pageIndex].shapeElements || []).filter((sh) => sh.id !== shapeId),
+      };
+      return { pages: newPages };
+    });
+    pushSnapshot(get);
+  },
+
   /* ── 层级操作 ── */
   bringToFront: (pageIndex, type, id) => {
     set((s) => {
@@ -176,6 +218,7 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
         ...(type === 'sticky' ? { stickyNotes: updateList(page.stickyNotes || []) } : {}),
         ...(type === 'text' ? { textElements: updateList(page.textElements || []) } : {}),
         ...(type === 'sticker' ? { stickerElements: updateList(page.stickerElements || []) } : {}),
+        ...(type === 'shape' ? { shapeElements: updateList(page.shapeElements || []) } : {}),
       };
       return { pages: newPages };
     });
@@ -195,6 +238,7 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
         ...(type === 'sticky' ? { stickyNotes: updateList(page.stickyNotes || []) } : {}),
         ...(type === 'text' ? { textElements: updateList(page.textElements || []) } : {}),
         ...(type === 'sticker' ? { stickerElements: updateList(page.stickerElements || []) } : {}),
+        ...(type === 'shape' ? { shapeElements: updateList(page.shapeElements || []) } : {}),
       };
       return { pages: newPages };
     });

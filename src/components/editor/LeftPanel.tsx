@@ -7,6 +7,7 @@ import { PhotoPanel } from './PhotoPanel';
 import { TemplatePanel } from './TemplatePanel';
 import { ToolsPanel } from './ToolsPanel';
 import { StickerPanel } from './StickerPanel';
+import { CoverLibraryPanel } from './CoverLibraryPanel';
 import { useTheme } from '../../contexts/ThemeContext';
 
 type TabItem = {
@@ -60,6 +61,16 @@ const tabs: TabItem[] = [
       </svg>
     ),
   },
+  {
+    tab: 'covers',
+    labelKey: 'editor.toolbar.covers',
+    icon: (
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+        <path d="M3 5h14a1 1 0 011 1v9a1 1 0 01-1 1H3a1 1 0 01-1-1V6a1 1 0 011-1z" />
+        <path d="M3 5l7 5 7-5" />
+      </svg>
+    ),
+  },
 ];
 
 function getPanelContent(activePanel: PanelTab, photoImport: UsePhotoImportResult, onNavigateToSmartLayout: () => void): React.ReactNode {
@@ -68,6 +79,7 @@ function getPanelContent(activePanel: PanelTab, photoImport: UsePhotoImportResul
     case 'templates': return <TemplatePanel />;
     case 'stickers': return <StickerPanel />;
     case 'tools': return <ToolsPanel />;
+    case 'covers': return <CoverLibraryPanel />;
     case 'theme': return <ToolsPanel />;
     case 'market': return <ToolsPanel />;
     default: return null;

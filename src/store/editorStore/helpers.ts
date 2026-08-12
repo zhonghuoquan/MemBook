@@ -1,6 +1,6 @@
 import type {
   AlbumPage, Photo, PhotoPlacement, AlbumSize, SlotOverride, SlotLayout,
-  BrushStroke, StickyNote, PageTextElement, StickerElement,
+  BrushStroke, StickyNote, PageTextElement, StickerElement, ShapeElement,
 } from '../../types';
 import { resolveTemplate, isGooglePhotosPage } from '../../types';
 import { refitPage, refitPageWithRotation } from '../../engine/google-photos-layout';
@@ -19,16 +19,18 @@ type LayeredPage = {
   stickyNotes?: StickyNote[];
   textElements?: PageTextElement[];
   stickerElements?: StickerElement[];
+  shapeElements?: ShapeElement[];
   slotZIndices?: Record<string, number>;
 };
 
-/** 收集页面内所有参与层级排序的装饰元素（画笔/便利贴/文字/贴纸） */
+/** 收集页面内所有参与层级排序的装饰元素（画笔/便利贴/文字/贴纸/形状） */
 function collectAllElements(page: LayeredPage) {
   return [
     ...(page.brushStrokes || []),
     ...(page.stickyNotes || []),
     ...(page.textElements || []),
     ...(page.stickerElements || []),
+    ...(page.shapeElements || []),
   ];
 }
 
