@@ -8,10 +8,17 @@
  *   1. 文件名关键词（快路径，无需解码）：Screenshot / 截图 / 屏幕截图 / 截屏 / 微信图片 …
  *   2. EXIF 元数据：真实相机照片几乎必有相机厂商/型号；截图通常无相机信息，
  *      且部分机型会在 Software 字段写入截图特征
- *   3. 分辨率特征：精确匹配常见屏幕分辨率，或宽高比接近 16:9 / 19.5:9 等屏幕比例
+ *   3. 分辨率特征：精确匹配常见屏幕分辨率，或宽高比接近 16:9 / 19.5:9 / 20:9 等屏占比特征明显的比例
  *
  * 每张照片输出置信度（high 判定为截图 / suspect 疑似）与命中信号列表，
  * UI 上展示判定依据，便于用户快速复核。
+ *
+ * ⚠️ 误判防护（保证识别准确率）：
+ *   「无相机信息」本身是常见情况——很多真实照片（经 App 重存、裁剪、下载、扫描等）
+ *   都会丢失相机厂商/型号；且 3:4、4:3、16:10 等同时是相机常见比例，已从屏幕比例列表中剔除。
+ *   因此仅凭「无相机信息 + 屏幕分辨率/比例」不足以高置信度判定为截图，
+ *   需要多个独立特征叠加（如同时命中文件名、EXIF 软件特征、PNG 无 EXIF 等）才会判定为高置信度，
+ *   其余归为「疑似」供用户复核，避免大量误伤正常照片。
  */
 
 import type {
@@ -68,17 +75,18 @@ const SCREEN_RESOLUTIONS: Array<[number, number]> = [
   [1125, 2436], [2436, 1125],
 ];
 
-/** 常见屏幕宽高比（容差 ±0.03），长边/短边 */
+/** 常见屏幕宽高比（容差 ±0.03），长边/短边。
+ * 仅保留「屏占比特征明显」的比例（16:9 / 19.5:9 / 20:9 等）。
+ * 移除 3:4、4:3、16:10 等——这些同时也是相机常见比例，
+ * 若纳入会误把真实拍摄照片的宽高比当作截图特征。
+ */
 const SCREEN_RATIOS = [
-  16 / 9,   // 16:9
-  16 / 10,  // 16:10
+  16 / 9,   // 16:9（横向 16:9 屏幕/网页截图）
   19.5 / 9, // 19.5:9（主流全面屏手机）
   20 / 9,   // 20:9
-  3 / 4,    // 4:3（旧手机/平板截图）
-  4 / 3,
   9 / 16,   // 竖向 16:9
   9 / 19.5,
-  10 / 16,
+  9 / 20,
 ];
 
 const RATIO_TOLERANCE = 0.03;
@@ -89,15 +97,15 @@ function matchFilename(name: string): boolean {
   return FILENAME_KEYWORDS.some((k) => lower.includes(k.toLowerCase()));
 }
 
-/** 判断宽高是否为常见屏幕分辨率 */
-function isScreenResolution(w: number, h: number): boolean {
+/** 判断宽高是否为常见屏幕分辨率（导出便于单元测试） */
+export function isScreenResolution(w: number, h: number): boolean {
   return SCREEN_RESOLUTIONS.some(
     ([rw, rh]) => (w === rw && h === rh) || (w === rh && h === rw),
   );
 }
 
-/** 判断宽高比是否接近常见屏幕比例 */
-function isScreenRatio(w: number, h: number): boolean {
+/** 判断宽高比是否接近常见屏幕比例（导出便于单元测试） */
+export function isScreenRatio(w: number, h: number): boolean {
   if (w <= 0 || h <= 0) return false;
   const ratio = Math.max(w, h) / Math.min(w, h);
   return SCREEN_RATIOS.some((r) => Math.abs(ratio - r) <= RATIO_TOLERANCE);
@@ -202,8 +210,8 @@ async function analyzePhoto(
   return { signals, readFailed };
 }
 
-/** 根据命中信号计算置信度并生成判定依据文案 key */
-function classify(signals: ScreenshotSignal[]): { confidence: 'high' | 'suspect'; reasons: ScreenshotSignal[] } | null {
+/** 根据命中信号计算置信度并生成判定依据文案 key（导出便于单元测试） */
+export function classify(signals: ScreenshotSignal[]): { confidence: 'high' | 'suspect'; reasons: ScreenshotSignal[] } | null {
   if (signals.length === 0) return null;
 
   // 高置信度：文件名命中，或 EXIF 软件特征 + 分辨率特征组合命中
@@ -220,10 +228,12 @@ function classify(signals: ScreenshotSignal[]): { confidence: 'high' | 'suspect'
   if (hasSoftware && hasExactRes) high = true;
   // 软件特征 + 屏幕比例（弱信号，仅与软件特征组合时提升到高置信度）
   if (hasSoftware && hasRatio) high = true;
-  // 精确屏幕分辨率 + 无相机信息 + （PNG 无 EXIF 或软件特征）→ 大概率截图
+  // 精确屏幕分辨率 + 无相机信息 + （PNG 无 EXIF 或软件特征）→ 多个独立特征叠加才判定为高置信度
   if (hasNoCamera && hasExactRes && (hasPng || hasSoftware)) high = true;
-  // 精确屏幕分辨率 + 无相机信息 → 大概率截图（比例接近不再提升到高置信度，避免正常照片误判）
-  if (signals.includes('screenRes') && hasNoCamera) high = true;
+  // ⚠️ 注意：仅「无相机信息 + 精确屏幕分辨率」不再单独判为高置信度截图。
+  // 很多真实照片（经 App 重存、裁剪、下载、扫描等）会丢失相机厂商/型号，
+  // 分辨率也可能恰好落在常见屏幕尺寸上（如 1080×1920）。
+  // 若仅凭这两个弱特征就高置信度判定，会大量误伤正常照片，故降级为「疑似」待用户复核。
 
   return {
     confidence: high ? 'high' : 'suspect',
