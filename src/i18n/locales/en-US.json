@@ -182,7 +182,9 @@
       "albumDescriptionOptional": "Optional",
       "albumDescriptionPlaceholder": "Briefly describe this album, e.g. time, place, people",
       "unnamedAlbum": "Untitled Album",
-      "flipped": "(Flipped)"
+      "flipped": "(Flipped)",
+      "autoCover": "Auto-generate Cover / Back Cover",
+      "autoCoverHint": "Smart cover & back cover generated on create; editable or toggled off anytime"
     },
     "projectGrid": {
       "myAlbums": "My Albums",
@@ -1909,6 +1911,11 @@
       "noPages": "No pages",
       "allPagesHidden": "All pages hidden",
       "showAllPages": "Show all pages",
+      "addCover": "Add Cover",
+      "addBackCover": "Add Back Cover",
+      "coverAdded": "Cover generated",
+      "backCoverAdded": "Back cover generated",
+      "addPage": "Add Page",
       "copyPage": "Copy Page",
       "hidePage": "Hide Page",
       "deletePage": "Delete Page",

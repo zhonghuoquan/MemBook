@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type {
-  AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings,
+  AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings, AlbumTypeId,
   EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, WatermarkSettings,
 } from '../../types';
 
@@ -61,6 +61,10 @@ export interface PageSlice {
   resetPageLayout: (pageIndex: number) => void;
   /** 在当前页添加一个照片槽位（默认居中，30%×30%，百分比坐标） */
   addPhotoSlot: () => void;
+  /** 智能生成封面页并插入到首部（复用 cover-generator 本地规则引擎） */
+  addCoverPage: (options?: { templateId?: string; coverPhotoId?: string }) => void;
+  /** 智能生成封底页并插入到尾部（复用封面配色） */
+  addBackCoverPage: () => void;
 }
 
 /* ── 槽位/照片编辑 ──
@@ -99,6 +103,8 @@ export interface PlacementSlice {
 export interface AlbumMetaSlice {
   albumSize: AlbumSize | null;
   projectName: string;
+  /** 相册类型（用于封面场景化引言与配色） */
+  albumType: AlbumTypeId | undefined;
   pageMargin: PageMarginSettings;
   applyMarginToAll: boolean;
   slotGap: number;
@@ -107,6 +113,8 @@ export interface AlbumMetaSlice {
   showMarginGuide: boolean;
   setProjectName: (name: string) => void;
   setAlbumSize: (size: AlbumSize) => void;
+  /** 设置相册类型（封面场景化引言与配色） */
+  setAlbumType: (albumType: AlbumTypeId | undefined) => void;
   /** 批量应用页面设置（边距+间距+圆角+开关），一次 Store 写入避免中间态跳变 */
   batchPageSettings: (params: {
     margin: PageMarginSettings; gap: number; cornerRadius: number;

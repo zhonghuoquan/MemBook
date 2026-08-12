@@ -1,9 +1,40 @@
-import type { AlbumPage, SlotLayout } from '../../types';
+import type { AlbumPage, SlotLayout, AlbumTypeId } from '../../types';
 import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById } from '../../types';
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
+import { generateCoverPage, generateBackCoverPage, buildCoverPalette } from '../../engine/cover-generator';
+import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
+
+/** 从已有封面页反推配色，供封底复用以保持首尾呼应 */
+function derivePaletteFromPage(coverPage: AlbumPage): ReturnType<typeof buildCoverPalette> {
+  const background = coverPage.background || '#FFFFFF';
+  const titleEl = coverPage.textElements?.find((el) => el.id.startsWith('cover-title-'));
+  const dark = /^#[0-9a-fA-F]{3,6}$/.test(background) ? luminanceOf(background) < 0.45 : false;
+  return {
+    background,
+    dark,
+    titleColor: titleEl?.color ?? (dark ? '#FFF8EC' : '#2B2A4A'),
+    bodyColor: titleEl?.color ? mixOpacity(titleEl.color) : (dark ? 'rgba(255,248,236,0.82)' : 'rgba(43,42,74,0.72)'),
+  };
+}
+
+function luminanceOf(hex: string): number {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n)) return 1;
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+function mixOpacity(hex: string): string {
+  const n = parseInt(hex.replace('#', ''), 16);
+  if (Number.isNaN(n)) return hex;
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r},${g},${b},0.82)`;
+}
 
 /* ── 页面增删改查 slice ── */
 export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
@@ -266,6 +297,67 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       const newPages = [...s.pages];
       newPages[s.currentPageIndex] = { ...page, extraSlots, placements, slotOrder, slotZIndices };
       return { pages: newPages, selectedSlotId: slotId, multiSelectedSlots: [] };
+    });
+    pushSnapshot(get);
+  },
+
+  /** 智能生成封面页并插入到首部（复用 cover-generator 本地规则引擎） */
+  addCoverPage: (options) => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    const albumName = get().projectName || '我的相册';
+    const albumType = get().albumType as AlbumTypeId | undefined;
+    const photos = usePhotoStore.getState().photos;
+    const result = generateCoverPage({ photos, albumName, albumType, ...options }, new Map(), pageMm);
+    const { page } = result;
+    set((s) => {
+      const hasCover = s.pages.some((p) => p.pageKind === 'cover');
+      const newPages = [...s.pages];
+      if (hasCover) {
+        // 已有封面 → 用新生成页面替换旧封面（保留其位置，通常为首位）
+        const idx = newPages.findIndex((p) => p.pageKind === 'cover');
+        newPages[idx] = page;
+      } else {
+        newPages.unshift(page);
+      }
+      return { pages: newPages, currentPageIndex: 0 };
+    });
+    // 记录历史快照并应用边距约束（与 addPage 对齐）
+    const idx = get().pages.findIndex((p) => p.pageKind === 'cover');
+    const marginResult = pageMarginService.calcMarginForPage(idx, get().pages);
+    if (marginResult) {
+      set((s) => {
+        const np = [...s.pages];
+        if (np[idx]) np[idx] = marginResult.newPage;
+        return { pages: np };
+      });
+    }
+    pushSnapshot(get);
+  },
+
+  /** 智能生成封底页并插入到尾部（复用封面配色，保持首尾呼应） */
+  addBackCoverPage: () => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    const albumName = get().projectName || '我的相册';
+    const albumType = get().albumType as AlbumTypeId | undefined;
+    const photos = usePhotoStore.getState().photos;
+    // 复用现有封面配色（若无封面则用品牌紫系默认配色）
+    const coverPage = get().pages.find((p) => p.pageKind === 'cover');
+    const palette = coverPage?.background
+      ? derivePaletteFromPage(coverPage)
+      : buildCoverPalette([108, 99, 255]); // 品牌紫 #6C63FF 兜底
+    const backPage = generateBackCoverPage({ photos, albumName, albumType }, palette, pageMm);
+    set((s) => {
+      const hasBack = s.pages.some((p) => p.pageKind === 'backCover');
+      const newPages = [...s.pages];
+      if (hasBack) {
+        const idx = newPages.findIndex((p) => p.pageKind === 'backCover');
+        newPages[idx] = backPage;
+      } else {
+        newPages.push(backPage);
+      }
+      return { pages: newPages };
     });
     pushSnapshot(get);
   },

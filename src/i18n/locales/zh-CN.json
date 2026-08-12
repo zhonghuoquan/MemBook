@@ -182,7 +182,9 @@
       "albumDescriptionOptional": "选填",
       "albumDescriptionPlaceholder": "简单描述这个相册，如时间、地点、人物等",
       "unnamedAlbum": "未命名相册",
-      "flipped": "（翻转）"
+      "flipped": "（翻转）",
+      "autoCover": "自动生成封面 / 封底",
+      "autoCoverHint": "创建时智能生成封面与封底，可随时编辑或关闭"
     },
     "projectGrid": {
       "myAlbums": "我的相册",
@@ -1910,7 +1912,11 @@
       "noPages": "暂无页面",
       "allPagesHidden": "所有页面已隐藏",
       "showAllPages": "显示全部页面",
-      "copyPage": "复制页面",
+      "addCover": "添加封面",
+      "addBackCover": "添加封底",
+      "coverAdded": "已生成封面",
+      "backCoverAdded": "已生成封底",
+      "addPage": "添加页面",
       "hidePage": "隐藏页面",
       "deletePage": "删除页面",
       "selectAll": "全选",

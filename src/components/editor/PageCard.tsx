@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore, usePhotoStore } from '../../store';
 import { invalidatePageThumbnail, preloadPagePhotos, renderPageThumbnailInWorker, getCachedThumbnailUrl, preloadStickers, releaseStickerImages } from '../../utils/gridThumbnailRenderer';
 import type { AlbumPage, Photo } from '../../types';
+import { isCoverPage, isBackCoverPage } from '../../types';
 
 interface PageCardProps {
   page: AlbumPage;
@@ -181,6 +182,23 @@ export const PageCard = memo(function PageCard({
           }}
           draggable={false}
         />
+      )}
+      {(isCoverPage(page) || isBackCoverPage(page)) && (
+        <div style={{
+          position: 'absolute',
+          top: 6, left: 6,
+          zIndex: 2,
+          padding: '2px 7px',
+          borderRadius: 999,
+          fontSize: 10,
+          fontWeight: 600,
+          lineHeight: '16px',
+          color: '#fff',
+          backgroundColor: isCoverPage(page) ? 'rgba(108,99,255,0.88)' : 'rgba(52,124,96,0.88)',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+        }}>
+          {isCoverPage(page) ? '📕 封面' : '📗 封底'}
+        </div>
       )}
     </div>
   );
