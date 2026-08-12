@@ -3,7 +3,7 @@
  *
  * 按 年-月 或 相册路径 分组展示照片，支持：
  * - 异常日期标记（年份 < 2000 或 > 当前年+1 标红，显示"日期异常"）
- * - 每个月份/路径分组可折叠/展开：点击表头展开即显示该组全部照片（不再有独立的"查看全部"）
+ * - 每个月份/路径分组默认收起（仅显示一行照片预览，避免大量照片一次性加载），点击表头展开即显示该组全部照片
  * - 月份分组表头 sticky 吸顶：照片多时往下滑动，月份表头固定保留在最上方
  * - 缩略图网格，使用共享 ThumbImage 异步加载
  * - 多选模式：分组级全选/取消全选（月份级 + 路径级）
@@ -288,10 +288,11 @@ export function TimelineView({
   const [previewGroup, setPreviewGroup] = useState<PhotoFileInfo[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
 
-  // 折叠状态：默认全部展开（点击表头展开分组即显示该组全部照片）
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // 折叠状态：默认全部收起（避免大量照片一次性加载，仅显示一行照片预览）。
+  // 用 expanded 记录“用户已展开”的分组；不在其中的分组默认收起。
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleCollapse = useCallback((key: string) => {
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const n = new Set(prev);
       if (n.has(key)) n.delete(key);
       else n.add(key);
@@ -375,7 +376,7 @@ export function TimelineView({
     year?: number,
     month?: number,
   ) => {
-    const isCollapsed = collapsed.has(key);
+    const isCollapsed = !expanded.has(key);
     const groupIds = items.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
     const headerBgCls =
@@ -488,7 +489,7 @@ export function TimelineView({
   /** 渲染单个路径分组 */
   const renderPathGroup = (g: PathGroup) => {
     const key = g.key;
-    const isCollapsed = collapsed.has(key);
+    const isCollapsed = !expanded.has(key);
     const groupIds = g.photos.map((p) => p.id);
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
     return (

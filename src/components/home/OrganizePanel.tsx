@@ -230,7 +230,12 @@ function photoToFileInfo(p: Photo): PhotoFileInfo {
   };
 }
 
-export function OrganizePanel() {
+interface OrganizePanelProps {
+  /** 当前整理面板是否处于可见（激活）状态；仅当用户真正进入“照片整理”页时才触发恢复扫描 */
+  active?: boolean;
+}
+
+export function OrganizePanel({ active = false }: OrganizePanelProps) {
   const { t } = useTranslation();
   const addToast = useUIStore((s) => s.addToast);
 
@@ -395,11 +400,11 @@ export function OrganizePanel() {
     return activeTab.photos.filter((p) => selectedPhotoIds.has(p.id));
   }, [selectedPhotoIds, activeTab]);
 
-  // 切换标签时清空选中状态 + 重置工具状态（不同标签的照片集不同，旧结果无效）
+  // 切换标签时清空选中状态。
+  // 注意：不再重置 visitedTools / toolStatuses——工具保持挂载（不带 tab 的 key），
+  // 且扫描结果由各工具内部 useTabCachedResult 按标签缓存，切回时自动恢复，无需卸载重挂。
   useEffect(() => {
     setSelectedPhotoIds(new Set());
-    setVisitedTools(new Set([activeTool]));
-    setToolStatuses(new Map());
   }, [activeTabId]);
 
   // 访问新工具时加入 visitedTools（懒挂载：首次访问才渲染，之后保持挂载保留状态）
@@ -675,17 +680,21 @@ export function OrganizePanel() {
     }
   }, [setTabState, addToast, t]);
 
-  // ── 恢复：组件挂载时触发已恢复标签的异步重新扫描 ──
-  // 标签本身已通过 useState lazy initializer 同步恢复，这里仅触发异步扫描
+  // ── 恢复：仅当用户真正进入“照片整理”面板时才触发已恢复标签的异步重新扫描 ──
+  // 背景：本面板在主页中“始终挂载”（仅用 CSS 隐藏，避免切换 Tab 时丢失所选路径）。
+  // 若在组件挂载时就自动恢复扫描，那么每次从编辑/相册返回主页（面板重新挂载）
+  // 都会在用户停留在相册页时突然弹出“扫描完成”提示，令人困惑。
+  // 故改为：仅当 active 变为 true（用户主动进入照片整理页）时，才扫描一次并提示结果。
   // 仅执行一次（用 ref 守卫，React 18 StrictMode 双调用下也安全）
   useEffect(() => {
     if (restoredRef.current) return;
+    if (!active) return;
     restoredRef.current = true;
 
     const restoredTabs = tabsRef.current;
     if (restoredTabs.length === 0) return;
 
-    // 异步触发每个标签的重新扫描（后台静默执行，不阻塞 UI）
+    // 异步触发每个标签的重新扫描
     void (async () => {
       for (const tab of restoredTabs) {
         if (tab.sourceMode === 'library' && tab.projectId) {
@@ -703,7 +712,7 @@ export function OrganizePanel() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
 
   /** Web 端扫描文件夹（写入指定标签） */
   const scanFolderWeb = useCallback(async (handle: FileSystemDirectoryHandle, tabId: string) => {
@@ -1419,7 +1428,7 @@ export function OrganizePanel() {
             {visitedTools.has('dedupe') && (
               <div className={activeTool === 'dedupe' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <DedupeTool
-                  key={`dedupe-${activeTabId}`}
+                  key="dedupe"
                   {...toolProps}
                   dedupeResult={activeDedupeState.result}
                   dedupeOverrides={activeDedupeState.overrides}
@@ -1431,37 +1440,37 @@ export function OrganizePanel() {
             )}
             {visitedTools.has('organize') && (
               <div className={activeTool === 'organize' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <OrganizeTool key={`organize-${activeTabId}`} {...toolProps} />
+                <OrganizeTool key="organize" {...toolProps} />
               </div>
             )}
             {visitedTools.has('faceCluster') && (
               <div className={activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key={`faceCluster-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
+                <FaceClusterTool key="faceCluster" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
               <div className={activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <SimilarTool key={`similar-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
+                <SimilarTool key="similar" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('screenshot') && (
               <div className={activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ScreenshotTool key={`screenshot-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
+                <ScreenshotTool key="screenshot" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
               </div>
             )}
             {visitedTools.has('exif') && (
               <div className={activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ExifTool key={`exif-${activeTabId}`} {...toolProps} />
+                <ExifTool key="exif" {...toolProps} />
               </div>
             )}
             {visitedTools.has('rename') && (
               <div className={activeTool === 'rename' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <RenameTool key={`rename-${activeTabId}`} {...toolProps} />
+                <RenameTool key="rename" {...toolProps} />
               </div>
             )}
             {visitedTools.has('convert') && (
               <div className={activeTool === 'convert' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ConvertTool key={`convert-${activeTabId}`} {...toolProps} />
+                <ConvertTool key="convert" {...toolProps} />
               </div>
             )}
             {visitedTools.has('timeline') && (
@@ -1482,7 +1491,7 @@ export function OrganizePanel() {
                   }
                 >
                   <TimelineView
-                    key={`timeline-${activeTabId}`}
+                    key="timeline"
                     photos={activeTab?.photos ?? []}
                     readPhotoData={readPhotoData}
                     onSelectionChange={setSelectedPhotoIds}
@@ -1514,7 +1523,7 @@ export function OrganizePanel() {
                   }
                 >
                   <CalendarView
-                    key={`calendar-${activeTabId}`}
+                    key="calendar"
                     photos={activeTab?.photos ?? []}
                     readPhotoData={readPhotoData}
                     selectedIds={selectedPhotoIds}

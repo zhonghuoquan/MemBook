@@ -4,7 +4,7 @@
  * 与真实拍摄照片分离，支持：
  * - 一键筛出截图 → 点击缩略图查看大图
  * - 缩略图左上角勾选 → 批量加入相册 / 批量删除
- * - 缩略图左上角删除按钮 → 单张快速删除（去掉三点菜单，缩短操作路径）
+ * - 缩略图右上角删除按钮 → 单张快速删除（去掉三点菜单，缩短操作路径）
  * - 加入相册（把保留的正常照片加入相册）
  * - 疑似截图独立展示，供用户复核
  */
@@ -24,6 +24,7 @@ import {
   AddToAlbumButton,
   ThumbImage,
   deletePhotos,
+  useTabCachedResult,
   type ToolProps,
 } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
@@ -47,18 +48,19 @@ interface ScreenshotToolProps extends ToolProps {
 }
 
 export function ScreenshotTool({
-  photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate,
+  photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId,
   autoRunToken, isAutoRunTarget,
 }: ScreenshotToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  const [scanned, setScanned] = useState(false);
+  // 识别结果按标签缓存，切换路径时保留各路径的截图识别结果
+  const [scanned, setScanned] = useTabCachedResult<boolean>(tabId, false);
   // 识别结果
-  const [screenshots, setScreenshots] = useState<ScreenshotItem[]>([]);
-  const [suspects, setSuspects] = useState<ScreenshotItem[]>([]);
-  const [normalPhotos, setNormalPhotos] = useState<PhotoFileInfo[]>([]);
-  const [failedPhotos, setFailedPhotos] = useState(0);
+  const [screenshots, setScreenshots] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
+  const [suspects, setSuspects] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
+  const [normalPhotos, setNormalPhotos] = useTabCachedResult<PhotoFileInfo[]>(tabId, []);
+  const [failedPhotos, setFailedPhotos] = useTabCachedResult<number>(tabId, 0);
   // 当前展示 Tab
   const [tab, setTab] = useState<'screenshots' | 'suspects' | 'normal'>('screenshots');
   // 多选（勾选）的照片 ID
@@ -248,7 +250,7 @@ export function ScreenshotTool({
         >
           <ThumbImage photo={photo} readPhotoData={readPhotoData} size="medium" />
 
-          {/* 左上角：勾选 + 删除按钮 */}
+          {/* 左上角：勾选按钮 */}
           <div className="absolute top-1 left-1 z-10 flex items-center gap-1">
             {/* 勾选添加/删除 */}
             <span
@@ -267,25 +269,26 @@ export function ScreenshotTool({
                 <path d="M2 6l3 3 5-6" />
               </svg>
             </span>
-            {/* 单张删除（左上角，替代原三点菜单） */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
-                  handleDelete(photo);
-                }
-              }}
-              className="w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
-              title={t('home.organize.shared.delete')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                <path d="M4 7h16" />
-                <path d="M9 7V4h6v3" />
-                <path d="M6 7l1 13h10l1-13" />
-              </svg>
-            </button>
           </div>
+
+          {/* 右上角：单张删除（替代原三点菜单） */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
+                handleDelete(photo);
+              }
+            }}
+            className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
+            title={t('home.organize.shared.delete')}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+              <path d="M4 7h16" />
+              <path d="M9 7V4h6v3" />
+              <path d="M6 7l1 13h10l1-13" />
+            </svg>
+          </button>
         </div>
 
         {/* 判定依据信号标签 */}
@@ -318,7 +321,7 @@ export function ScreenshotTool({
           title={photo.name}
         >
           <ThumbImage photo={photo} readPhotoData={readPhotoData} size="medium" />
-          {/* 单张删除（左上角） */}
+          {/* 单张删除（右上角） */}
           <button
             type="button"
             onClick={(e) => {
@@ -328,7 +331,7 @@ export function ScreenshotTool({
                 setNormalPhotos((prev) => prev.filter((p) => p.id !== photo.id));
               }
             }}
-            className="absolute top-1 left-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
+            className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
             title={t('home.organize.shared.delete')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">

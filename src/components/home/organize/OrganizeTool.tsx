@@ -6,7 +6,7 @@
  * 支持：排除已整理文件、按格式排除、执行后自动重新扫描
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   isTauri,
@@ -18,16 +18,17 @@ import {
   type OrganizeMode,
   type LocationLevel,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, countByExt, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, countByExt, useTabCachedResult, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 
-export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan, onBusyChange }: ToolProps) {
+export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan, onBusyChange, tabId }: ToolProps) {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  const [items, setItems] = useState<OrganizePreviewItem[]>([]);
-  const [noDatePhotos, setNoDatePhotos] = useState<PhotoFileInfo[]>([]);
+  // 归类预览结果按标签缓存，切换路径时保留各路径的预览结果
+  const [items, setItems] = useTabCachedResult<OrganizePreviewItem[]>(tabId, []);
+  const [noDatePhotos, setNoDatePhotos] = useTabCachedResult<PhotoFileInfo[]>(tabId, []);
   const [useFileDate, setUseFileDate] = useState(false);
   const [excludeSorted, setExcludeSorted] = useState(true);
   const [excludedExts, setExcludedExts] = useState<Set<string>>(new Set());
@@ -49,12 +50,19 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
     return [...set].sort();
   }, [photos]);
 
-  // photos 变化时清除旧结果
+  // 组件保持挂载后，切标签时 photos 引用也会变化，但不应清空（结果由 useTabCachedResult 按标签恢复）。
+  // 仅在“同一标签内 photos 变化”（重新扫描/删除照片）时清除旧预览结果。
+  const prevTabRef = useRef(tabId);
   useEffect(() => {
+    if (prevTabRef.current !== tabId) {
+      prevTabRef.current = tabId;
+      return; // 跨标签切换：交由标签缓存恢复，不清空
+    }
     setItems([]);
     setProgress(null);
     setNoDatePhotos([]);
-  }, [photos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos, tabId]);
 
   const toggleExt = (ext: string) => {
     setExcludedExts((prev) => {

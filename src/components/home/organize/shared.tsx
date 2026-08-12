@@ -9,6 +9,49 @@ import type { PhotoFileInfo, ToolProgress, DataSourceMode } from '../../../photo
 import { formatBytes, isTauri } from '../../../photo-tools';
 import { getThumbUrl, evictFromCache, type ThumbSize } from './thumbCache';
 
+// ── 按标签持久化工具结果 ────────────────────────────────
+
+/**
+ * 按标签（tabId）持久化工具结果的 hook。
+ *
+ * 背景：照片整理支持多路径标签，切换标签时会卸载/重挂工具组件导致扫描结果丢失。
+ * 本 hook 让工具组件保持挂载（去掉 key 中的 tabId），内部用 Map<tabId, result>
+ * 缓存结果——切换标签时自动把当前结果存入旧标签缓存，并从新标签缓存恢复，
+ * 实现「切换路径不丢扫描结果」（方案A）。
+ *
+ * 用法：把工具的 `useState(initial)` 替换为 `useTabCachedResult(tabId, initial)`，
+ * 其余 setState 调用保持不变（返回的就是标准 React dispatch）。
+ *
+ * @param tabId   当前标签 ID（来自 ToolProps.tabId）；undefined 时不启用缓存
+ * @param initial 每个标签的初始值
+ */
+export function useTabCachedResult<T>(tabId: string | undefined, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  // tabId → 结果缓存（跨标签切换保留，组件挂载期间一直存在）
+  const cacheRef = useRef<Map<string, T>>(new Map());
+  const [state, setState] = useState<T>(initial);
+  // 实时同步最新 state，供标签切换时保存到旧标签缓存（在 effect 中访问 ref，避免 render 期访问）
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  const prevTabRef = useRef(tabId);
+
+  // 标签切换：保存旧标签结果 → 从新标签缓存恢复
+  useEffect(() => {
+    if (tabId === prevTabRef.current) return;
+    if (prevTabRef.current !== undefined) {
+      cacheRef.current.set(prevTabRef.current, stateRef.current);
+    }
+    prevTabRef.current = tabId;
+    if (tabId !== undefined) {
+      const cached = cacheRef.current.get(tabId);
+      setState(cached !== undefined ? cached : initial);
+    }
+  }, [tabId, initial]);
+
+  return [state, setState];
+}
+
 // ── 常量 ────────────────────────────────────────────────
 
 export const IMAGE_EXTS = new Set([
