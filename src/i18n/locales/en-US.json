@@ -900,6 +900,9 @@
       "jumpHint": "Found {{count}} item(s){{sub}}",
       "subCount": " (affecting {{sub}})",
       "cleanHint": "No action needed for this item",
+      "cleanRate": "Cleanliness",
+      "foundBadge": "Found",
+      "cleanBadge": "Clean",
       "handle": "Handle",
       "reanalyze": "Re-analyze"
     },
