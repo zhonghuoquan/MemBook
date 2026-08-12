@@ -25,7 +25,7 @@ import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, Th
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
-export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, tabId, proFeature, checkProFeature, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -53,6 +53,10 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
   /** 查找相似照片 */
   const handleStart = async () => {
     if (photos.length < 2) return;
+    // Pro 授权守卫：点击“开始扫描”时才检查并提示激活
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     abortRef.current = new AbortController();
     setRunning(true);
     setScanned(false);

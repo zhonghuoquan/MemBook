@@ -69,7 +69,7 @@ function getClusterColor(index: number) {
   return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
 }
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId, proFeature, checkProFeature, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -167,6 +167,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 开始人脸检测（只检测，不聚类） */
   const handleStart = async () => {
     if (photos.length === 0) return;
+    // Pro 授权守卫：点击“开始分析”时才检查并提示激活，而非进入工具时立即弹出
+    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
+      return;
+    }
     abortRef.current = new AbortController();
     setRunning(true);
     setResult(null);

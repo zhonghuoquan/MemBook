@@ -256,6 +256,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     exif: 'exifBatch',
   };
   // 检查某工具是否被 Pro 锁定（未激活且该工具属于 Pro 专属）
+  // 订阅 isActivated 布尔态而非稳定的 isFeatureAvailable 函数引用，确保激活后组件能重新渲染并刷新锁定判断
+  const licenseActivated = useLicenseStore((s) => s.isActivated);
   const isFeatureAvailable = useLicenseStore((s) => s.isFeatureAvailable);
   const checkFeature = useLicenseStore((s) => s.checkFeature);
   const isToolLocked = (id: ToolId): boolean => {
@@ -263,6 +265,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     if (!feat) return false;
     return !isFeatureAvailable(feat);
   };
+  // 在激活态变化时刷新一次（确保依赖 isToolLocked 的缓存与 UI 及时更新）
+  void licenseActivated;
 
   // ---- 多路径标签状态 ----
   // 使用 lazy initializer 在初始化时同步恢复 localStorage 中的标签，避免 effect 中 setState
@@ -337,8 +341,9 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 对 Free 用户自动剔除 Pro 专属工具（人脸识别/相似照片），仅在授权可用时才纳入序列
   const AUTO_ANALYZE_TOOLS: ToolId[] = useMemo(
     () => (['dedupe', 'faceCluster', 'similar', 'screenshot'] as ToolId[]).filter((id) => !isToolLocked(id)),
+    // 依赖 licenseActivated：激活后（Pro 全开）一键分析要包含全部工具
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFeatureAvailable],
+    [isFeatureAvailable, licenseActivated],
   );
   // 当前“一键分析”进行到的工具（'idle' 表示未在运行）
   const [autoAnalyzeStep, setAutoAnalyzeStep] = useState<ToolId | 'idle'>('idle');
@@ -1178,9 +1183,11 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     tabId: activeTabId ?? undefined,
     onBusyChange: handleBusyChange,
     onResultSummary: handleResultSummary,
+    checkProFeature: (feat, hint) => checkFeature(feat, hint ?? t('license.photoToolRequiresPro')),
   }), [
     activeTab?.photos, activeTab?.rootPath, activeTab?.sourceMode,
     readPhotoData, onPhotosUpdate, addToast, handleRescan, activeTabId, handleBusyChange, handleResultSummary,
+    checkFeature, t,
   ]);
 
   // ── 渲染 ──────────────────────────────────────────────
@@ -1485,12 +1492,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                 if (autoAnalyzeRunning) userNavigatedRef.current = true;
                 // 用户从报告页切换到其他工具时关闭报告页（报告作为单独页，不与其他工具合并）
                 setShowAnalyzeReport(false);
-                // Pro 专属工具：未激活时拦截并弹出激活窗口，避免进入空/受限界面
-                if (isToolLocked(id)) {
-                  const feat = TOOL_PRO_FEATURE[id]!;
-                  checkFeature(feat, t('license.photoToolRequiresPro'));
-                  return;
-                }
+                // Pro 专属工具不拦截入口，允许进入查看工具界面；
+                // 待用户点击“开始扫描/执行”按钮时再由工具内部的授权守卫弹出激活窗口
                 setActiveTool(id);
                 // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
                 setSelectedPhotoIds(new Set());
@@ -1590,12 +1593,12 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             )}
             {visitedTools.has('faceCluster') && (
               <div className={!showAnalyzeReport && activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key="faceCluster" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
+                <FaceClusterTool key="faceCluster" {...toolProps} proFeature="faceCluster" autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
               <div className={!showAnalyzeReport && activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <SimilarTool key="similar" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
+                <SimilarTool key="similar" {...toolProps} proFeature="similar" autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('screenshot') && (
@@ -1605,7 +1608,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             )}
             {visitedTools.has('exif') && (
               <div className={!showAnalyzeReport && activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ExifTool key="exif" {...toolProps} />
+                <ExifTool key="exif" {...toolProps} proFeature="exifBatch" />
               </div>
             )}
             {visitedTools.has('rename') && (
@@ -1615,7 +1618,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             )}
             {visitedTools.has('convert') && (
               <div className={!showAnalyzeReport && activeTool === 'convert' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ConvertTool key="convert" {...toolProps} />
+                <ConvertTool key="convert" {...toolProps} proFeature="convert" />
               </div>
             )}
             {visitedTools.has('timeline') && (
