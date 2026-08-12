@@ -21,7 +21,7 @@ import {
   ProgressBar,
   PrimaryButton,
   AddToAlbumButton,
-  ThumbWithMenu,
+  ThumbImage,
   deletePhotos,
   type ToolProps,
 } from './shared';
@@ -151,12 +151,30 @@ export function ScreenshotTool({ photos, readPhotoData, addToast, onBusyChange, 
     <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
       {list.map((item, idx) => (
         <div key={item.photo.id} className="relative">
-          <ThumbWithMenu
-            photo={item.photo}
-            readPhotoData={readPhotoData}
-            onView={() => openPreview(list.map((s) => s.photo), idx)}
-            onDelete={() => handleDelete(item.photo)}
-          />
+          <div
+            className="relative group rounded-lg border-2 border-transparent transition-all cursor-pointer hover:border-[var(--color-border)] overflow-hidden"
+            title={item.photo.name}
+            onClick={() => openPreview(list.map((s) => s.photo), idx)}
+          >
+            <ThumbImage photo={item.photo} readPhotoData={readPhotoData} size="small" />
+            {/* 删除按钮：固定显示在照片右上角 */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(item.photo);
+              }}
+              className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded-full bg-black/40 text-white hover:bg-red-600 transition-colors cursor-pointer border-none"
+              title={t('home.organize.shared.delete')}
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7h16" />
+                <path d="M9 7V4h6v3" />
+                <path d="M6 7l1 13h10l1-13" />
+                <path d="M10 11v5M14 11v5" />
+              </svg>
+            </button>
+          </div>
           {showReasons && item.reasons.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               {item.reasons.slice(0, 3).map((r) => (
