@@ -13,7 +13,7 @@
  * 月份分组按时间倒序排列（最新的在前）；无法识别日期的照片归入"未知日期"分组置于末尾。
  */
 
-import { useState, useMemo, useCallback, useRef, useLayoutEffect, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { resolvePhotoDate, type PhotoFileInfo, type TimelineGroup } from '../../../photo-tools';
 import { ThumbWithMenu, deletePhotos } from './shared';
@@ -158,13 +158,11 @@ const THUMB_SIZE = 96;
 const THUMB_GAP = 8;
 
 /**
- * 折叠态照片行（单行横向滚动预览）
+ * 折叠态照片行（限定的框内预览）
  *
- * - 渲染该组全部照片，可横向滚动查看（配合懒加载缩略图，不会一次性加载图片）
- * - 行末固定一个与照片同尺寸（96px）的颜色框：显示“还有 N 张”（当前视口外被收起/需滚动才能看到的数量）
- * - **滚动条内嵌在颜色框内**：整行隐藏原生横向滚动条（scrollbar-width:none），
- *   改在颜色框底部绘制一条同步的横向滚动条，拖动/点击即可滚动整行。
- *   这样滚动条出现/消失都不会撑高行，也就不会让右边窗口宽度被缩放。
+ * - 仅在限定的框内展示前几张能放下的照片，不再渲染全部照片、无需横向滚动
+ * - 行末固定一个与照片同尺寸（96px）的颜色框：显示“还有 N 张”（未展示的剩余照片数量）
+ * - 点击表头展开分组即可查看全部照片
  */
 function CollapsedRow({
   items,
@@ -182,11 +180,8 @@ function CollapsedRow({
   onDelete: (photo: PhotoFileInfo) => void;
 }) {
   const rowRef = useRef<HTMLDivElement | null>(null);
-  // 当前容器可视宽度（用于计算“还有 N 张”与滚动条滑块比例）
+  // 当前容器可视宽度（用于计算限定的框内能放下多少张照片）
   const [rowWidth, setRowWidth] = useState(0);
-  // 当前横向滚动位置与可滚动总量
-  const [scrollLeft, setScrollLeft] = useState(0);
-  const [scrollRange, setScrollRange] = useState(0);
 
   // 用 ResizeObserver 实时测量容器宽度，窗口变化/面板拉伸时自动重排
   useLayoutEffect(() => {
@@ -203,46 +198,20 @@ function CollapsedRow({
     return () => window.removeEventListener('resize', update);
   }, []);
 
-  // 同步整行可滚动距离（scrollWidth - clientWidth）
-  const syncScroll = useCallback(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    setScrollLeft(el.scrollLeft);
-    setScrollRange(Math.max(0, el.scrollWidth - el.clientWidth));
-  }, []);
-
-  useEffect(() => {
-    syncScroll();
-  }, [syncScroll, rowWidth, items.length]);
-
-  // 整行横向滚动时更新内嵌滚动条位置
-  const handleScroll = () => syncScroll();
-
-  // 通过内嵌滚动条滚动整行（拖动或点击轨道跳转）
-  const scrollToRatio = (ratio: number) => {
-    const el = rowRef.current;
-    if (!el) return;
-    el.scrollLeft = Math.max(0, Math.min(ratio, 1)) * (el.scrollWidth - el.clientWidth);
-  };
-
-  // 单行当前能放下的照片数 = floor((宽度 - 间隙) / (缩略图+间隙))
+  // 限定的框内能放下的照片数 = floor((宽度 - 间隙) / (缩略图+间隙))
   const fitCount = Math.max(1, Math.floor((rowWidth - THUMB_GAP) / (THUMB_SIZE + THUMB_GAP)));
-  // “还有 N 张” = 视口外需滚动才能看到的数量
-  const remaining = Math.max(0, items.length - fitCount);
-  const showCounter = remaining > 0;
-
-  // 内嵌滚动条滑块：比例 = 可视宽 / 总宽，位置随 scrollLeft 变化
-  const thumbRatio = rowWidth && scrollRange >= 0 ? rowWidth / (rowWidth + scrollRange) : 1;
-  const thumbWidthPct = Math.max(6, Math.min(100, thumbRatio * 100));
-  const thumbLeftPct = scrollRange > 0 ? (scrollLeft / scrollRange) * (100 - thumbWidthPct) : 0;
+  // 预留最后一个位置给“剩余数量”框，真正展示的照片数为 fitCount - 1
+  const visibleCount = Math.max(0, fitCount - 1);
+  // 只在照片总数超过展示数量时才显示剩余数量框
+  const showCounter = items.length > visibleCount;
+  // 剩余数量 = 总照片数 - 已展示数量
+  const remaining = items.length - visibleCount;
+  // 只展示限定的框内能放下的前几张照片，其余照片不再渲染、无需滚动
+  const visibleItems = showCounter ? items.slice(0, visibleCount) : items;
 
   return (
-    <div
-      ref={rowRef}
-      onScroll={handleScroll}
-      className="timeline-row-scroll flex gap-2 overflow-x-auto overflow-y-hidden"
-    >
-      {items.map((p, i) => (
+    <div ref={rowRef} className="flex gap-2 overflow-hidden">
+      {visibleItems.map((p, i) => (
         <div key={p.id} className="shrink-0" style={{ width: THUMB_SIZE }}>
           <Thumb
             photo={p}
@@ -257,7 +226,7 @@ function CollapsedRow({
         </div>
       ))}
 
-      {/* 行末：与照片同尺寸的颜色框，说明还有多少张照片，滚动条内嵌其中 */}
+      {/* 行末：限定的框内最后一个位置展示剩余照片数量 */}
       {showCounter && (
         <div
           className="shrink-0 rounded-lg border border-[var(--color-brand)]/25 bg-gradient-to-br from-[var(--color-brand-bg)] to-[var(--color-brand)]/10 flex flex-col items-center justify-center gap-1 select-none"
@@ -268,29 +237,8 @@ function CollapsedRow({
           <span className="text-[var(--color-text-secondary)] text-[10px] leading-none">
             {items.length}
           </span>
-          {/* 内嵌横向滚动条：同步整行滚动进度，拖动/点击可滚动整行 */}
-          <div
-            className="w-[72%] h-1.5 rounded-full bg-[var(--color-gray-200)]/70 relative cursor-pointer shrink-0 mt-0.5"
-            onPointerDown={(e) => {
-              // 点击/拖动跳转到对应位置
-              const rect = e.currentTarget.getBoundingClientRect();
-              const ratio = (e.clientX - rect.left) / rect.width;
-              scrollToRatio(ratio);
-            }}
-          >
-            <div
-              className="absolute top-0 h-full rounded-full bg-[var(--color-brand)]/80"
-              style={{ left: `${thumbLeftPct}%`, width: `${thumbWidthPct}%` }}
-            />
-          </div>
         </div>
       )}
-
-      {/* 隐藏整行原生横向滚动条：滚动条视觉统一内嵌到颜色框内 */}
-      <style>{`
-        .timeline-row-scroll { scrollbar-width: none; }
-        .timeline-row-scroll::-webkit-scrollbar { display: none; }
-      `}</style>
     </div>
   );
 }
@@ -325,9 +273,8 @@ function PhotoRow({
   /** 分组折叠时仅显示一行预览：不展开网格、不参与多选点击 */
   collapsed?: boolean;
 }) {
-  // 折叠态：单行预览（渲染全部照片可横向滚动，行末固定一个与照片同尺寸的
-  // 颜色框显示“还有 N 张”，并把横向滚动条内嵌在该颜色框内——隐藏整行原生滚动条，
-  // 避免滚动条显示时撑高/挤压行导致右边窗口宽度被缩放）。
+  // 折叠态：单行预览，仅在限定的框内展示前几张照片，
+  // 行末固定一个与照片同尺寸的颜色框显示“还有 N 张”（剩余照片数量）。
   if (collapsed) {
     return (
       <CollapsedRow
