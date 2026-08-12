@@ -3,6 +3,7 @@
    ============================================================ */
 
 import { GENERATED_TEMPLATES } from './generated-templates';
+import { ALL_COVER_TEMPLATES, findCoverTemplateById } from './cover-templates';
 
 /* ── 相册规格 ── */
 export type AlbumSize = {
@@ -137,6 +138,48 @@ export function buildVirtualTemplate(page: { slotOverrides?: Record<string, Slot
 /** 判断页面是否使用 Google Photos 动态布局（统一入口，替代散落的 templateId 全等判断） */
 export function isGooglePhotosPage(page: { templateId: string }): boolean {
   return page.templateId === GOOGLE_PHOTOS_TEMPLATE_ID;
+}
+
+/* ── 封面 / 封底特殊页面 ── */
+/** 封面页的模板 ID 前缀（真实模板 ID = `${COVER_TEMPLATE_PREFIX}<index>`，如 cover-1） */
+export const COVER_TEMPLATE_PREFIX = 'cover-';
+/** 封底页的模板 ID 前缀 */
+export const BACK_COVER_TEMPLATE_PREFIX = 'backcover-';
+
+/** 页面类型：content=普通内容页 / cover=封面 / backCover=封底 */
+export type PageKind = 'content' | 'cover' | 'backCover';
+
+/**
+ * 封面/封底专属字段（仅当 pageKind 为 cover / backCover 时使用）。
+ * 封面视觉仍复用现有 textElements 文字元素体系渲染，这里只保存"结构化的封面元信息"，
+ * 供快捷面板编辑、智能重排、以及导出预览时直接取用。
+ */
+export type CoverFields = {
+  /** 封面主标题（如"我们的旅行 2024"），缺省时用相册名 */
+  title?: string;
+  /** 副标题 / 一句话引言（情绪锚点） */
+  subtitle?: string;
+  /** 作者 / 纪念人 */
+  author?: string;
+  /** 日期 / 年份区间（如 2023-2024） */
+  dateText?: string;
+  /** 封底专用：居中纪念语 / 版权信息 */
+  backText?: string;
+};
+
+/** 判断页面是否为封面页 */
+export function isCoverPage(page: { templateId: string }): boolean {
+  return page.templateId.startsWith(COVER_TEMPLATE_PREFIX);
+}
+
+/** 判断页面是否为封底页 */
+export function isBackCoverPage(page: { templateId: string }): boolean {
+  return page.templateId.startsWith(BACK_COVER_TEMPLATE_PREFIX);
+}
+
+/** 判断页面是否为封面或封底页（特殊页面） */
+export function isCoverOrBackCoverPage(page: { templateId: string }): boolean {
+  return isCoverPage(page) || isBackCoverPage(page);
 }
 
 /**
@@ -322,6 +365,10 @@ export type AlbumPage = {
   watermarkHidden?: boolean;
   /** 用户删除的模板内置槽位 ID（保留原模板结构，仅在 resolveTemplate 时过滤） */
   hiddenTemplateSlotIds?: string[];
+  /** 页面类型：content=普通内容页 / cover=封面 / backCover=封底。缺省 = 'content'，兼容旧数据 */
+  pageKind?: PageKind;
+  /** 封面/封底结构化元信息（仅 pageKind 为 cover/backCover 时使用） */
+  coverFields?: CoverFields;
 };
 
 /** 读取槽位 zIndex：未配置时返回 0（与装饰元素共享同一命名空间） */
@@ -523,6 +570,8 @@ function customTemplateToTemplate(ct: CustomTemplate): Template {
 export function findTemplateById(id: string): Template | undefined {
   const builtin = TEMPLATES.find((t) => t.id === id);
   if (builtin) return builtin;
+  const cover = findCoverTemplateById(id);
+  if (cover) return cover;
   const custom = _customTemplateRegistry.find((t) => t.id === id);
   return custom ? customTemplateToTemplate(custom) : undefined;
 }
@@ -1428,6 +1477,9 @@ export const TEMPLATES: Template[] = [
 
   /* ========= 生成器批量扩展模板（1-12 图，约 300 种） ========= */
   ...GENERATED_TEMPLATES,
+
+  /* ========= 封面 / 封底模板库（美学版式） ========= */
+  ...ALL_COVER_TEMPLATES,
 
   /* ========= 9-12 图基础平铺模板（按子分类组织） ========= */
 

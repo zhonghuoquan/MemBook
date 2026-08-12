@@ -225,6 +225,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     albumType?: string,
     description?: string,
     cornerRadius?: number,
+    autoGenerateCover?: boolean,
   ) => {
     // P0: 新建项目前清理旧项目缓存，释放 blob URL 和 ImageBitmap 内存
     photoService.cleanupProjectResources();
@@ -234,6 +235,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     useEditorStore.setState({ currentPageIndex: 0 });
     setAlbumSize(_size);
     useEditorStore.getState().setProjectName(_name || t('home.create.unnamedAlbum'));
+    useEditorStore.getState().setAlbumType((albumType as AlbumProject['albumType']) ?? undefined);
     // 应用边距、间距与圆角设置，后续点击添加页面时会继承这些参数
     useEditorStore.getState().setPageMargin({
       top: _margin.margin,
@@ -258,6 +260,11 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
       setStorageMode(null);  // 重置存储偏好，下次导入时重新选择
       clearSmartLayoutState();
       useUIStore.getState().setCanvasZoom(1); // 新相册重置缩放为 100%
+      // 创建时自动生成封面 + 封底（默认开启）：纯本地规则引擎，照片导入后可重新生成
+      if (autoGenerateCover !== false) {
+        useEditorStore.getState().addCoverPage();
+        useEditorStore.getState().addBackCoverPage();
+      }
       onNavigateToEditor();
     };
 
@@ -294,6 +301,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     setPages([page]);
     setAlbumSize(size);
     useEditorStore.getState().setProjectName(name || t('home.create.unnamedAlbum'));
+    useEditorStore.getState().setAlbumType((albumType as AlbumProject['albumType']) ?? undefined);
     useEditorStore.getState().setPageMargin({
       top: margin.margin,
       bottom: margin.margin,

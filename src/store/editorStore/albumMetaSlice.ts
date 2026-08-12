@@ -8,6 +8,7 @@ import type { EditorSlice, AlbumMetaSlice } from './types';
 export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => ({
   albumSize: null,
   projectName: '',
+  albumType: undefined,
   pageMargin: { top: PAGE_MARGIN_DEFAULT, bottom: PAGE_MARGIN_DEFAULT, left: PAGE_MARGIN_DEFAULT, right: PAGE_MARGIN_DEFAULT },
   applyMarginToAll: false,
   showGuides: false,
@@ -16,6 +17,7 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
   defaultSlotCornerRadius: DEFAULT_SLOT_CORNER_RADIUS,
 
   setProjectName: (name) => set({ projectName: name }),
+  setAlbumType: (albumType) => set({ albumType }),
   setAlbumSize: (size: AlbumSize) => {
     set((s) => {
       // 切换相册尺寸时，模板页面清除旧 slotOverrides（走等比缩放 fallback），

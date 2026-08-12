@@ -591,7 +591,33 @@ export function GridView({ onBack }: GridViewProps) {
       >
         {visiblePages.length === 0 ? (
           <div className="flex flex-col items-center justify-center w-full h-full text-[var(--color-gray-500)]">
-            <span className="text-sm">{pages.length === 0 ? t('editor.gridView.noPages') : t('editor.gridView.allPagesHidden')}</span>
+            {pages.length === 0 ? (
+              <>
+                <span className="text-sm mb-3">{t('editor.gridView.noPages')}</span>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addCoverPage(); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
+                  >
+                    📕 {t('editor.gridView.addCover')}
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addPage(); }}
+                  >
+                    {t('editor.gridView.addPage')}
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
+                    onClick={() => { useEditorStore.getState().addBackCoverPage(); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
+                  >
+                    📗 {t('editor.gridView.addBackCover')}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <span className="text-sm">{t('editor.gridView.allPagesHidden')}</span>
+            )}
             {hiddenGridPageIds.length > 0 && (
               <button
                 className="mt-3 px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors"
