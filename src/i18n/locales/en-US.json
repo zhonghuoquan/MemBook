@@ -450,8 +450,6 @@
         "visualLabel": "Visual",
         "exactTooltip": "The two photos are byte-for-byte identical",
         "visualTooltip": "Look the same but differ in details (e.g. re-compressed)",
-        "hasDateLabel": "Has date",
-        "noDateLabel": "No date",
         "hasDateTooltip": "Has capture date, prefer to keep",
         "noDateTooltip": "Missing capture date, prefer to delete",
         "willFree": "Delete {{count}} · Free {{size}}",

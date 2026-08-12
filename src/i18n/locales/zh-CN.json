@@ -451,8 +451,6 @@
         "visualLabel": "视觉",
         "exactTooltip": "两张照片的文件内容完全相同",
         "visualTooltip": "看起来一样但文件细节有差别（例如经过重新压缩）",
-        "hasDateLabel": "有日期",
-        "noDateLabel": "无日期",
         "hasDateTooltip": "含拍摄日期，优先保留",
         "noDateTooltip": "缺失拍摄日期，优先删除",
         "willFree": "将删除 {{count}} 张 · 释放 {{size}}",
