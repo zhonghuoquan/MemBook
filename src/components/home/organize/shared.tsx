@@ -58,7 +58,8 @@ export function useTabCachedResult<T>(tabId: string | undefined, initial: T): [T
 export const IMAGE_EXTS = new Set([
   '.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.livp', '.gif', '.bmp', '.tiff', '.tif',
 ]);
-export const CONVERTIBLE_EXTS = new Set(['.livp', '.heic', '.heif', '.png', '.webp', '.bmp', '.tiff', '.tif', '.gif']);
+// 支持转换为 JPG 的格式；含 .jpg/.jpeg（可强制重编码，用于修复损坏/非标准 EXIF 的 JPEG）
+export const CONVERTIBLE_EXTS = new Set(['.livp', '.heic', '.heif', '.png', '.webp', '.bmp', '.tiff', '.tif', '.gif', '.jpg', '.jpeg']);
 
 /**
  * 统计照片列表中各格式的数量

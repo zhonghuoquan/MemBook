@@ -1,8 +1,11 @@
 /**
  * 格式转换工具 — 多种格式 → JPG
  * 支持：livp / HEIC / HEIF（heic2any 或 Rust WIC）
- *       png / webp / bmp / tiff / gif（Canvas API）
- * 支持格式选择（类似时间归类的格式排除）
+ *       png / webp / bmp / tiff / gif / jpg / jpeg（Canvas API）
+ * 支持格式选择（类似时间归类的格式排除）与「指定照片选择」：
+ *   - 可通过点击缩略图勾选/取消勾选要转换的具体照片（默认全选）
+ *   - 可按格式快捷筛选
+ *   - JPG/JPEG 也可被强制重编码转换（修复损坏/非标准 EXIF 的 JPEG）
  */
 
 import { useState, useEffect, useMemo } from 'react';
@@ -12,7 +15,7 @@ import {
   convertToJpg,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, RangeSlider, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, RangeSlider, ThumbImage, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -23,6 +26,9 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
   const [excludedExts, setExcludedExts] = useState<Set<string>>(new Set());
+  // 未选中的照片 ID 集合。默认全选所有可转换照片，仅在用户取消勾选时记录到此处；
+  // 这样新加入的照片无需额外 setState 即默认为选中，避免在 effect 中同步 setState。
+  const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
 
   // 通知父组件工具执行状态（running），用于禁用标签切换
   useEffect(() => {
@@ -40,25 +46,57 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
     return [...set].sort();
   }, [convertiblePhotos]);
 
-  // 选中的照片（排除未选格式）
-  const selectedPhotos = convertiblePhotos.filter((p) => !excludedExts.has(p.ext));
-
-  // photos 变化时重置
-  useEffect(() => {
-    setProgress(null);
-  }, [photos]);
+  // 当前生效的可转换照片（排除未选格式）
+  const filteredPhotos = useMemo(
+    () => convertiblePhotos.filter((p) => !excludedExts.has(p.ext)),
+    [convertiblePhotos, excludedExts],
+  );
 
   const toggleExt = (ext: string) => {
     setExcludedExts((prev) => {
       const next = new Set(prev);
-      next.has(ext) ? next.delete(ext) : next.add(ext);
+      if (next.has(ext)) next.delete(ext);
+      else next.add(ext);
       return next;
     });
   };
 
+  /** 切换单张照片选中状态 */
+  const toggleSelect = (id: string) => {
+    setDeselectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** 全选当前生效列表 */
+  const selectAll = () => {
+    setDeselectedIds((prev) => {
+      const next = new Set(prev);
+      filteredPhotos.forEach((p) => next.delete(p.id));
+      return next;
+    });
+  };
+
+  /** 取消全选当前生效列表 */
+  const deselectAll = () => {
+    setDeselectedIds((prev) => {
+      const next = new Set(prev);
+      filteredPhotos.forEach((p) => next.add(p.id));
+      return next;
+    });
+  };
+
+  // 最终待转换照片：生效列表中未被取消勾选的照片
+  const selectedPhotos = filteredPhotos.filter((p) => !deselectedIds.has(p.id));
+  const allSelected =
+    filteredPhotos.length > 0 && filteredPhotos.every((p) => !deselectedIds.has(p.id));
+
   const handleExecute = async () => {
     if (selectedPhotos.length === 0) return;
-    // Pro 授权守卫：点击“开始转换”时才检查并提示激活
+    // Pro 授权守卫：点击"开始转换"时才检查并提示激活
     if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
       return;
     }
@@ -161,6 +199,69 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
                     </button>
                   ));
                 })()}
+              </div>
+            </div>
+          )}
+
+          {/* 指定照片选择网格 */}
+          {filteredPhotos.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-[var(--color-gray-600)]">
+                  {t('home.organize.convert.selectPhotos', { count: selectedPhotos.length, total: filteredPhotos.length })}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAll}
+                    disabled={allSelected}
+                    className="text-xs text-[var(--color-brand)] hover:underline disabled:opacity-30 disabled:no-underline cursor-pointer disabled:cursor-default"
+                  >
+                    {t('home.organize.convert.selectAll')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deselectAll}
+                    disabled={selectedPhotos.length === 0}
+                    className="text-xs text-[var(--color-gray-500)] hover:underline disabled:opacity-30 disabled:no-underline cursor-pointer disabled:cursor-default"
+                  >
+                    {t('home.organize.convert.deselectAll')}
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-1.5 max-h-[280px] overflow-y-auto overflow-x-hidden p-0.5 custom-scrollbar" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}>
+                {filteredPhotos.map((p) => {
+                  const selected = !deselectedIds.has(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleSelect(p.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(p.id); } }}
+                      className={`relative rounded-lg border-2 overflow-hidden cursor-pointer transition-all group ${
+                        selected
+                          ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand)]'
+                          : 'border-transparent hover:border-[var(--color-border)]'
+                      }`}
+                      title={p.name}
+                    >
+                      <ThumbImage photo={p} readPhotoData={readPhotoData} size="small" />
+                      {/* 选中标记 */}
+                      <span
+                        className={`absolute top-1 left-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-sm transition-all ${
+                          selected ? 'opacity-100 bg-[var(--color-brand)]' : 'opacity-0 bg-black/40 group-hover:opacity-60'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                      {/* 格式角标 */}
+                      <span className="absolute bottom-0.5 right-0.5 z-10 text-[9px] leading-none px-1 py-0.5 rounded bg-black/50 text-white font-mono">
+                        {p.ext.replace('.', '')}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
