@@ -31,7 +31,7 @@ import {
 import { useUIStore } from '../../store';
 import { useLicenseStore } from '../../license';
 import type { LicenseFeature } from '../../license/types';
-import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, useTabCachedResult, type ToolProps } from './organize/shared';
+import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
 import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
 import { ExifTool } from './organize/ExifTool';
@@ -355,10 +355,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 用户是否在一键分析过程中手动操作了（切换到其他工具等）。
   // 若用户有操作则不自动跳转（分析照常在后台跑，但不强制切走用户正在看的界面）
   const userNavigatedRef = useRef(false);
-  // 一键分析结果报告：本轮分析各工具的上报摘要 + 是否展示报告页
-  // 按标签（路径）缓存：切换路径时恢复各自的分析报告，避免串到其他路径的报告
-  const [analyzeReport, setAnalyzeReport] = useTabCachedResult<ToolResultSummary[]>(activeTabId ?? undefined, []);
+  // 记录本轮“一键分析”所属的标签（路径），用于把各工具上报的摘要写入正确的报告
+  const activeAnalyzeTabRef = useRef<string | null>(null);
+  // 一键分析结果报告：按标签（路径）隔离，切换路径后展示各自的分析报告，避免串扰
+  // analyzeReports: key = tabId, value = 该路径本轮分析各工具的上报摘要
+  const [analyzeReports, setAnalyzeReports] = useState<Map<string, ToolResultSummary[]>>(new Map());
+  // 是否展示报告页（作用于当前激活标签的报告）
   const [showAnalyzeReport, setShowAnalyzeReport] = useState(false);
+  // 当前激活标签的分析报告（若该路径已分析过则展示对应报告，否则为空）
+  const activeReport = activeTabId ? (analyzeReports.get(activeTabId) ?? []) : [];
 
   /** 点击“一键分析”：按顺序触发 去重 → 人脸识别 → 相似照片 → 截图识别 */
   const handleOneClickAnalyze = useCallback(() => {
@@ -373,7 +378,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     }
     autoAnalyzeStartedRef.current = new Set();
     userNavigatedRef.current = false;
-    setAnalyzeReport([]);
+    // 记录本轮分析所属标签，供各工具上报摘要时写入正确的报告
+    activeAnalyzeTabRef.current = activeTabId ?? null;
+    // 清空当前标签（路径）的分析报告，后续各工具完成后再重新汇总到该标签
+    setAnalyzeReports((prev) => {
+      if (!activeTabId) return prev;
+      const next = new Map(prev);
+      next.delete(activeTabId);
+      return next;
+    });
     setShowAnalyzeReport(false);
     // 预挂载所有参与一键分析的工具，保证即使不自动跳转也能在后台完成扫描
     setVisitedTools((prev) => {
@@ -395,7 +408,10 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     const seq = AUTO_ANALYZE_TOOLS.map((id) => stepName[id] ?? id).join(' → ');
     addToast({ type: 'info', message: t('organize.autoAnalyze.start', { defaultValue: '开始一键分析：{{seq}}', seq }) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, autoAnalyzeRunning, isAnyToolBusy, addToast, t, AUTO_ANALYZE_TOOLS]);
+  }, [
+    activeTab, activeTabId, autoAnalyzeRunning, isAnyToolBusy, addToast, t, AUTO_ANALYZE_TOOLS,
+    setAnalyzeReports, setShowAnalyzeReport, setVisitedTools, setAutoAnalyzeRunning, setAutoAnalyzeStep, setAutoAnalyzeToken, setActiveTool,
+  ]);
 
   // “一键分析”推进：当前目标工具真正开始并完成后，才自动切到下一个工具
   useEffect(() => {
@@ -421,6 +437,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
           setAutoAnalyzeRunning(false);
           setAutoAnalyzeStep('idle');
           autoAnalyzeStartedRef.current = new Set();
+          activeAnalyzeTabRef.current = null;
         }
       }, 4000);
       return () => clearTimeout(timer);
@@ -433,6 +450,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       setAutoAnalyzeRunning(false);
       setAutoAnalyzeStep('idle');
       autoAnalyzeStartedRef.current = new Set();
+      activeAnalyzeTabRef.current = null;
       // 若用户在整个分析过程中没有手动操作 → 自动跳转到报告页；
       // 若用户有操作（切到其他工具/标签等）→ 不强制跳转，按钮变为「查看报告」供用户手动进入
       const userOperated = userNavigatedRef.current;
@@ -462,9 +480,12 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 且扫描结果由各工具内部 useTabCachedResult 按标签缓存，切回时自动恢复，无需卸载重挂。
   useEffect(() => {
     setSelectedPhotoIds(new Set());
-    // 切换路径（标签）时关闭报告页：报告按标签缓存，但展示页不跨标签自动弹出，
-    // 避免切到其他路径时仍停留在上一路径的报告视图，需重新点击「查看报告」进入。
-    setShowAnalyzeReport(false);
+    // 切换路径后若新路径尚未生成分析报告，则关闭报告页，避免显示上一个路径的旧报告；
+    // 若新路径已有报告，保持展示（报告内容会随 activeReport 自动切换到该路径的报告）
+    if (activeReport.length === 0) {
+      setShowAnalyzeReport(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId]);
 
   // 访问新工具时加入 visitedTools（懒挂载：首次访问才渲染，之后保持挂载保留状态）
@@ -949,6 +970,13 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       const tab = tabsRef.current.find((t) => t.id === id);
       if (tab) releaseTabBlobUrls(tab);
       clearDedupeState(id);
+      // 释放该路径的分析报告，避免内存/状态残留
+      setAnalyzeReports((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
 
       const idx = tabsRef.current.findIndex((t) => t.id === id);
       const remaining = tabsRef.current.filter((t) => t.id !== id);
@@ -960,7 +988,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
         return remaining[Math.max(0, idx - 1)].id;
       });
     },
-    [releaseTabBlobUrls, clearDedupeState],
+    [releaseTabBlobUrls, clearDedupeState, setAnalyzeReports],
   );
 
   /** 复制路径到剪贴板 */
@@ -990,8 +1018,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const handleRescan = useCallback(async () => {
     const tab = tabsRef.current.find((tt) => tt.id === activeTabId);
     if (!tab) return;
-    // 重新扫描后旧的去重结果失效，清除持久化状态
+    // 重新扫描后旧的去重结果与分析报告失效，清除持久化状态
     clearDedupeState(tab.id);
+    setAnalyzeReports((prev) => {
+      if (!prev.has(tab.id)) return prev;
+      const next = new Map(prev);
+      next.delete(tab.id);
+      return next;
+    });
+    setShowAnalyzeReport(false);
     // library 模式：重新从 DB 加载照片
     if (tab.sourceMode === 'library' && tab.projectId) {
       const reloadingMsg = t('organize.reloadingProjectPhotos');
@@ -1020,7 +1055,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     } else if (tab.folderHandle) {
       await scanFolderWeb(tab.folderHandle, tab.id);
     }
-  }, [activeTabId, clearDedupeState, t, setTabState, addToast, releaseTabBlobUrls, scanFolderTauri, scanFolderWeb]);
+  }, [activeTabId, clearDedupeState, t, setTabState, addToast, releaseTabBlobUrls, scanFolderTauri, scanFolderWeb, setAnalyzeReports, setShowAnalyzeReport]);
 
   // ── 扫描项目库 ──────────────────────────────────────────
 
@@ -1162,10 +1197,16 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
    * 只收集“一键分析”运行期间（autoAnalyzeRunning）各工具的摘要，避免普通手动扫描也堆积
    */
   const handleResultSummary = useCallback((summary: ToolResultSummary) => {
-    setAnalyzeReport((prev) => {
+    // 写入本轮“一键分析”所属标签（路径）的报告，避免切换路径后汇总到其他路径
+    const tabId = activeAnalyzeTabRef.current;
+    if (!tabId) return;
+    setAnalyzeReports((prev) => {
+      const cur = prev.get(tabId) ?? [];
       // 去重：同一工具只保留最新一次上报（覆盖旧值）
-      const others = prev.filter((s) => s.tool !== summary.tool);
-      return [...others, summary];
+      const others = cur.filter((s) => s.tool !== summary.tool);
+      const next = new Map(prev);
+      next.set(tabId, [...others, summary]);
+      return next;
     });
   }, []);
 
@@ -1436,8 +1477,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             <button
               type="button"
               onClick={() => {
-                // 若已有报告且不在运行 → 点击进入报告页
-                if (!autoAnalyzeRunning && analyzeReport.length > 0) {
+                // 若当前路径已有报告且不在运行 → 点击进入报告页
+                if (!autoAnalyzeRunning && activeReport.length > 0) {
                   setShowAnalyzeReport(true);
                   return;
                 }
@@ -1447,7 +1488,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               className={`group shrink-0 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-[700] transition-all border-none cursor-pointer ${
                 autoAnalyzeRunning
                   ? 'bg-[var(--color-brand-bg)] text-[var(--color-brand)]'
-                  : analyzeReport.length > 0
+                  : activeReport.length > 0
                     ? 'bg-gradient-to-br from-[#8b5cf6] to-[#6366f1] text-white shadow-[0_3px_12px_rgba(139,92,246,0.28)] hover:shadow-[0_5px_18px_rgba(139,92,246,0.38)] hover:brightness-110'
                     : 'bg-gradient-to-br from-[var(--color-brand)] to-[#8b5cf6] text-white shadow-[0_3px_12px_rgba(108,99,255,0.28)] hover:shadow-[0_5px_18px_rgba(108,99,255,0.38)] hover:brightness-110'
               } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none`}
@@ -1461,7 +1502,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                   </svg>
                   {t('organize.autoAnalyze.running', '正在分析…')}
                 </>
-              ) : analyzeReport.length > 0 ? (
+              ) : activeReport.length > 0 ? (
                 <>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                     <path d="M3 3v18h18" />
@@ -1556,7 +1597,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             {showAnalyzeReport && (
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <AnalyzeReportPanel
-                  report={analyzeReport}
+                  report={activeReport}
                   onJump={(tool) => {
                     setActiveTool(tool as ToolId);
                     setShowAnalyzeReport(false);
