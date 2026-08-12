@@ -9,8 +9,8 @@
  *  - 读取函数 / 中止信号 / 进度回调的调用行为
  */
 import { describe, it, expect, vi } from 'vitest';
-import { detectScreenshots } from './screenshot';
-import type { PhotoFileInfo } from './types';
+import { detectScreenshots, classify, isScreenRatio, isScreenResolution } from './screenshot';
+import type { PhotoFileInfo, ScreenshotSignal } from './types';
 
 function makePhoto(name: string, ext = '.png'): PhotoFileInfo {
   return {
@@ -90,5 +90,88 @@ describe('detectScreenshots', () => {
     expect(res.totalPhotos).toBe(0);
     expect(res.screenshots).toHaveLength(0);
     expect(res.normalPhotos).toHaveLength(0);
+  });
+});
+
+describe('classify —— 截图置信度判定（准确率防护）', () => {
+  const classifyC = (signals: ScreenshotSignal[]) =>
+    classify(signals)!.confidence;
+
+  it('无信号返回 null（归为正常照片）', () => {
+    expect(classify([])).toBeNull();
+  });
+
+  it('文件名命中 → 高置信度截图', () => {
+    expect(classifyC(['filename'])).toBe('high');
+    expect(classifyC(['filename', 'noCamera', 'screenRes'])).toBe('high');
+  });
+
+  it('软件特征 + 精确屏幕分辨率 → 高置信度', () => {
+    expect(classifyC(['software', 'screenRes'])).toBe('high');
+  });
+
+  it('软件特征 + 屏幕比例 → 高置信度', () => {
+    expect(classifyC(['software', 'screenRatio'])).toBe('high');
+  });
+
+  it('无相机信息 + 精确屏幕分辨率 + PNG 无 EXIF → 高置信度', () => {
+    expect(classifyC(['noCamera', 'screenRes', 'pngNoExif'])).toBe('high');
+  });
+
+  it('无相机信息 + 精确屏幕分辨率 + 软件特征 → 高置信度', () => {
+    expect(classifyC(['noCamera', 'screenRes', 'software'])).toBe('high');
+  });
+
+  // —— 以下为本次修复的核心：真实照片（无相机信息但分辨率恰为常见屏幕尺寸）不应误判 ——
+  it('仅「无相机信息 + 精确屏幕分辨率」→ 降级为疑似，不判为高置信度', () => {
+    // 典型误判场景：真实照片经 App 重存/下载/扫描后丢失相机信息，分辨率恰为 1080×1920
+    expect(classifyC(['noCamera', 'screenRes'])).toBe('suspect');
+  });
+
+  it('仅「无相机信息 + 屏幕比例」→ 疑似', () => {
+    expect(classifyC(['noCamera', 'screenRatio'])).toBe('suspect');
+  });
+
+  it('仅「精确屏幕分辨率」→ 疑似（不单独判为截图）', () => {
+    expect(classifyC(['screenRes'])).toBe('suspect');
+  });
+
+  it('仅「PNG 无 EXIF」→ 疑似', () => {
+    expect(classifyC(['pngNoExif'])).toBe('suspect');
+  });
+
+  it('「无相机信息 + PNG 无 EXIF」无屏幕特征 → 疑似', () => {
+    expect(classifyC(['noCamera', 'pngNoExif'])).toBe('suspect');
+  });
+});
+
+describe('屏幕分辨率/比例识别 —— 收紧比例避免误判真实照片', () => {
+  it('精确匹配常见屏幕分辨率 → true', () => {
+    expect(isScreenResolution(1080, 1920)).toBe(true);
+    expect(isScreenResolution(1920, 1080)).toBe(true);
+    expect(isScreenResolution(1170, 2532)).toBe(true);
+  });
+
+  it('相机常见分辨率（4:3 等）不匹配屏幕分辨率', () => {
+    // 4000×3000、4032×3024 等是手机/相机常见输出分辨率，不应判为屏幕尺寸
+    expect(isScreenResolution(4000, 3000)).toBe(false);
+    expect(isScreenResolution(4032, 3024)).toBe(false);
+    expect(isScreenResolution(3024, 4032)).toBe(false);
+  });
+
+  it('16:9 / 19.5:9 / 20:9 → 匹配屏幕比例', () => {
+    expect(isScreenRatio(1920, 1080)).toBe(true); // 16:9
+    expect(isScreenRatio(2340, 1080)).toBe(true); // 19.5:9
+    expect(isScreenRatio(2400, 1080)).toBe(true); // 20:9
+  });
+
+  it('4:3 / 3:4 相机比例不再匹配屏幕比例（避免误判）', () => {
+    expect(isScreenRatio(4000, 3000)).toBe(false); // 4:3
+    expect(isScreenRatio(3000, 4000)).toBe(false); // 3:4
+    expect(isScreenRatio(4032, 3024)).toBe(false); // 4:3
+  });
+
+  it('16:10 相机比例不再匹配屏幕比例', () => {
+    expect(isScreenRatio(1920, 1200)).toBe(false); // 16:10
   });
 });
