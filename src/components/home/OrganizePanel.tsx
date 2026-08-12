@@ -439,7 +439,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       if (!userOperated) {
         setShowAnalyzeReport(true);
       }
-      addToast({ type: 'success', message: t('organize.autoAnalyze.done', '一键分析完成') });
+      addToast({ type: 'success', message: t('organize.autoAnalyze.done', '智能分析报告已生成') });
       return;
     }
     const next = AUTO_ANALYZE_TOOLS[idx + 1];
@@ -1165,11 +1165,6 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     });
   }, []);
 
-  /** 关闭一键分析结果报告页 */
-  const closeAnalyzeReport = useCallback(() => {
-    setShowAnalyzeReport(false);
-  }, []);
-
   // 子工具共享 props（基于激活标签）
   // useMemo 稳定引用：扫描进度更新不会重建此对象，避免工具组件不必要重渲染
   const toolProps = useMemo<ToolProps>(() => ({
@@ -1558,7 +1553,6 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <AnalyzeReportPanel
                   report={analyzeReport}
-                  onClose={closeAnalyzeReport}
                   onJump={(tool) => {
                     setActiveTool(tool as ToolId);
                     setShowAnalyzeReport(false);

@@ -139,6 +139,26 @@ export function ScreenshotTool({
 
   const handleCancel = () => abortRef.current?.abort();
 
+  // 结果变化后重新上报摘要（同步更新报告页数据）：
+  // 当用户处理完截图/疑似项后，报告页应反映最新状态
+  const lastReportRef = useRef<string>('');
+  useEffect(() => {
+    const key = `${screenshots.length}|${suspects.length}`;
+    if (!scanned || lastReportRef.current === key) return;
+    lastReportRef.current = key;
+    onResultSummary?.({
+      tool: 'screenshot',
+      hasResult: screenshots.length > 0,
+      count: screenshots.length,
+      subCount: suspects.length,
+      label: screenshots.length > 0
+        ? t('home.organize.screenshot.summaryFound', { count: screenshots.length, suspects: suspects.length })
+        : t('home.organize.screenshot.summaryNone'),
+      targetTool: 'screenshot',
+      color: 'teal',
+    });
+  }, [scanned, screenshots.length, suspects.length, onResultSummary, t]);
+
   // “一键分析”自动触发：仅当本工具是当前分析目标且令牌变化时，自动开始识别
   const prevToken = useRef(0);
   useEffect(() => {
