@@ -53,10 +53,12 @@ export function AnalyzeReportPanel({
   report,
   onClose,
   onJump,
+  onReanalyze,
 }: {
   report: ToolResultSummary[];
   onClose: () => void;
   onJump: (tool: string) => void;
+  onReanalyze?: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -91,19 +93,36 @@ export function AnalyzeReportPanel({
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-[600] cursor-pointer
-            border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-gray-600)]
-            hover:bg-[var(--color-surface-hover)] transition-all"
-          title={t('common.close', '关闭')}
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </svg>
-          {t('common.close', '关闭')}
-        </button>
+        <div className="flex items-center gap-2">
+          {onReanalyze && (
+            <button
+              type="button"
+              onClick={onReanalyze}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[600] cursor-pointer
+                bg-[var(--color-brand)] text-white hover:opacity-90 active:scale-95 transition-all shadow-sm"
+              title={t('organize.analyzeReport.reanalyze', '重新分析')}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M13.5 8a5.5 5.5 0 11-1.6-3.9" />
+                <path d="M13.5 3v3h-3" />
+              </svg>
+              {t('organize.analyzeReport.reanalyze', '重新分析')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-[600] cursor-pointer
+              border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-gray-600)]
+              hover:bg-[var(--color-surface-hover)] transition-all"
+            title={t('common.close', '关闭')}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+            {t('common.close', '关闭')}
+          </button>
+        </div>
       </div>
 
       {/* 总览统计 */}
