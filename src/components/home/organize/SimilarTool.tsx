@@ -16,12 +16,11 @@ import { useTranslation } from 'react-i18next';
 import {
   findSimilarPhotos,
   isTauri,
-  formatBytes,
   type PhotoFileInfo,
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, ThumbImage, useTabCachedResult, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, PhotoCard, useTabCachedResult, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
@@ -317,47 +316,15 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
                     const isSuggest = i === g.keepIndex;
                     const isMarked = markedDelete[g.groupId]?.has(i) ?? false;
                     return (
-                      <div
+                      <PhotoCard
                         key={f.id}
-                        className={`relative rounded-lg border-2 overflow-hidden cursor-pointer transition-all hover:shadow-md ${
-                          isMarked ? 'border-red-400' : isSuggest ? 'border-green-400' : 'border-transparent'
-                        }`}
-                        onClick={() => toggleMark(g, i)}
-                        title={t('home.organize.similar.clickToToggle')}
-                      >
-                        {/* 标记删除徽章（右上角 ✕ 红叉） */}
-                        {isMarked && (
-                          <div
-                            className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-white shadow-lg ring-2 ring-white"
-                            style={{ background: '#ef4444' }}
-                          >
-                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4">
-                              <path d="M4 4l8 8M12 4l-8 8" />
-                            </svg>
-                          </div>
-                        )}
-
-                        {/* 建议保留标签（左上角） */}
-                        {isSuggest && !isMarked && (
-                          <span className="absolute top-1.5 left-1.5 z-10 text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-500/85 text-white backdrop-blur-sm shadow-sm">
-                            {t('home.organize.similar.suggestKeep')}
-                          </span>
-                        )}
-
-                        {/* 缩略图：使用共享 ThumbImage，支持异步加载与点击预览 */}
-                        <ThumbImage
-                          photo={f}
-                          readPhotoData={readPhotoData}
-                          onPreview={() => openPreview(g, i)}
-                          size="medium"
-                        />
-
-                        {/* 文件信息 */}
-                        <div className="px-2 py-1.5 bg-[var(--color-surface)] text-[10px] leading-tight">
-                          <div className="font-medium text-[var(--color-gray-800)] truncate" title={f.name}>{f.name}</div>
-                          <div className="text-[var(--color-gray-400)] mt-0.5">{formatBytes(f.size)}</div>
-                        </div>
-                      </div>
+                        photo={f}
+                        readPhotoData={readPhotoData}
+                        onPreview={() => openPreview(g, i)}
+                        onToggle={() => toggleMark(g, i)}
+                        state={isMarked ? 'delete' : isSuggest ? 'keep' : 'none'}
+                        stateLabel={isSuggest && !isMarked ? t('home.organize.similar.suggestKeep') : undefined}
+                      />
                     );
                   })}
                 </div>
