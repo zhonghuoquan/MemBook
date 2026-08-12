@@ -25,7 +25,7 @@ import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, Th
 import { PhotoQuickView } from './PhotoQuickView';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
-export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -69,8 +69,20 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, sou
       });
       setGroups(res);
       setScanned(true);
+      // 上报结果摘要（供“一键分析结果报告页”展示）
+      const photoCount = res.reduce((s, g) => s + g.files.length, 0);
+      onResultSummary?.({
+        tool: 'similar',
+        hasResult: res.length > 0,
+        count: res.length,
+        subCount: photoCount,
+        label: res.length > 0
+          ? t('home.organize.similar.summaryFound', { groups: res.length, photos: photoCount })
+          : t('home.organize.similar.summaryNone'),
+        targetTool: 'similar',
+        color: 'amber',
+      });
       if (res.length > 0) {
-        const photoCount = res.reduce((s, g) => s + g.files.length, 0);
         addToast({
           type: 'info',
           message: t('home.organize.similar.toastFound', { groups: res.length, photos: photoCount }),

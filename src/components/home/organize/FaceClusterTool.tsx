@@ -69,7 +69,7 @@ function getClusterColor(index: number) {
   return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
 }
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
@@ -203,6 +203,19 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       setProgress({ phase: 'clustering', current: 0, total: det.faces.length, message: `聚类 ${det.faces.length} 个人脸...` });
       const res = recluster(det, threshold, photos);
       setResult(res);
+
+      // 上报结果摘要（供“一键分析结果报告页”展示）
+      onResultSummary?.({
+        tool: 'faceCluster',
+        hasResult: res.clusters.length > 0,
+        count: res.clusters.length,
+        subCount: res.photosWithFaces,
+        label: res.clusters.length > 0
+          ? t('home.organize.faceCluster.summaryFound', { clusters: res.clusters.length, faces: res.photosWithFaces, defaultValue: '识别出 {{clusters}} 个人脸组，涉及 {{faces}} 张照片' })
+          : t('home.organize.faceCluster.summaryNone', { defaultValue: '未检测到人脸' }),
+        targetTool: 'faceCluster',
+        color: 'violet',
+      });
 
       if (res.clusters.length > 0) {
         addToast({

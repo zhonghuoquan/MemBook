@@ -48,7 +48,7 @@ interface ScreenshotToolProps extends ToolProps {
 }
 
 export function ScreenshotTool({
-  photos, readPhotoData, addToast, onBusyChange, sourceMode, onPhotosUpdate, tabId,
+  photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId,
   autoRunToken, isAutoRunTarget,
 }: ScreenshotToolProps) {
   const { t } = useTranslation();
@@ -105,6 +105,19 @@ export function ScreenshotTool({
       setFailedPhotos(res.failedPhotos);
       setScanned(true);
       setTab(res.screenshots.length > 0 ? 'screenshots' : res.suspects.length > 0 ? 'suspects' : 'normal');
+
+      // 上报结果摘要（供“一键分析结果报告页”展示）
+      onResultSummary?.({
+        tool: 'screenshot',
+        hasResult: res.screenshots.length > 0,
+        count: res.screenshots.length,
+        subCount: res.suspects.length,
+        label: res.screenshots.length > 0
+          ? t('home.organize.screenshot.summaryFound', { count: res.screenshots.length, suspects: res.suspects.length })
+          : t('home.organize.screenshot.summaryNone'),
+        targetTool: 'screenshot',
+        color: 'teal',
+      });
 
       if (res.screenshots.length > 0) {
         addToast({

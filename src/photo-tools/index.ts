@@ -16,6 +16,7 @@ export type {
   ConvertItem,
   ToolProgress,
   ToolResult,
+  ToolResultSummary,
   OrganizeMode,
   LocationLevel,
   SimilarGroup,
