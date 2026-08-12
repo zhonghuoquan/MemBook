@@ -29,6 +29,7 @@ import {
   type PageTextElement,
   type StickerElement,
 } from '../types';
+import { drawCoverDecoration } from './coverDecoration';
 import type { PhotoContentInfo } from '../engine/content-aware';
 import { SLOT_BORDER_COLORS, SLOT_CANVAS_PALETTE } from '../constants/templatePalette';
 
@@ -282,6 +283,9 @@ export function drawPageToCanvas(
   for (const item of items) {
     item.draw();
   }
+
+  // ── 封面/封底装饰层（渲染层感知 pageKind：全幅蒙版 + 品牌装饰线） ──
+  drawCoverDecoration(ctx, page, logicalW, logicalH);
 
   ctx.restore();
 
