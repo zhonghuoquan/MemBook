@@ -16,7 +16,7 @@ import {
   type ToolProgress,
   type PhotoFileInfo,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, EXIF_WRITABLE_EXTS, downloadBlob, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, EXIF_WRITABLE_EXTS, downloadBlob, ThumbImage, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 
 /** 智能解析日期输入，支持多种格式：
@@ -730,8 +730,15 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onDateUpda
 
   return (
     <div className="px-2.5 py-2 rounded bg-white/80 border border-[var(--color-border)]/50 space-y-1.5">
-      {/* 第一行：文件名 + 自动识别日期标记 */}
-      <div className="flex items-center gap-1.5 min-w-0">
+      {/* 第一行：缩略图 + 文件名 + 自动识别日期标记 */}
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="shrink-0 w-10 h-10 overflow-hidden rounded border border-[var(--color-border)]/50">
+          <ThumbImage
+            photo={photo}
+            readPhotoData={readPhotoData}
+            size="small"
+          />
+        </div>
         <span className="text-xs text-[var(--color-gray-700)] truncate flex-1" title={photo.relativePath || photo.name}>
           {photo.name}
         </span>
