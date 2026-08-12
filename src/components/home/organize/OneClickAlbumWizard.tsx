@@ -137,8 +137,8 @@ export function OneClickAlbumWizard({
           googlePhotosBaseMmLayout: mmLayout,
           googlePhotosMmConfig: { margin: { top: PAGE_MARGIN_DEFAULT, bottom: PAGE_MARGIN_DEFAULT, left: PAGE_MARGIN_DEFAULT, right: PAGE_MARGIN_DEFAULT }, gap: PAGE_GAP_DEFAULT },
           googlePhotosInternalRows: previewLayout.internalRows[pageIdx],
-          googlePhotosLayoutRows: previewLayout.layoutRows[pageIdx] as any,
-          googlePhotosBaseLayoutRows: previewLayout.layoutRows[pageIdx] as any,
+          googlePhotosLayoutRows: previewLayout.layoutRows[pageIdx],
+          googlePhotosBaseLayoutRows: previewLayout.layoutRows[pageIdx],
           googlePhotosBasePageSize: { width: albumSize.width, height: albumSize.height },
           perPageTierPattern: previewLayout.tierPatterns[pageIdx],
         };
