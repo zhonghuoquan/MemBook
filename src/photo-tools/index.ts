@@ -27,6 +27,11 @@ export type {
   FaceDetectionResult,
   TimelineGroup,
   CalendarDay,
+  ScreenshotItem,
+  ScreenshotDetectResult,
+  ScreenshotDetectOptions,
+  ScreenshotConfidence,
+  ScreenshotSignal,
 } from './types';
 
 // 平台
@@ -82,3 +87,6 @@ export type { RenameOptions } from './rename';
 // 人脸聚类
 export { extractFaceDescriptors, detectFaces, recluster, clusterFaces, findFaceClusters } from './face-cluster';
 export type { FaceClusterOptions } from './face-cluster';
+
+// 截图识别
+export { detectScreenshots } from './screenshot';

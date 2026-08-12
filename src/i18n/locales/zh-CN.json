@@ -497,6 +497,36 @@
         "toastDeletedWithFail": "已删除 {{ok}} 张照片，{{fail}} 张失败",
         "toastDeleteFailed": "删除失败: {{message}}"
       },
+      "screenshot": {
+        "title": "截图识别",
+        "description": "自动识别出照片库里的手机/电脑屏幕截图，帮你筛选、清理",
+        "sidebarDesc": "找出并清理屏幕截图",
+        "startScan": "开始识别",
+        "rescan": "重新识别",
+        "cancel": "取消",
+        "detectHint": "共 {{total}} 张照片 · 自动识别屏幕截图",
+        "noResult": "未发现屏幕截图，照片库里都是正常拍摄的照片。",
+        "tabScreenshots": "截图 ({{count}})",
+        "tabSuspects": "疑似 ({{count}})",
+        "tabNormal": "正常照片 ({{count}})",
+        "screenshotsDesc": "已识别为屏幕截图，可逐张预览或一键删除",
+        "suspectsDesc": "看起来像截图但不确定，建议人工复核后处理",
+        "normalDesc": "正常拍摄的照片，可一键加入相册",
+        "deleteAll": "删除全部 {{count}} 张",
+        "deleteHint": "移入回收站（可恢复）",
+        "failedHint": "{{count}} 张照片读取失败，已跳过",
+        "toastFound": "发现 {{count}} 张屏幕截图",
+        "toastNoResult": "未发现屏幕截图",
+        "toastFailed": "识别失败: {{message}}",
+        "signal": {
+          "filename": "文件名含截图关键词",
+          "noCamera": "无相机拍摄信息",
+          "software": "软件标识含截图特征",
+          "screenRes": "分辨率与常见屏幕一致",
+          "screenRatio": "宽高比接近屏幕比例",
+          "pngNoExif": "PNG 且无 EXIF 信息"
+        }
+      },
       "organize": {
         "title": "照片归类",
         "description": "按拍摄日期/地点将照片整理到 MemBook照片整理/年/月 目录结构",
@@ -870,6 +900,11 @@
         "title": "相似照片分析",
         "desc": "查找连拍、同场景等视觉相似照片",
         "shortDesc": "找出连拍/同场景相似照片"
+      },
+      "screenshot": {
+        "title": "截图识别",
+        "desc": "自动识别屏幕截图，帮你筛选和清理",
+        "shortDesc": "找出并清理屏幕截图"
       },
       "rename": {
         "title": "批量重命名",

@@ -282,6 +282,55 @@ export interface ConvertItem {
   error?: string;
 }
 
+// ══════════════════════════════════════════════════════════
+// 功能：截图识别
+// ══════════════════════════════════════════════════════════
+
+/** 截图判定置信度 */
+export type ScreenshotConfidence = 'high' | 'suspect';
+
+/** 截图识别命中信号类型 */
+export type ScreenshotSignal =
+  | 'filename'        // 文件名含截图关键词
+  | 'noCamera'        // EXIF 无相机厂商/型号（真实照片几乎必有）
+  | 'software'        // EXIF Software 字段含截图特征
+  | 'screenRes'       // 分辨率精确匹配常见屏幕尺寸
+  | 'screenRatio'     // 宽高比接近常见屏幕比例（如 16:9 / 19.5:9）
+  | 'pngNoExif';      // PNG 格式且完全无 EXIF 元数据段
+
+/** 单张照片的截图识别结果 */
+export interface ScreenshotItem {
+  photo: PhotoFileInfo;
+  /** 置信度：high = 判定为截图，suspect = 疑似截图（待用户复核） */
+  confidence: ScreenshotConfidence;
+  /** 命中原因（UI 展示“判定依据”） */
+  reasons: string[];
+}
+
+/** 截图识别整体结果 */
+export interface ScreenshotDetectResult {
+  /** 判定为截图 */
+  screenshots: ScreenshotItem[];
+  /** 疑似截图（低置信度，供用户复核勾选） */
+  suspects: ScreenshotItem[];
+  /** 正常照片 */
+  normalPhotos: PhotoFileInfo[];
+  /** 总照片数 */
+  totalPhotos: number;
+  /** 处理失败的照片数（读取/解码失败） */
+  failedPhotos: number;
+}
+
+/** 截图识别选项 */
+export interface ScreenshotDetectOptions {
+  /** 读取照片数据（统一入口） */
+  readData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  /** 进度回调 */
+  onProgress?: (p: ToolProgress) => void;
+  /** 中止信号 */
+  signal?: AbortSignal;
+}
+
 /** 工具执行进度 */
 export interface ToolProgress {
   phase: string;
