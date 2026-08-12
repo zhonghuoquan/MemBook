@@ -20,22 +20,26 @@ describe('getTier', () => {
 
 describe('isFeatureAvailableForTier', () => {
   it('已激活时所有功能可用', () => {
-    for (const f of ['createProject', 'smartLayout', 'exportFile', 'timeWatermark'] as const) {
+    for (const f of ['createProject', 'smartLayout', 'exportFile', 'timeWatermark', 'faceCluster', 'similar', 'convert', 'exifBatch', 'dataImport'] as const) {
       expect(isFeatureAvailableForTier(true, f)).toBe(true);
     }
   });
 
   it('Free 档：Pro 专属功能不可用', () => {
-    // smartLayout / exportFile / timeWatermark 为 Pro 专属
+    // smartLayout / timeWatermark / dataImport 及照片整理高阶能力为 Pro 专属
     expect(isFeatureAvailableForTier(false, 'smartLayout')).toBe(false);
-    expect(isFeatureAvailableForTier(false, 'exportFile')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'timeWatermark')).toBe(false);
+    expect(isFeatureAvailableForTier(false, 'dataImport')).toBe(false);
+    expect(isFeatureAvailableForTier(false, 'faceCluster')).toBe(false);
+    expect(isFeatureAvailableForTier(false, 'similar')).toBe(false);
+    expect(isFeatureAvailableForTier(false, 'convert')).toBe(false);
+    expect(isFeatureAvailableForTier(false, 'exifBatch')).toBe(false);
   });
 
-  it('Free 档：基础功能仍可用', () => {
-    // createProject / dataImport 为免费基础能力
+  it('Free 档：基础功能仍可用（含导出）', () => {
+    // createProject / exportFile 为免费基础能力
     expect(isFeatureAvailableForTier(false, 'createProject')).toBe(true);
-    expect(isFeatureAvailableForTier(false, 'dataImport')).toBe(true);
+    expect(isFeatureAvailableForTier(false, 'exportFile')).toBe(true);
   });
 });
 

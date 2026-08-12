@@ -11,7 +11,11 @@ export type LicenseFeature =
   | 'timeWatermark'
   | 'layoutSwitch'
   | 'layoutAdjust'
-  | 'photoShuffle';
+  | 'photoShuffle'
+  | 'faceCluster'
+  | 'similar'
+  | 'convert'
+  | 'exifBatch';
 
 /** 激活状态 */
 export interface LicenseState {
