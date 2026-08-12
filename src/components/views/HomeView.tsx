@@ -550,7 +550,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             )}
             {/* 整理面板始终挂载，仅用 CSS 隐藏，避免切换 Tab 时丢失已选文件夹路径 */}
             <div className={activeNav === 'organize' ? 'h-full' : 'hidden'}>
-              <OrganizePanel />
+              <OrganizePanel active={activeNav === 'organize'} />
             </div>
           </div>
         </div>
