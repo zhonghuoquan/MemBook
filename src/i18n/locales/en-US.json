@@ -496,6 +496,36 @@
         "toastDeletedWithFail": "Deleted {{ok}} photos, {{fail}} failed",
         "toastDeleteFailed": "Delete failed: {{message}}"
       },
+      "screenshot": {
+        "title": "Screenshot Detection",
+        "description": "Automatically detect phone/computer screenshots in your library to filter and clean up",
+        "sidebarDesc": "Find and clean screenshots",
+        "startScan": "Start Scan",
+        "rescan": "Rescan",
+        "cancel": "Cancel",
+        "detectHint": "{{total}} photos · auto-detect screenshots",
+        "noResult": "No screenshots found. All photos are regular captures.",
+        "tabScreenshots": "Screenshots ({{count}})",
+        "tabSuspects": "Suspects ({{count}})",
+        "tabNormal": "Normal Photos ({{count}})",
+        "screenshotsDesc": "Detected as screenshots — preview or delete in bulk",
+        "suspectsDesc": "May be screenshots but uncertain — review before handling",
+        "normalDesc": "Normal photos — can be added to album in one click",
+        "deleteAll": "Delete all {{count}}",
+        "deleteHint": "Move to trash (recoverable)",
+        "failedHint": "{{count}} photos failed to read and were skipped",
+        "toastFound": "Found {{count}} screenshots",
+        "toastNoResult": "No screenshots found",
+        "toastFailed": "Detection failed: {{message}}",
+        "signal": {
+          "filename": "Filename contains screenshot keyword",
+          "noCamera": "No camera capture info",
+          "software": "Software field indicates screenshot",
+          "screenRes": "Resolution matches common screen size",
+          "screenRatio": "Aspect ratio close to screen",
+          "pngNoExif": "PNG without EXIF metadata"
+        }
+      },
       "organize": {
         "title": "Photo Organize",
         "description": "Organize photos into MemBook照片整理/year/month directory structure by date taken / location",
@@ -869,6 +899,11 @@
         "title": "Similar Photo Analysis",
         "desc": "Find visually similar photos (burst / same scene)",
         "shortDesc": "Find burst/same-scene similar photos"
+      },
+      "screenshot": {
+        "title": "Screenshot Detection",
+        "desc": "Auto-detect screenshots to filter and clean up",
+        "shortDesc": "Find and clean screenshots"
       },
       "rename": {
         "title": "Batch Rename",

@@ -34,6 +34,7 @@ import { OrganizeTool } from './organize/OrganizeTool';
 import { ExifTool } from './organize/ExifTool';
 import { ConvertTool } from './organize/ConvertTool';
 import { SimilarTool } from './organize/SimilarTool';
+import { ScreenshotTool } from './organize/ScreenshotTool';
 import { RenameTool } from './organize/RenameTool';
 import { FaceClusterTool } from './organize/FaceClusterTool';
 import { TimelineView } from './organize/TimelineView';
@@ -1428,6 +1429,11 @@ export function OrganizePanel() {
                 <SimilarTool key={`similar-${activeTabId}`} {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
+            {visitedTools.has('screenshot') && (
+              <div className={activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
+                <ScreenshotTool key={`screenshot-${activeTabId}`} {...toolProps} />
+              </div>
+            )}
             {visitedTools.has('exif') && (
               <div className={activeTool === 'exif' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
                 <ExifTool key={`exif-${activeTabId}`} {...toolProps} />
@@ -1657,6 +1663,7 @@ function EmptyState({
               { color: 'blue' as const, title: t('organize.tools.organize.title'), desc: t('organize.tools.organize.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="4" width="14" height="13" rx="1" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="12" y1="2" x2="12" y2="6" /></svg> },
               { color: 'violet' as const, title: t('organize.tools.faceCluster.title'), desc: t('organize.tools.faceCluster.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><circle cx="10" cy="10" r="8" /><circle cx="7.5" cy="8.5" r="0.8" fill="currentColor" /><circle cx="12.5" cy="8.5" r="0.8" fill="currentColor" /><path d="M6.5 12.5c1 1 2.3 1.5 3.5 1.5s2.5-.5 3.5-1.5" /></svg> },
               { color: 'amber' as const, title: t('organize.tools.similar.title'), desc: t('organize.tools.similar.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="2" y="4" width="11" height="11" rx="2" /><rect x="7" y="7" width="11" height="11" rx="2" /></svg> },
+              { color: 'teal' as const, title: t('organize.tools.screenshot.title'), desc: t('organize.tools.screenshot.shortDesc'), icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><rect x="3" y="3" width="14" height="11" rx="1.5" /><path d="M7 18h6" /><path d="M10 14v4" /><path d="M8 6.5a2 2 0 104 0" /><path d="M8 9.5h4" /></svg> },
             ],
           },
           {

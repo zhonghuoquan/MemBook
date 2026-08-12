@@ -18,6 +18,7 @@ export type ToolId =
   | 'organize'
   | 'faceCluster'
   | 'similar'
+  | 'screenshot'
   | 'exif'
   | 'rename'
   | 'convert'
@@ -128,6 +129,21 @@ export const TOOL_LIST: { category: ToolCategory; tools: ToolMeta[] }[] = [
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
             <rect x="2" y="4" width="11" height="11" rx="2" />
             <rect x="7" y="7" width="11" height="11" rx="2" />
+          </svg>
+        ),
+      },
+      {
+        id: 'screenshot',
+        color: 'teal',
+        titleKey: 'home.organize.screenshot.title',
+        descKey: 'home.organize.screenshot.sidebarDesc',
+        icon: (
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <rect x="3" y="3" width="14" height="11" rx="1.5" />
+            <path d="M7 18h6" />
+            <path d="M10 14v4" />
+            <path d="M8 6.5a2 2 0 104 0" />
+            <path d="M8 9.5h4" />
           </svg>
         ),
       },
