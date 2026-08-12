@@ -439,7 +439,7 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
   },
 
   /** 智能生成封底页并插入到尾部（复用封面配色，保持首尾呼应） */
-  addBackCoverPage: () => {
+  addBackCoverPage: (options) => {
     const size = get().albumSize;
     const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
     const albumName = get().projectName || '我的相册';
@@ -450,7 +450,7 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
     const palette = coverPage?.background
       ? derivePaletteFromPage(coverPage)
       : buildCoverPalette([108, 99, 255]); // 品牌紫 #6C63FF 兜底
-    const backPage = generateBackCoverPage({ photos, albumName, albumType }, palette, pageMm);
+    const backPage = generateBackCoverPage({ photos, albumName, albumType, templateId: options?.templateId }, palette, pageMm);
     set((s) => {
       const hasBack = s.pages.some((p) => p.pageKind === 'backCover');
       const newPages = [...s.pages];
@@ -461,6 +461,35 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         newPages.push(backPage);
       }
       return { pages: newPages };
+    });
+    pushSnapshot(get);
+  },
+
+  /** 切换封底版式：在当前封底上应用另一款封底模板，保留文案 */
+  switchBackCoverTemplate: (pageIndex, templateId) => {
+    const size = get().albumSize;
+    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
+    const albumName = get().projectName || '我的相册';
+    const albumType = get().albumType as AlbumTypeId | undefined;
+    const photos = usePhotoStore.getState().photos;
+    set((s) => {
+      const np = [...s.pages];
+      const page = np[pageIndex];
+      if (!page || page.pageKind !== 'backCover') return s;
+      // 保留当前封底文案
+      const cf = page.coverFields ?? {};
+      // 复用封面配色（若当前封底有背景则用其本身）
+      const palette = page.background
+        ? derivePaletteFromPage(page)
+        : buildCoverPalette([108, 99, 255]);
+      const newPage = generateBackCoverPage(
+        { photos, albumName, albumType, templateId },
+        palette,
+        pageMm,
+      );
+      newPage.coverFields = { ...(newPage.coverFields ?? {}), ...cf };
+      np[pageIndex] = newPage;
+      return { pages: np };
     });
     pushSnapshot(get);
   },

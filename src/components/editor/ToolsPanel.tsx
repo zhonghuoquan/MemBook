@@ -2,9 +2,9 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../store';
 import {
-  STICKY_COLORS, TEXT_STYLE_PRESETS,
+  STICKY_COLORS, TEXT_STYLE_PRESETS, SHAPE_TYPES, DEFAULT_SHAPE_SIZE,
 } from '../../types';
-import type { BrushType, PageTextElement, StickyNote } from '../../types';
+import type { BrushType, PageTextElement, StickyNote, ShapeElement, ShapeType } from '../../types';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { BrushPreview } from './tools/BrushPreview';
 import { ColorPicker } from './tools/ColorPicker';
@@ -42,6 +42,9 @@ export function ToolsPanel() {
   const addTextElement = useEditorStore((s) => s.addTextElement);
   const sb = useScrollbarVisibility<HTMLDivElement>();
   const addStickyNote = useEditorStore((s) => s.addStickyNote);
+  const addShapeElement = useEditorStore((s) => s.addShapeElement);
+  const updateShapeElement = useEditorStore((s) => s.updateShapeElement);
+  const removeShapeElement = useEditorStore((s) => s.removeShapeElement);
   const setPendingTextEditId = useEditorStore((s) => s.setPendingTextEditId);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
   const pages = useEditorStore((s) => s.pages);
@@ -50,12 +53,15 @@ export function ToolsPanel() {
   /* ── 文字/便利贴选中态与编辑方法 ── */
   const selectedTextId = useEditorStore((s) => s.selectedTextId);
   const selectedStickyId = useEditorStore((s) => s.selectedStickyId);
+  const selectedShapeId = useEditorStore((s) => s.selectedShapeId);
   const setSelectedTextId = useEditorStore((s) => s.setSelectedTextId);
   const setSelectedStickyId = useEditorStore((s) => s.setSelectedStickyId);
+  const setSelectedShapeId = useEditorStore((s) => s.setSelectedShapeId);
   const updateTextElement = useEditorStore((s) => s.updateTextElement);
   const updateStickyNote = useEditorStore((s) => s.updateStickyNote);
   const selectedTextEl = currentPage?.textElements?.find((e) => e.id === selectedTextId);
   const selectedStickyNote = currentPage?.stickyNotes?.find((n) => n.id === selectedStickyId);
+  const selectedShape = currentPage?.shapeElements?.find((s) => s.id === selectedShapeId);
 
   /* 文字字体列表 */
   const FONT_FAMILIES = ['思源黑体', '宋体', '微软雅黑', '楷体', '黑体', '仿宋'];
@@ -124,6 +130,29 @@ export function ToolsPanel() {
     setSelectedStickyId(note.id);
     setPendingTextEditId(note.id);
   }, [currentPage, currentPageIndex, addStickyNote, setSelectedTextId, setSelectedStickyId, setPendingTextEditId]);
+
+  /* ── 添加形状 ── */
+  const handleAddShape = useCallback((type: ShapeType) => {
+    if (!currentPage) return;
+    const shape: ShapeElement = {
+      id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      x: 105, y: 140,   // 页面中心附近（mm）
+      width: DEFAULT_SHAPE_SIZE.width,
+      height: DEFAULT_SHAPE_SIZE.height,
+      type,
+      fill: '#6C63FF',
+      stroke: '#6C63FF',
+      strokeWidth: 2,
+      opacity: 1,
+      rotation: 0,
+      zIndex: 0,
+    };
+    addShapeElement(currentPageIndex, shape);
+    // 自动选中新形状
+    setSelectedTextId(null);
+    setSelectedStickyId(null);
+    setSelectedShapeId(shape.id);
+  }, [currentPage, currentPageIndex, addShapeElement, setSelectedTextId, setSelectedStickyId, setSelectedShapeId]);
 
   /* ── 清除当前页所有笔迹 ── */
   const handleClearAllStrokes = useCallback(() => {
@@ -452,6 +481,127 @@ export function ToolsPanel() {
           )}
         </CollapsibleSection>
 
+        {/* ═══════════════════ 3.5 形状 ═══════════════════ */}
+        <CollapsibleSection title={t('editor.tools.shapeSection')} icon="shape" defaultOpen onToggle={() => toggleSection('shape')}>
+          {/* 形状选择面板 */}
+          <div className="p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)] space-y-2">
+            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.addShape')}</div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {SHAPE_TYPES.map((st) => (
+                <button
+                  key={st}
+                  onClick={() => handleAddShape(st)}
+                  title={t(`editor.tools.shape_${st}`)}
+                  className="flex items-center justify-center h-10 rounded-[var(--radius-sm)] border border-[var(--color-border)]
+                             bg-white text-[var(--color-gray-500)] hover:border-[var(--color-brand)]
+                             hover:text-[var(--color-brand)] cursor-pointer transition-colors"
+                >
+                  <ShapeIcon type={st} className="w-5 h-5" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 选中形状时的属性编辑面板 */}
+          {selectedShape && (
+            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
+              <div className="text-[10px] font-[500] text-[var(--color-brand)] uppercase tracking-wide">{t('editor.tools.shapeProperties')}</div>
+              {/* 尺寸 */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeWidth')}</div>
+                  <input type="number" min={5} value={Math.round(selectedShape.width)}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { width: Math.max(5, +e.target.value || 5) })}
+                    className="w-full h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeHeight')}</div>
+                  <input type="number" min={5} value={Math.round(selectedShape.height)}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { height: Math.max(5, +e.target.value || 5) })}
+                    className="w-full h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
+                </div>
+              </div>
+              {/* 填充色（支持无填充） */}
+              <div>
+                <div className="flex items-center justify-between text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">
+                  <span>{t('editor.tools.shapeFill')}</span>
+                  <button
+                    onClick={() => updateShapeElement(currentPageIndex, selectedShape.id, { fill: '' })}
+                    className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer ${selectedShape.fill === '' ? 'border-[var(--color-brand)] text-[var(--color-brand)]' : 'border-[var(--color-border)] text-[var(--color-gray-400)]'}`}
+                  >
+                    {t('editor.tools.shapeNoFill')}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="color" value={selectedShape.fill || '#000000'}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: e.target.value })}
+                    disabled={selectedShape.fill === ''}
+                    className="w-8 h-7 border border-[var(--color-border)] rounded cursor-pointer p-0 disabled:opacity-40" />
+                  <input type="text" value={selectedShape.fill || ''}
+                    placeholder={t('editor.tools.shapeNoFill')}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: e.target.value })}
+                    className="flex-1 h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
+                </div>
+              </div>
+              {/* 描边 */}
+              <div>
+                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeStroke')}</div>
+                <div className="flex items-center gap-2">
+                  <input type="color" value={selectedShape.stroke || '#000000'}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: e.target.value })}
+                    className="w-8 h-7 border border-[var(--color-border)] rounded cursor-pointer p-0" />
+                  <input type="text" value={selectedShape.stroke}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: e.target.value })}
+                    className="flex-1 h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
+                </div>
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
+                    <span>{t('editor.tools.shapeStrokeWidth')}</span>
+                    <span className="font-[600] tabular-nums">{selectedShape.strokeWidth}px</span>
+                  </div>
+                  <input type="range" min={0} max={20} value={selectedShape.strokeWidth}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { strokeWidth: +e.target.value })}
+                    className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
+                </div>
+              </div>
+              {/* 透明度 */}
+              <div>
+                <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
+                  <span>{t('editor.tools.opacity')}</span>
+                  <span className="font-[600] tabular-nums">{Math.round(selectedShape.opacity * 100)}%</span>
+                </div>
+                <input type="range" min={0} max={100} value={Math.round(selectedShape.opacity * 100)}
+                  onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { opacity: +e.target.value / 100 })}
+                  className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
+              </div>
+              {/* 旋转 */}
+              <div>
+                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeRotation')}</div>
+                <div className="flex items-center gap-2">
+                  <input type="range" min={0} max={359} value={((selectedShape.rotation % 360) + 360) % 360}
+                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { rotation: +e.target.value })}
+                    className="flex-1 h-1.5 cursor-pointer accent-[var(--color-brand)]" />
+                  <span className="text-[10px] font-[600] tabular-nums">{Math.round(((selectedShape.rotation % 360) + 360) % 360)}°</span>
+                </div>
+              </div>
+              {/* 删除 */}
+              <button
+                onClick={() => { removeShapeElement(currentPageIndex, selectedShape.id); setSelectedShapeId(null); }}
+                className="w-full py-1.5 text-[11px] font-[500] text-[var(--color-error)] border border-[var(--color-error)]/30 rounded-[var(--radius-sm)] bg-[var(--color-error-light)] hover:bg-[var(--color-error)]/10 cursor-pointer transition-colors"
+              >
+                {t('editor.tools.deleteShape')}
+              </button>
+            </div>
+          )}
+
+          {/* 未选中形状时的提示 */}
+          {!selectedShape && (
+            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
+              {t('editor.tools.shapeHint')}
+            </div>
+          )}
+        </CollapsibleSection>
+
         {/* ═══════════════════ 4. 背景 ═══════════════════ */}
         <CollapsibleSection title={t('editor.tools.backgroundSection')} icon="bg" defaultOpen onToggle={() => toggleSection('bg')}>
           <BackgroundPicker
@@ -539,4 +689,23 @@ function ToolButton({
       {children}
     </button>
   );
+}
+
+/* ── 形状 SVG 图标 ── */
+function ShapeIcon({ type, className }: { type: ShapeType; className?: string }) {
+  const props = { className, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '1.5', strokeLinejoin: 'round' as const };
+  switch (type) {
+    case 'rectangle': return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="1"/></svg>;
+    case 'square': return <svg {...props}><rect x="4" y="4" width="16" height="16" rx="1"/></svg>;
+    case 'circle': return <svg {...props}><circle cx="12" cy="12" r="9"/></svg>;
+    case 'ellipse': return <svg {...props}><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>;
+    case 'triangle': return <svg {...props}><path d="M12 4l9 16H3z"/></svg>;
+    case 'diamond': return <svg {...props}><path d="M12 3l9 9-9 9-9-9z"/></svg>;
+    case 'pentagon': return <svg {...props}><path d="M12 3l8 6-3 11H7L4 9z"/></svg>;
+    case 'hexagon': return <svg {...props}><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/></svg>;
+    case 'star': return <svg {...props}><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/></svg>;
+    case 'arrow': return <svg {...props}><line x1="3" y1="12" x2="17" y2="12"/><path d="M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case 'line': return <svg {...props}><line x1="4" y1="20" x2="20" y2="4" strokeLinecap="round"/></svg>;
+    default: return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="1"/></svg>;
+  }
 }

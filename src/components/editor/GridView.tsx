@@ -728,16 +728,6 @@ export function GridView({ onBack }: GridViewProps) {
                         setViewMode('single');
                       }}
                     />
-                    <MenuButton
-                      icon={ShuffleIcon}
-                      label={t('editor.gridView.regenerateCover')}
-                      onClick={() => {
-                        useEditorStore.getState().regenerateCoverPage(1);
-                        invalidatePageThumbnail(pg.id);
-                        setPageMenu(null);
-                        addToast({ type: 'success', message: t('editor.gridView.coverRegenerated') });
-                      }}
-                    />
                     <div className="h-px bg-[var(--color-border-light)] my-1" />
                   </>
                 );
@@ -1157,12 +1147,4 @@ const EditCoverIcon = (
     <path d="M5 8h4M5 10h3" />
   </svg>
 );
-
-const ShuffleIcon = (
-  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
-    <path d="M12.5 3.5L8 8M11.5 5V3h-2" />
-    <path d="M2 12L6 8M3 8H2M12 11h-1M2 4h1" />
-  </svg>
-);
-
 

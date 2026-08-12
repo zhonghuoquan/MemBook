@@ -24,18 +24,8 @@ export function CoverPanel() {
 
   const isCover = isCoverPage(page);
   const templates = isCover ? COVER_TEMPLATES : BACK_COVER_TEMPLATES;
-  const cf = page.coverFields ?? {};
-
-  const setField = (field: string, value: string) => {
-    useEditorStore.getState().updateCoverFields(currentPageIndex, { [field]: value });
-  };
-
   const switchTemplate = (templateId: string) => {
     useEditorStore.getState().switchCoverTemplate(currentPageIndex, templateId);
-  };
-
-  const regenerate = () => {
-    useEditorStore.getState().regenerateCoverPage(1);
   };
 
   return (
@@ -49,22 +39,6 @@ export function CoverPanel() {
         <span className="text-[13px] font-[600] text-[var(--color-gray-800)]">
           {isCover ? '📕 封面编辑' : '📗 封底编辑'}
         </span>
-        {/* 一键换设计 */}
-        {isCover && (
-          <button
-            onClick={regenerate}
-            className="flex items-center gap-1 px-2 py-1 text-[11px] font-[500] rounded-[var(--radius-sm)]
-              bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)]
-              border-none cursor-pointer transition-colors"
-            title={t('editor.coverPanel.regenerateHint')}
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-              <path d="M14 8a6 6 0 1 1-1.8-4.3" />
-              <path d="M14 2v3.5h-3.5" />
-            </svg>
-            {t('editor.coverPanel.regenerate')}
-          </button>
-        )}
       </div>
 
       {/* 封面：版式切换缩略 */}
@@ -111,85 +85,10 @@ export function CoverPanel() {
         </div>
       )}
 
-      {/* 字段编辑区 */}
-      <div className="space-y-2">
-        {isCover ? (
-          <>
-            <Field
-              label={t('editor.coverPanel.title')}
-              value={cf.title ?? ''}
-              placeholder={t('editor.coverPanel.titlePlaceholder')}
-              onChange={(v) => setField('title', v)}
-            />
-            <Field
-              label={t('editor.coverPanel.subtitle')}
-              value={cf.subtitle ?? ''}
-              placeholder={t('editor.coverPanel.subtitlePlaceholder')}
-              onChange={(v) => setField('subtitle', v)}
-            />
-            <Field
-              label={t('editor.coverPanel.author')}
-              value={cf.author ?? ''}
-              placeholder={t('editor.coverPanel.authorPlaceholder')}
-              onChange={(v) => setField('author', v)}
-            />
-            <Field
-              label={t('editor.coverPanel.date')}
-              value={cf.dateText ?? ''}
-              placeholder={t('editor.coverPanel.datePlaceholder')}
-              onChange={(v) => setField('dateText', v)}
-            />
-          </>
-        ) : (
-          <>
-            <Field
-              label={t('editor.coverPanel.backText')}
-              value={cf.backText ?? ''}
-              placeholder={t('editor.coverPanel.backTextPlaceholder')}
-              onChange={(v) => setField('backText', v)}
-            />
-            <Field
-              label={t('editor.coverPanel.date')}
-              value={cf.dateText ?? ''}
-              placeholder={t('editor.coverPanel.datePlaceholder')}
-              onChange={(v) => setField('dateText', v)}
-            />
-            <Field
-              label={t('editor.coverPanel.author')}
-              value={cf.author ?? ''}
-              placeholder={t('editor.coverPanel.authorPlaceholder')}
-              onChange={(v) => setField('author', v)}
-            />
-          </>
-        )}
+      {/* 自由文字编辑提示 */}
+      <div className="text-[11px] leading-relaxed text-[var(--color-gray-500)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
+        {t('editor.coverPanel.freeTextHint')}
       </div>
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="block text-[11px] font-[500] text-[var(--color-gray-500)] mb-0.5">{label}</span>
-      <input
-        type="text"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2 py-1.5 text-[12px] text-[var(--color-gray-800)] rounded-[var(--radius-sm)]
-          border border-[var(--color-border)] bg-white focus:border-[var(--color-brand)] focus:ring-1
-          focus:ring-[var(--color-primary-200)] outline-none transition-colors"
-      />
-    </label>
   );
 }

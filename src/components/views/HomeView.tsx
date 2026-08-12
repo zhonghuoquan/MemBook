@@ -5,6 +5,7 @@ import { AppHeader } from '../common/AppHeader';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
+import { CoverGallery } from './../home/CoverGallery';
 import { StickerGallery } from './../home/StickerGallery';
 import { OrganizePanel } from './../home/OrganizePanel';
 import { CreateDialog } from './../home/CreateDialog';
@@ -54,7 +55,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
   const [activeNav, setActiveNav] = useState<HomeTab>(() => {
     try {
       const saved = sessionStorage.getItem(NAV_SESSION_KEY);
-      if (saved === 'create' || saved === 'albums' || saved === 'templates' || saved === 'organize' || saved === 'stickers') return saved;
+      if (saved === 'create' || saved === 'albums' || saved === 'templates' || saved === 'organize' || saved === 'stickers' || saved === 'covers') return saved;
       // 兼容旧版本 sessionStorage 中遗留的 'projects' 值
       if (saved === 'projects') return 'albums';
     } catch { /* ignore */ }
@@ -326,6 +327,48 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
       onNavigateToEditor();
     };
 
+  /** 从主页「封面」设计库选择封面模板，新建相册并进入编辑器 */
+  const handleCreateFromCover = async (templateId: string) => {
+    if (!canCreateProject(projectCount)) {
+      openLicenseDialog(t('home.create.projectLimit'));
+      return;
+    }
+    const template = findTemplateById(templateId);
+    if (!template) return;
+
+    photoService.cleanupProjectResources();
+
+    const name = t('home.coverGallery.defaultAlbumName');
+    const size: AlbumSize = { id: 'standard', name: '标准', width: 210, height: 280, desc: '标准' };
+    const margin: PageMargin = { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT };
+
+    // 封面页：应用所选封面模板，标记 pageKind（由 templateId 前缀自动判定）
+    const page: AlbumPage = {
+      id: `page-${Date.now()}`,
+      templateId,
+      placements: template.slots.map((slot) => ({ slotId: slot.id, photoId: null })),
+      background: '#FFFFFF',
+      slotCornerRadius: DEFAULT_SLOT_CORNER_RADIUS,
+    };
+
+    setPages([page]);
+    setAlbumSize(size);
+    useEditorStore.getState().setProjectName(name);
+    useEditorStore.getState().setPageMargin({
+      top: margin.margin, bottom: margin.margin, left: margin.margin, right: margin.margin,
+    });
+    useEditorStore.getState().setSlotGap(margin.gap);
+    useEditorStore.getState().setDefaultSlotCornerRadius(DEFAULT_SLOT_CORNER_RADIUS);
+
+    const projectId = await createAndSaveProject(name, size, [page], margin, undefined, undefined);
+    setPhotos([]);
+    await savePhotos([], projectId);
+    setStorageMode(null);
+    clearSmartLayoutState();
+    useUIStore.getState().setCanvasZoom(1);
+    onNavigateToEditor();
+  };
+
   const handleOpenProject = async (project: AlbumProject) => {
     // P0: 打开项目前清理旧项目缓存，释放 blob URL 和 ImageBitmap 内存
     photoService.cleanupProjectResources();
@@ -504,6 +547,12 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
               <line x1="10" y1="5" x2="10" y2="15" />
             </svg>
           </HomeNavItem>
+          <HomeNavItem active={activeNav === 'covers'} label={t('home.nav.covers')} onClick={() => setActiveNav('covers')}>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+              <path d="M3 5h14a1 1 0 011 1v9a1 1 0 01-1 1H3a1 1 0 01-1-1V6a1 1 0 011-1z" />
+              <path d="M3 5l7 5 7-5" />
+            </svg>
+          </HomeNavItem>
           <HomeNavItem active={activeNav === 'stickers'} label={t('home.nav.stickers')} onClick={() => setActiveNav('stickers')}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
               <path d="M14.5 2.5l3 3a1.5 1.5 0 0 1 0 2.1l-9.9 9.9a1.5 1.5 0 0 1-1 .4H4a1.5 1.5 0 0 1-1.5-1.5v-2.6a1.5 1.5 0 0 1 .4-1l9.9-9.9a1.5 1.5 0 0 1 2.1 0z" />
@@ -553,6 +602,9 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             )}
             {activeNav === 'templates' && (
               <TemplateGallery onCreateFromTemplate={handleCreateFromTemplate} />
+            )}
+            {activeNav === 'covers' && (
+              <CoverGallery onCreateFromCover={handleCreateFromCover} />
             )}
             {activeNav === 'stickers' && (
               <StickerGallery />

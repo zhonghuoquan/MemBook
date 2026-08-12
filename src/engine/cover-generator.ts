@@ -542,7 +542,8 @@ export function generateBackCoverPage(
   palette: CoverPalette,
   pageMm: { width: number; height: number },
 ): AlbumPage {
-  const template = BACK_COVER_TEMPLATES[0];
+  const template = (input.templateId ? BACK_COVER_TEMPLATES.find((t) => t.id === input.templateId) : undefined)
+    ?? BACK_COVER_TEMPLATES[0];
   const date = deriveDateRange(input.photos);
   const els = buildBackCoverTextElements(
     { backText: input.albumType ? BACK_COVER_QUOTES[input.albumType] : '愿你记得这些时光', date, author: undefined },

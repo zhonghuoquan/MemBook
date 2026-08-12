@@ -41,7 +41,7 @@ import {
   getWatermarkSettings,
   WATERMARK_FONT_STACK,
 } from './watermarkRenderer';
-import type { AlbumPage, Photo, PhotoPlacement, StickerElement, StickyNote, PageTextElement, BrushStroke } from '../types';
+import type { AlbumPage, Photo, PhotoPlacement, StickerElement, StickyNote, PageTextElement, BrushStroke, ShapeElement } from '../types';
 import { getSlotZIndex } from '../types';
 import { preloadStickerSrc } from '../hooks/useStickerSrc';
 import { ensurePhotoAnalyzed } from '../engine/content-aware';
@@ -730,6 +730,15 @@ async function drawPage(
     });
   });
 
+  // 4.5b 形状（typeOrder=1）
+  (page.shapeElements || []).forEach((sh: ShapeElement) => {
+    items.push({
+      z: sh.zIndex || 0,
+      typeOrder: 1,
+      draw: () => drawShape(ctx, sh, mmToPx),
+    });
+  });
+
   // 排序：先按 z 升序（z 小的渲染在下层），z 相同时 typeOrder 小的（槽位）排前（渲染在装饰下方）
   items.sort((a, b) => {
     if (a.z !== b.z) return a.z - b.z;
@@ -1221,6 +1230,160 @@ function drawSticker(
 }
 
 /** 简单文字换行 */
+/** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform） */
+function drawShape(ctx: CanvasRenderingContext2D, sh: ShapeElement, mmToPx: number): void {
+  const scale = mmToPx / MM_TO_PX;
+  const px = sh.x * mmToPx;
+  const py = sh.y * mmToPx;
+  const pw = Math.max(sh.width * mmToPx, 10 * scale);
+  const ph = Math.max(sh.height * mmToPx, 10 * scale);
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate((sh.rotation * Math.PI) / 180);
+  ctx.globalAlpha = typeof sh.opacity === 'number' ? sh.opacity : 1;
+
+  const lineWidth = Math.max(0.5, (sh.strokeWidth || 0) * scale);
+  ctx.lineWidth = lineWidth;
+  if (sh.fill) {
+    ctx.fillStyle = sh.fill;
+  }
+  if (sh.stroke) {
+    ctx.strokeStyle = sh.stroke;
+  }
+
+  const minDim = Math.min(pw, ph);
+  const halfW = pw / 2;
+  const halfH = ph / 2;
+
+  const beginShape = () => {
+    if (sh.fill) ctx.fill();
+    if (sh.stroke && lineWidth > 0) ctx.stroke();
+  };
+
+  switch (sh.type) {
+    case 'circle':
+      ctx.beginPath();
+      ctx.arc(0, 0, minDim / 2, 0, Math.PI * 2);
+      beginShape();
+      break;
+    case 'ellipse':
+      ctx.beginPath();
+      ctx.ellipse(0, 0, halfW, halfH, 0, 0, Math.PI * 2);
+      beginShape();
+      break;
+    case 'triangle': {
+      ctx.beginPath();
+      const r = minDim / 2;
+      ctx.moveTo(0, -r);
+      ctx.lineTo(r, r);
+      ctx.lineTo(-r, r);
+      ctx.closePath();
+      beginShape();
+      break;
+    }
+    case 'diamond':
+    case 'square': {
+      // 菱形以对角线为边长；正方形直接矩形
+      if (sh.type === 'diamond') {
+        ctx.beginPath();
+        const r = minDim / 2;
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r, 0);
+        ctx.lineTo(0, r);
+        ctx.lineTo(-r, 0);
+        ctx.closePath();
+        beginShape();
+      } else {
+        ctx.beginPath();
+        ctx.rect(-halfW, -halfW, pw, pw);
+        beginShape();
+      }
+      break;
+    }
+    case 'rectangle':
+    default:
+      ctx.beginPath();
+      ctx.rect(-halfW, -halfH, pw, ph);
+      beginShape();
+      break;
+    case 'pentagon': {
+      ctx.beginPath();
+      const r = minDim / 2;
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+        const x = Math.cos(angle) * r;
+        const y = Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      beginShape();
+      break;
+    }
+    case 'hexagon': {
+      ctx.beginPath();
+      const r = minDim / 2;
+      for (let i = 0; i < 6; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 6;
+        const x = Math.cos(angle) * r;
+        const y = Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      beginShape();
+      break;
+    }
+    case 'star': {
+      ctx.beginPath();
+      const outer = minDim / 2;
+      const inner = minDim / 4;
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? outer : inner;
+        const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+        const x = Math.cos(angle) * r;
+        const y = Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      beginShape();
+      break;
+    }
+    case 'arrow': {
+      // 水平箭头
+      const tip = halfW;
+      const tail = -halfW;
+      const headLen = Math.min(24 * scale, pw / 3);
+      const headW = Math.min(18 * scale, ph / 2);
+      ctx.beginPath();
+      ctx.moveTo(tail, 0);
+      ctx.lineTo(tip - headLen, 0);
+      // 箭头头部（下半）
+      ctx.lineTo(tip - headLen, -headW);
+      ctx.lineTo(tip, 0);
+      ctx.lineTo(tip - headLen, headW);
+      ctx.lineTo(tip - headLen, 0);
+      ctx.closePath();
+      beginShape();
+      break;
+    }
+    case 'line': {
+      ctx.beginPath();
+      ctx.moveTo(-halfW, 0);
+      ctx.lineTo(halfW, 0);
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = sh.stroke || sh.fill || '#6C63FF';
+      ctx.lineWidth = Math.max(1, (sh.strokeWidth || 2) * scale);
+      ctx.stroke();
+      break;
+    }
+  }
+
+  ctx.restore();
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const lines: string[] = [];
   const paragraphs = text.split('\n');

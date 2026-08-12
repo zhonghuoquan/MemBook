@@ -73,6 +73,7 @@
     "nav": {
       "albums": "Albums",
       "templates": "Layouts",
+      "covers": "Covers",
       "organize": "Organize",
       "stickers": "Stickers"
     },
@@ -275,6 +276,17 @@
       "createTemplateCard": "Create New Layout",
       "createTemplateDesc": "Design a layout from scratch",
       "copySuffix": "(Copy)"
+    },
+    "coverGallery": {
+      "title": "Cover Gallery",
+      "subtitle": "Pick a beautiful cover and start your album",
+      "coverSection": "Cover templates",
+      "backCoverSection": "Back cover templates",
+      "coverBadge": "📕 Cover",
+      "backCoverBadge": "📗 Back cover",
+      "use": "Use",
+      "defaultAlbumName": "My Album",
+      "hint": "Click \"Use\" to create an album with this cover and open the editor. The cover layout auto-fits the page size. You can then freely change photos, double-click text to edit, or use the Tools panel to add shapes and adjust fonts and colors."
     },
     "emptyState": {
       "title": "No albums yet",
@@ -1052,12 +1064,27 @@
       "date": "Date",
       "datePlaceholder": "e.g. 2023-2024",
       "backText": "Back Cover Text",
-      "backTextPlaceholder": "Copyright / message"
+      "backTextPlaceholder": "Copyright / message",
+      "freeTextHint": "Cover text is a free text element: double-click to edit, drag to move, or use the Tools panel to adjust font, color and size."
+    },
+    "coverLibrary": {
+      "title": "Covers",
+      "coverSection": "Cover templates",
+      "backCoverSection": "Back cover templates",
+      "coverBadge": "📕 Cover",
+      "backCoverBadge": "📗 Back cover",
+      "switched": "Cover layout switched",
+      "coverAdded": "Cover page added",
+      "backCoverAdded": "Back cover page added",
+      "onCoverPageHint": "Current page is a cover/back cover: click a template above to switch its layout (keeps photos and text).",
+      "onNormalPageHint": "Current page is a normal page: clicking a cover template inserts a new cover/back cover page.",
+      "hint": "Cover layouts auto-fit the page size. After applying, double-click text on the canvas to edit, or use the Tools panel."
     },
     "toolbar": {
       "photos": "Photos",
       "templates": "Layouts",
       "tools": "Tools",
+      "covers": "Covers",
       "stickers": "Stickers",
       "theme": "Theme",
       "market": "Market",
@@ -1111,6 +1138,8 @@
       "textPasted": "Text pasted",
       "stickyPasted": "Sticky note pasted",
       "stickerPasted": "Sticker pasted",
+      "shapeCopied": "Shape copied",
+      "shapePasted": "Shape pasted",
       "noPages": "No pages",
       "pageActions": "Page actions",
       "zoomLevel": "Zoom {{percent}}",
@@ -1212,6 +1241,29 @@
       "stickyHint": "Click to add sticky note, double-click to edit text, drag to move",
       "textHint": "Click \"Add Text\" to add a text element, double-click to edit content",
       "textStickyHint": "Select a text or sticky note on the canvas to edit its properties",
+      "shapeSection": "Shapes",
+      "addShape": "Add shape",
+      "shapeProperties": "Shape properties",
+      "shapeWidth": "Width",
+      "shapeHeight": "Height",
+      "shapeFill": "Fill",
+      "shapeNoFill": "No fill",
+      "shapeStroke": "Stroke",
+      "shapeStrokeWidth": "Stroke width",
+      "shapeRotation": "Rotation",
+      "deleteShape": "Delete shape",
+      "shapeHint": "Click a shape above to add it to the page. Adjust size, color, stroke and opacity.",
+      "shape_rectangle": "Rectangle",
+      "shape_square": "Square",
+      "shape_circle": "Circle",
+      "shape_ellipse": "Ellipse",
+      "shape_triangle": "Triangle",
+      "shape_diamond": "Diamond",
+      "shape_pentagon": "Pentagon",
+      "shape_hexagon": "Hexagon",
+      "shape_star": "Star",
+      "shape_arrow": "Arrow",
+      "shape_line": "Line",
       "backgroundSection": "Background",
       "background": {
         "tabSolid": "Solid",
@@ -1429,6 +1481,7 @@
       "photos": "Photos",
       "templates": "Layouts",
       "tools": "Tools",
+      "covers": "Covers",
       "settings": "Settings"
     },
     "bottomTabs": {
