@@ -4,18 +4,43 @@
  * 展示 Free 与 Pro 各版本能做什么、Pro 相比 Free 多解锁哪些能力，
  * 让用户清楚「为什么要付费、付费能多得到什么」，避免一刀切锁死带来的困惑。
  */
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TIER_FEATURES, type LicenseTier } from './tiers';
 
 export function TierComparisonPanel({
   currentTier,
+  /** 是否可折叠（默认 true，点击标题后再展开/收起） */
+  collapsible = true,
+  /** 初始是否展开 */
+  defaultCollapsed = true,
 }: {
   currentTier: LicenseTier;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
 }) {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const toggle = () => setCollapsed((c) => !c);
 
   return (
     <div className="rounded-xl border border-[var(--color-border)] overflow-hidden">
+      {collapsible && (
+        <button
+          type="button"
+          onClick={toggle}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left bg-[var(--color-gray-50)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
+        >
+          <span className="text-[12px] font-[600] text-[var(--color-gray-800)]">
+            {t('license.tier.comparison', '版本对比')}
+          </span>
+          <span className="text-[11px] text-[var(--color-primary-600)] font-[500]">
+            {collapsed ? t('license.tier.expand', '展开对比') : t('license.tier.collapse', '收起')}
+          </span>
+        </button>
+      )}
+      {!collapsed && (
+      <>
       {/* 表头：Free / Pro */}
       <div className="grid grid-cols-[1.2fr_1fr_1fr] bg-[var(--color-gray-50)] border-b border-[var(--color-border)]">
         <div className="px-3 py-2 text-[11px] font-[600] text-[var(--color-text-secondary)]">
@@ -74,6 +99,8 @@ export function TierComparisonPanel({
             : t('license.tier.proActive', '您已解锁全部 Pro 能力')}
         </span>
       </div>
+      </>
+      )}
     </div>
   );
 }
