@@ -16,6 +16,7 @@ import {
   type GooglePhotosLayoutResult,
 } from '../../../engine/google-photos-layout';
 import { createAndSaveProject, savePhotoChanges } from '../../../db';
+import { importPhotoToDB, ensureSupportedFormat, isHeicFile } from '../../../engine/storage-engine';
 import {
   ALBUM_SIZES,
   PAGE_MARGIN_DEFAULT,
@@ -27,6 +28,7 @@ import {
   type Photo,
 } from '../../../types';
 import type { PhotoFileInfo } from '../../../photo-tools';
+import { ThumbImage } from './shared';
 
 const MM_TO_PX = 2;
 
@@ -148,28 +150,44 @@ export function OneClickAlbumWizard({
       const margin = { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT };
       const projectId = await createAndSaveProject(name, albumSize, newPages, margin);
 
-      // 保存照片（import 到库内，读取原数据）
+      // 保存照片（import 到库内）：读取原数据 → 压缩生成 thumb/preview/original 三级 blob 存入 IndexedDB，
+      // 并回填 blobId 字段，确保进入编辑器后照片列表/页面缩略图能正常加载。
       const savedPhotos: Photo[] = [];
       for (const p of photos) {
         try {
           const buf = await readPhotoData(p);
-          if (buf) {
-            savedPhotos.push({
-              id: p.id,
-              src: p.path || '',
-              name: p.name,
-              date: p.dateTaken || new Date().toISOString(),
-              width: p.width || 3000,
-              height: p.height || 3000,
-              orientation: p.width !== undefined && p.height !== undefined
-                ? p.width > p.height ? 'landscape' : p.width < p.height ? 'portrait' : 'square'
-                : 'square',
-              fileSize: p.size,
-              storageMode: 'import',
-              albumId: projectId,
-            });
+          if (!buf) continue;
+          let file = new File([buf], p.name, { type: p.mimeType || 'image/jpeg' });
+          // HEIC 浏览器无法原生解码，先转换为 JPEG（与正常导入流程一致）
+          if (isHeicFile(p.name)) {
+            file = await ensureSupportedFormat(file);
           }
-        } catch { /* skip unreadable */ }
+          // 完整导入：thumb(256px) + preview(1200px) + original，压缩后存入 IndexedDB
+          const imported = await importPhotoToDB(file, {
+            originalWidth: p.width,
+            originalHeight: p.height,
+          });
+          savedPhotos.push({
+            id: p.id,
+            src: imported.previewUrl,
+            name: p.name,
+            date: p.dateTaken || new Date().toISOString(),
+            width: imported.previewWidth,
+            height: imported.previewHeight,
+            orientation: p.width !== undefined && p.height !== undefined
+              ? p.width > p.height ? 'landscape' : p.width < p.height ? 'portrait' : 'square'
+              : 'square',
+            fileSize: p.size,
+            storageMode: 'import',
+            albumId: projectId,
+            blobId: imported.originalBlobId,
+            originalBlobId: imported.originalBlobId,
+            previewBlobId: imported.previewBlobId,
+            thumbBlobId: imported.thumbBlobId,
+          });
+        } catch {
+          // 单张照片导入失败时跳过，其余照片继续
+        }
       }
       if (savedPhotos.length > 0) {
         await savePhotoChanges(savedPhotos, projectId);
@@ -300,11 +318,11 @@ export function OneClickAlbumWizard({
               <div className="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar">
                 {photos.slice(0, 40).map((p) => (
                   <div key={p.id} className="aspect-square rounded-md bg-[var(--color-gray-100)] overflow-hidden">
-                    <img
-                      src={p.thumbUrl || ''}
-                      alt={p.name}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
+                    <ThumbImage
+                      photo={p}
+                      readPhotoData={readPhotoData}
+                      aspect="square"
+                      size="small"
                     />
                   </div>
                 ))}
