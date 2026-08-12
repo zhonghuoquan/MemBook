@@ -879,6 +879,7 @@
     "autoAnalyze": {
       "title": "One-click Analyze",
       "running": "Analyzing…",
+      "viewReport": "View Report",
       "empty": "Please add a photo path first",
       "busy": "A tool is already running, please wait",
       "start": "One-click analysis: {{seq}}",
@@ -896,7 +897,8 @@
       "jumpHint": "Found {{count}} item(s){{sub}}",
       "subCount": " (affecting {{sub}})",
       "cleanHint": "No action needed for this item",
-      "handle": "Handle"
+      "handle": "Handle",
+      "reanalyze": "Re-analyze"
     },
     "oneClickAlbum": {
       "title": "One-Click Album",
