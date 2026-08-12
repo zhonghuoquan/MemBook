@@ -230,7 +230,12 @@ function photoToFileInfo(p: Photo): PhotoFileInfo {
   };
 }
 
-export function OrganizePanel() {
+interface OrganizePanelProps {
+  /** 当前整理面板是否处于可见（激活）状态；仅当用户真正进入“照片整理”页时才触发恢复扫描 */
+  active?: boolean;
+}
+
+export function OrganizePanel({ active = false }: OrganizePanelProps) {
   const { t } = useTranslation();
   const addToast = useUIStore((s) => s.addToast);
 
@@ -675,17 +680,21 @@ export function OrganizePanel() {
     }
   }, [setTabState, addToast, t]);
 
-  // ── 恢复：组件挂载时触发已恢复标签的异步重新扫描 ──
-  // 标签本身已通过 useState lazy initializer 同步恢复，这里仅触发异步扫描
+  // ── 恢复：仅当用户真正进入“照片整理”面板时才触发已恢复标签的异步重新扫描 ──
+  // 背景：本面板在主页中“始终挂载”（仅用 CSS 隐藏，避免切换 Tab 时丢失所选路径）。
+  // 若在组件挂载时就自动恢复扫描，那么每次从编辑/相册返回主页（面板重新挂载）
+  // 都会在用户停留在相册页时突然弹出“扫描完成”提示，令人困惑。
+  // 故改为：仅当 active 变为 true（用户主动进入照片整理页）时，才扫描一次并提示结果。
   // 仅执行一次（用 ref 守卫，React 18 StrictMode 双调用下也安全）
   useEffect(() => {
     if (restoredRef.current) return;
+    if (!active) return;
     restoredRef.current = true;
 
     const restoredTabs = tabsRef.current;
     if (restoredTabs.length === 0) return;
 
-    // 异步触发每个标签的重新扫描（后台静默执行，不阻塞 UI）
+    // 异步触发每个标签的重新扫描
     void (async () => {
       for (const tab of restoredTabs) {
         if (tab.sourceMode === 'library' && tab.projectId) {
@@ -703,7 +712,7 @@ export function OrganizePanel() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
 
   /** Web 端扫描文件夹（写入指定标签） */
   const scanFolderWeb = useCallback(async (handle: FileSystemDirectoryHandle, tabId: string) => {
