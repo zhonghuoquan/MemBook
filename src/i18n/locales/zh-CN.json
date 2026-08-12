@@ -821,7 +821,10 @@
       "free": "Free",
       "pro": "Pro",
       "upgradeHint": "激活 Pro 解锁全部能力",
-      "proActive": "您已解锁全部 Pro 能力"
+      "proActive": "您已解锁全部 Pro 能力",
+      "comparison": "版本对比",
+      "expand": "展开对比",
+      "collapse": "收起"
     },
     "photoToolRequiresPro": "该功能为 Pro 专属，激活后解锁"
   },

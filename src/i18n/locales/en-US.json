@@ -820,7 +820,10 @@
       "free": "Free",
       "pro": "Pro",
       "upgradeHint": "Activate Pro to unlock all features",
-      "proActive": "You have unlocked all Pro features"
+      "proActive": "You have unlocked all Pro features",
+      "comparison": "Version Comparison",
+      "expand": "Expand",
+      "collapse": "Collapse"
     },
     "photoToolRequiresPro": "This feature is Pro-only. Activate to unlock."
   },
