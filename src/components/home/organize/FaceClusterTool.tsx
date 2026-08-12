@@ -30,7 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, useTabCachedResult, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, RangeSlider, useTabCachedResult, type ToolProps } from './shared';
 import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
@@ -392,23 +392,19 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
 
       {/* ── 顶部：距离阈值滑块 + 操作按钮 ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-          <label className="text-xs text-[var(--color-text-secondary)] whitespace-nowrap">
+        <div className="flex-1 min-w-[220px]">
+          <label className="text-xs text-[var(--color-text-secondary)] block mb-1">
             {t('home.organize.faceCluster.threshold', '识别灵敏度')}
           </label>
-          <input
-            type="range"
+          <RangeSlider
             min={0.3}
             max={0.9}
             step={0.05}
             value={threshold}
-            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            onChange={(v) => setThreshold(v)}
             disabled={running}
-            className="face-sensitivity-range flex-1"
+            accent="#8B6BB0"
           />
-          <span className="text-xs font-mono text-[var(--color-gray-600)] w-10 text-right">
-            {threshold.toFixed(2)}
-          </span>
         </div>
         {!running ? (
           <PrimaryButton onClick={handleStart} disabled={photos.length === 0}>

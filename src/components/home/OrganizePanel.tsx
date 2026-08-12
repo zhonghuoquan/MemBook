@@ -1267,9 +1267,9 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
                       <span className="text-xs text-[var(--color-brand)] font-[600] truncate">{t('organize.libraryPrefix', { name: activeTab.name })}</span>
                     </div>
                   ) : activeTab.rootPath ? (
-                    <div className="min-w-0 flex-1 inline-flex items-start gap-1 px-2 py-1.5 rounded-lg
+                    <div className="min-w-0 flex-1 inline-flex items-center gap-1 px-2 py-1.5 rounded-lg
                                     bg-[var(--color-surface-panel)] border border-[var(--color-border)]">
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0 text-[var(--color-gray-500)] mt-0.5">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0 text-[var(--color-gray-500)]">
                         <path d="M14 11V5a2 2 0 00-2-2H8l-2-2H4a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2z" />
                       </svg>
                       <span className="text-xs text-[var(--color-gray-600)] flex-1 min-w-0 break-all leading-relaxed">{activeTab.rootPath}</span>
@@ -1277,7 +1277,7 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
                       <button
                         onClick={() => handleCopyPath(activeTab.rootPath!)}
                         title={t('organize.copyPath')}
-                        className="shrink-0 w-6 h-6 mt-0.5 rounded flex items-center justify-center text-[var(--color-gray-400)]
+                        className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-[var(--color-gray-400)]
                                    hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-brand)] transition-colors cursor-pointer"
                       >
                         <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
@@ -1290,7 +1290,7 @@ export function OrganizePanel({ active = false }: OrganizePanelProps) {
                         <button
                           onClick={() => handleOpenFolder(activeTab.rootPath!)}
                           title={t('organize.openFolder')}
-                          className="shrink-0 w-6 h-6 mt-0.5 rounded flex items-center justify-center text-[var(--color-gray-400)]
+                          className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-[var(--color-gray-400)]
                                      hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-brand)] transition-colors cursor-pointer"
                         >
                           <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">

@@ -12,7 +12,7 @@ import {
   convertToJpg,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, RangeSlider, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -161,22 +161,20 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
             </div>
           )}
 
-          {/* 质量滑块 */}
-          <label className="block">
+          {/* 质量滑块（使用共享 RangeSlider，与其他滑块样式统一） */}
+          <div className="block">
             <div className="flex justify-between mb-1">
               <span className="text-sm text-[var(--color-gray-600)]">{t('home.organize.convert.jpgQuality')}</span>
               <span className="text-sm font-mono text-[var(--color-brand)]">{Math.round(quality * 100)}%</span>
             </div>
-            <input
-              type="range"
+            <RangeSlider
               min={0.5}
               max={1}
               step={0.05}
               value={quality}
-              onChange={(e) => setQuality(parseFloat(e.target.value))}
-              className="w-full cursor-pointer"
+              onChange={(v) => setQuality(v)}
             />
-          </label>
+          </div>
 
           {/* 删除原文件（仅 folder + 桌面端） */}
           {canWriteFile && (
