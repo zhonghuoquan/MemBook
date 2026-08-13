@@ -183,9 +183,7 @@
       "albumDescriptionOptional": "Optional",
       "albumDescriptionPlaceholder": "Briefly describe this album, e.g. time, place, people",
       "unnamedAlbum": "Untitled Album",
-      "flipped": "(Flipped)",
-      "autoCover": "Auto-generate Cover / Back Cover",
-      "autoCoverHint": "Smart cover & back cover generated on create; editable or toggled off anytime"
+      "flipped": "(Flipped)"
     },
     "projectGrid": {
       "myAlbums": "My Albums",
@@ -1050,22 +1048,6 @@
       "pageNumber": "Page {{n}}",
       "photosMovedFromPages": "Some photos come from {{pages}} and will be removed from their original pages.",
       "dropPhotoPlaceholder": "Drop photo"
-    },
-    "coverPanel": {
-      "regenerate": "Shuffle",
-      "regenerateHint": "Smartly generate the next design (switch layout/photo/color)",
-      "template": "Cover Layout",
-      "title": "Title",
-      "titlePlaceholder": "Album name or title",
-      "subtitle": "Subtitle / Quote",
-      "subtitlePlaceholder": "A memorable phrase (optional)",
-      "author": "Author",
-      "authorPlaceholder": "Author or dedicatee (optional)",
-      "date": "Date",
-      "datePlaceholder": "e.g. 2023-2024",
-      "backText": "Back Cover Text",
-      "backTextPlaceholder": "Copyright / message",
-      "freeTextHint": "Cover text is a free text element: double-click to edit, drag to move, or use the Tools panel to adjust font, color and size."
     },
     "coverLibrary": {
       "title": "Covers",
