@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line } from 'react-konva';
 import Konva from 'konva';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
-import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, isCoverPage } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, isCoverPage, DEFAULT_SHAPE_STYLE } from '../../types';
 import { BRAND_ACCENT } from '../../utils/coverDecoration';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -29,7 +29,7 @@ import { RotationIcon } from './canvas/RotationIcon';
 import { StickyNoteNode } from './canvas/StickyNoteNode';
 import { TextElementNode } from './canvas/TextElementNode';
 import { StickerNode } from './canvas/StickerNode';
-import { ShapeNode } from './canvas/ShapeNode';
+import { ShapeNode, ShapeGlyph } from './canvas/ShapeNode';
 import { CanvasPhotoRenderer, DragPreviewPhoto } from './canvas/CanvasPhotoRenderer';
 import { useCanvasCentering } from './canvas/useCanvasCentering';
 import { useCanvasWheel } from './canvas/useCanvasWheel';
@@ -182,10 +182,10 @@ export function Canvas() {
   const addBrushStroke = useEditorStore((s) => s.addBrushStroke);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
   const updateStickyNote = useEditorStore((s) => s.updateStickyNote);
-  // 画笔/橡皮擦工具模式下，所有页面内容元素禁用交互（listening=false），
+  // 画笔/橡皮擦/形状工具模式下，所有页面内容元素禁用交互（listening=false），
   // 让点击事件穿透到 Stage，由 Stage 的 onMouseDown 统一处理绘制。
   // 笔迹在橡皮擦模式下单独保持 listening=true 以支持点击擦除。
-  const isToolMode = activeTool === 'brush' || activeTool === 'eraser';
+  const isToolMode = activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'shape';
   const removeStickyNote = useEditorStore((s) => s.removeStickyNote);
   const updateTextElement = useEditorStore((s) => s.updateTextElement);
   const removeTextElement = useEditorStore((s) => s.removeTextElement);
@@ -209,6 +209,20 @@ export function Canvas() {
   const [activeStrokePts, setActiveStrokePts] = useState<number[]>([]);
   // 用于便利贴和文字拖拽
   const [, setDraggingElementId] = useState<string | null>(null);
+
+  /* ── 形状绘制状态（PPT 式：选择形状后按住拖拽绘制） ── */
+  const addShapeElement = useEditorStore((s) => s.addShapeElement);
+  const pendingShapeType = useEditorStore((s) => s.pendingShapeType);
+  // 绘制起点（mm）与实时预览矩形（mm）
+  const shapeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [shapePreview, setShapePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  // 最新预览几何的 ref（供 onMouseUp 同步读取，避免依赖 state 异步更新）
+  const shapePreviewRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  // 当前指针位置（mm），用于直线/箭头按拖拽方向计算旋转角
+  const shapeEndRef = useRef<{ x: number; y: number } | null>(null);
+  // 渲染用的 state 镜像（react-hooks 规则禁止在 render 中读取 ref.current）
+  const [shapeStartState, setShapeStartState] = useState<{ x: number; y: number } | null>(null);
+  const [shapeEndState, setShapeEndState] = useState<{ x: number; y: number } | null>(null);
 
   /* ── 文字选中&编辑状态 ── */
   // selectedTextId / selectedStickyId 提升到 editorStore，便于 BottomNav 等全局快捷键访问
@@ -1683,7 +1697,9 @@ export function Canvas() {
         style={{
           cursor: activeTool === 'brush' || activeTool === 'eraser'
             ? 'none'
-            : undefined,
+            : activeTool === 'shape'
+              ? 'crosshair'
+              : undefined,
         }}
       >
       {/* 拖拽提示：仅在页面外时显示，顶部居中 */}
@@ -1895,6 +1911,24 @@ export function Canvas() {
               return;
             }
 
+            /* ── 形状绘制（PPT 式：按下确定起点） ── */
+            if (activeTool === 'shape' && pendingShapeType && e.evt.button === 0) {
+              const pos = stage.getPointerPosition()!;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
+              shapeStartRef.current = { x: lx, y: ly };
+              shapeEndRef.current = { x: lx, y: ly };
+              setShapeStartState({ x: lx, y: ly });
+              setShapeEndState({ x: lx, y: ly });
+              setShapePreview({ x: lx, y: ly, width: 0, height: 0 });
+              setSelectedTextId(null);
+              setSelectedStickyId(null);
+              setSelectedStickerId(null);
+              setSelectedShapeId(null);
+              clearMultiSelect();
+              return;
+            }
+
             // 每次按下鼠标时，清理旧的多选缩放预览状态，防止 Group 坐标与 slot-box 不一致
             if (!isEditing) {
               marqueeGroup.resetInteraction();
@@ -1936,6 +1970,25 @@ export function Canvas() {
               return;
             }
 
+            /* ── 形状绘制（拖拽实时预览） ── */
+            if (shapeStartRef.current && activeTool === 'shape') {
+              const pos = stage.getPointerPosition()!;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
+              const start = shapeStartRef.current;
+              shapeEndRef.current = { x: lx, y: ly };
+              setShapeEndState({ x: lx, y: ly });
+              const preview = {
+                x: Math.min(start.x, lx),
+                y: Math.min(start.y, ly),
+                width: Math.abs(lx - start.x),
+                height: Math.abs(ly - start.y),
+              };
+              shapePreviewRef.current = preview;
+              setShapePreview(preview);
+              return;
+            }
+
             // 框选 / 组合缩放 / 组合移动预览（hook 内部消费事件）
             if (marqueeGroup.handleMove()) return;
             multiElementGroup.handleMove();
@@ -1961,6 +2014,56 @@ export function Canvas() {
                 addBrushStroke(currentPageIndex, { ...stroke, zIndex: 0 });
               }
               brushPointsRef.current = [];
+              return;
+            }
+
+            /* ── 形状完成绘制（提交新形状） ── */
+            if (shapeStartRef.current && activeTool === 'shape') {
+              const start = shapeStartRef.current;
+              shapeStartRef.current = null;
+              const pv = shapePreviewRef.current;
+              shapePreviewRef.current = null;
+              setShapePreview(null);
+              setShapeStartState(null);
+              setShapeEndState(null);
+              const width = pv ? pv.width : 0;
+              const height = pv ? pv.height : 0;
+              const type = pendingShapeType;
+              const isLineLike = type === 'line' || type === 'arrow';
+              if (type && ((width >= 2 && height >= 2) || (isLineLike && (width >= 2 || height >= 2)))) {
+                let x = pv ? pv.x + pv.width / 2 : start.x;
+                let y = pv ? pv.y + pv.height / 2 : start.y;
+                let w = Math.max(width, 2);
+                let h = Math.max(height, 2);
+                let rotation = 0;
+                // 直线/箭头：宽度为线段长度，高度最小，旋转角由拖拽方向决定
+                if (isLineLike) {
+                  const end = shapeEndRef.current ?? start;
+                  const dx = end.x - start.x;
+                  const dy = end.y - start.y;
+                  const len = Math.sqrt(dx * dx + dy * dy);
+                  if (len < 2) { shapeEndRef.current = null; return; }
+                  w = len;
+                  h = 2;
+                  x = start.x + dx / 2;
+                  y = start.y + dy / 2;
+                  rotation = Math.atan2(dy, dx) * 180 / Math.PI;
+                }
+                shapeEndRef.current = null;
+                const shape: ShapeElement = {
+                  id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  x, y, width: w, height: h, type,
+                  fill: DEFAULT_SHAPE_STYLE.fill,
+                  stroke: DEFAULT_SHAPE_STYLE.stroke,
+                  strokeWidth: DEFAULT_SHAPE_STYLE.strokeWidth,
+                  opacity: DEFAULT_SHAPE_STYLE.opacity,
+                  rotation, zIndex: 0,
+                };
+                addShapeElement(currentPageIndex, shape);
+                setSelectedShapeId(shape.id);
+              } else {
+                shapeEndRef.current = null;
+              }
               return;
             }
 
@@ -2111,6 +2214,65 @@ export function Canvas() {
                     globalCompositeOperation={bs.blendMode}
                     listening={false}
                   />
+                );
+              })()}
+
+              {/* ── 形状实时预览（PPT 式拖拽绘制） ── */}
+              {activeTool === 'shape' && shapePreview && pendingShapeType && (() => {
+                const pv = shapePreview;
+                const isLineLike = pendingShapeType === 'line' || pendingShapeType === 'arrow';
+                // 直线/箭头预览：按拖拽方向旋转；宽度为线段长度，高度取最小
+                let pwx = pv.width * MM_TO_PX;
+                let pwy = pv.height * MM_TO_PX;
+                let rotation = 0;
+                if (isLineLike) {
+                  const start = shapeStartState;
+                  const end = shapeEndState;
+                  if (start && end) {
+                    const dx = end.x - start.x;
+                    const dy = end.y - start.y;
+                    pwx = Math.max(Math.sqrt(dx * dx + dy * dy) * MM_TO_PX, 1);
+                    pwy = 2 * MM_TO_PX;
+                    rotation = Math.atan2(dy, dx) * 180 / Math.PI;
+                  }
+                }
+                // 直线/箭头组中心取拖拽中点，其余形状取包围盒中心
+                const startPt = shapeStartState;
+                const endPt = shapeEndState;
+                const gx = isLineLike && startPt && endPt
+                  ? (startPt.x + endPt.x) / 2
+                  : pv.x + pv.width / 2;
+                const gy = isLineLike && startPt && endPt
+                  ? (startPt.y + endPt.y) / 2
+                  : pv.y + pv.height / 2;
+                const previewShape: ShapeElement = {
+                  id: '__shape_preview__',
+                  x: pv.x + pv.width / 2,
+                  y: pv.y + pv.height / 2,
+                  width: pv.width,
+                  height: pv.height,
+                  type: pendingShapeType,
+                  fill: DEFAULT_SHAPE_STYLE.fill,
+                  stroke: DEFAULT_SHAPE_STYLE.stroke,
+                  strokeWidth: DEFAULT_SHAPE_STYLE.strokeWidth,
+                  opacity: DEFAULT_SHAPE_STYLE.opacity,
+                  rotation: 0,
+                  zIndex: 0,
+                };
+                return (
+                  <Group
+                    x={gx * MM_TO_PX}
+                    y={gy * MM_TO_PX}
+                    rotation={rotation}
+                    listening={false}
+                  >
+                    <ShapeGlyph
+                      shape={previewShape}
+                      pw={Math.max(pwx, 1)}
+                      ph={Math.max(pwy, 1)}
+                      canvasZoom={canvasZoom}
+                    />
+                  </Group>
                 );
               })()}
 

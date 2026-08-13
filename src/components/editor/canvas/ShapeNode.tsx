@@ -18,7 +18,7 @@ import { useUIStore } from '../../../store';
 import type { ShapeElement } from '../../../types';
 
 /** 根据形状类型返回 Konva 绘制节点 */
-function ShapeGlyph({
+export function ShapeGlyph({
   shape, pw, ph, canvasZoom,
 }: {
   shape: ShapeElement;
