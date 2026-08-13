@@ -2,56 +2,39 @@ import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore } from '../../store';
 import { COVER_TEMPLATES, BACK_COVER_TEMPLATES } from '../../types/cover-templates';
 import { isCoverPage, isBackCoverPage } from '../../types';
+import type { Template } from '../../types';
+import { CoverPreview } from '../common/CoverPreview';
 
 /**
  * CoverLibraryPanel —— 编辑器左侧「封面」面板
  * ─────────────────────────────────────────
- * 展示所有封面 / 封底模板（类似布局模板），点击即可应用/切换：
- *   - 当前页已是封面：点封面模板 → switchCoverTemplate（保留照片与文字）
- *   - 当前页已是封底：点封底模板 → switchBackCoverTemplate（保留文案）
- *   - 当前页是普通页：点封面模板 → 插入新封面页（addCoverPage）
- *                      点封底模板 → 插入新封底页（addBackCoverPage）
- * 封面/封底模板的槽位使用百分比坐标，自动适应页面尺寸。
+ * 展示所有封面 / 封底模板（含书脊 + 真实图片占位 + 预设文字/形状的真实预览），点击即应用：
+ *   - 当前页是封面：切换封面模板（保留已填照片）
+ *   - 当前页是封底：切换封底模板
+ *   - 当前页是普通页：插入封面页
+ * 应用后所有元素（照片/文字/形状/书脊）皆为独立可编辑元素，可用工具栏继续自由编辑。
  */
 export function CoverLibraryPanel() {
   const { t } = useTranslation();
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const pages = useEditorStore((s) => s.pages);
   const addToast = useUIStore((s) => s.addToast);
-  const addCoverPage = useEditorStore((s) => s.addCoverPage);
-  const addBackCoverPage = useEditorStore((s) => s.addBackCoverPage);
-  const switchCoverTemplate = useEditorStore((s) => s.switchCoverTemplate);
-  const switchBackCoverTemplate = useEditorStore((s) => s.switchBackCoverTemplate);
+  const applyCoverTemplate = useEditorStore((s) => s.applyCoverTemplate);
+  const applyBackCoverTemplate = useEditorStore((s) => s.applyBackCoverTemplate);
 
   const currentPage = pages[currentPageIndex];
   const currentIsCover = currentPage ? isCoverPage(currentPage) : false;
   const currentIsBackCover = currentPage ? isBackCoverPage(currentPage) : false;
 
   const handleSelect = (templateId: string) => {
-    const isCover = templateId.startsWith('cover-');
-    const isBack = templateId.startsWith('backcover-');
-
-    if (isCover) {
-      if (currentIsCover) {
-        // 当前页已是封面 → 切换版式（保留主图与文字）
-        switchCoverTemplate(currentPageIndex, templateId);
-        addToast({ type: 'success', message: t('editor.coverLibrary.switched') });
-      } else {
-        // 普通页 → 插入新封面页
-        addCoverPage({ templateId });
-        addToast({ type: 'success', message: t('editor.coverLibrary.coverAdded') });
-      }
+    if (templateId.startsWith('cover-')) {
+      applyCoverTemplate(templateId);
+      addToast({ type: 'success', message: currentIsCover ? t('editor.coverLibrary.switched') : t('editor.coverLibrary.coverAdded') });
       return;
     }
-    if (isBack) {
-      if (currentIsBackCover) {
-        switchBackCoverTemplate(currentPageIndex, templateId);
-        addToast({ type: 'success', message: t('editor.coverLibrary.switched') });
-      } else {
-        addBackCoverPage({ templateId });
-        addToast({ type: 'success', message: t('editor.coverLibrary.backCoverAdded') });
-      }
-      return;
+    if (templateId.startsWith('backcover-')) {
+      applyBackCoverTemplate(templateId);
+      addToast({ type: 'success', message: currentIsBackCover ? t('editor.coverLibrary.switched') : t('editor.coverLibrary.backCoverAdded') });
     }
   };
 
@@ -59,16 +42,13 @@ export function CoverLibraryPanel() {
 
   return (
     <aside className="flex-1 bg-[var(--color-surface)] flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-[var(--color-border-light)] flex items-center justify-between">
         <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">
           {t('editor.coverLibrary.title')}
         </span>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto ps-scroll pl-4 pr-1 py-4 space-y-4">
-        {/* 当前页面类型提示 */}
         {currentPage && (
           <div className="text-[11px] leading-relaxed text-[var(--color-gray-500)] px-1">
             {currentIsCover || currentIsBackCover
@@ -77,14 +57,12 @@ export function CoverLibraryPanel() {
           </div>
         )}
 
-        {/* 封面模板 */}
         <Section label={t('editor.coverLibrary.coverSection')}>
           <div className="grid grid-cols-2 gap-2">
             {COVER_TEMPLATES.map((tmpl) => (
-              <TemplateCard
+              <CoverTemplateCard
                 key={tmpl.id}
-                name={tmpl.name}
-                slots={tmpl.slots}
+                template={tmpl}
                 active={isActive(tmpl.id)}
                 badge={t('editor.coverLibrary.coverBadge')}
                 onClick={() => handleSelect(tmpl.id)}
@@ -93,14 +71,12 @@ export function CoverLibraryPanel() {
           </div>
         </Section>
 
-        {/* 封底模板 */}
         <Section label={t('editor.coverLibrary.backCoverSection')}>
           <div className="grid grid-cols-2 gap-2">
             {BACK_COVER_TEMPLATES.map((tmpl) => (
-              <TemplateCard
+              <CoverTemplateCard
                 key={tmpl.id}
-                name={tmpl.name}
-                slots={tmpl.slots}
+                template={tmpl}
                 active={isActive(tmpl.id)}
                 badge={t('editor.coverLibrary.backCoverBadge')}
                 onClick={() => handleSelect(tmpl.id)}
@@ -126,11 +102,11 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function TemplateCard({
-  name, slots, active, badge, onClick,
+/** 封面模板卡片：正方形预览 + 名称 + 角标，点击应用 */
+function CoverTemplateCard({
+  template, active, badge, onClick,
 }: {
-  name: string;
-  slots: { id: string; x: number; y: number; width: number; height: number }[];
+  template: Template;
   active: boolean;
   badge: string;
   onClick: () => void;
@@ -146,29 +122,14 @@ function TemplateCard({
         }
       `}
     >
-      {/* 迷你版式预览 */}
-      <div className="w-full aspect-[3/4] rounded-[6px] relative overflow-hidden" style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-        {slots.map((s) => (
-          <div
-            key={s.id}
-            className="absolute rounded-[2px]"
-            style={{
-              left: `${s.x}%`, top: `${s.y}%`,
-              width: `${s.width}%`, height: `${s.height}%`,
-              backgroundColor: active ? 'var(--color-brand)' : 'var(--color-gray-400)',
-              opacity: 0.75,
-            }}
-          />
-        ))}
-      </div>
-      {/* 角标 */}
+      <CoverPreview template={template} active={active} />
       <span
         className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-[600] rounded-full
-                   bg-black/50 text-white backdrop-blur-sm"
+                   bg-black/55 text-white backdrop-blur-sm"
       >
         {badge}
       </span>
-      <span className="text-[11px] text-[var(--color-gray-700)] text-center leading-tight px-1">{name}</span>
+      <span className="text-[11px] text-[var(--color-gray-700)] text-center leading-tight px-1">{template.name}</span>
     </button>
   );
 }

@@ -598,7 +598,7 @@ export function GridView({ onBack }: GridViewProps) {
                 <div className="flex gap-2">
                   <button
                     className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
-                    onClick={() => { useEditorStore.getState().addCoverPage(); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
+                    onClick={() => { useEditorStore.getState().applyCoverTemplate('cover-1'); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
                   >
                     📕 {t('editor.gridView.addCover')}
                   </button>
@@ -610,7 +610,7 @@ export function GridView({ onBack }: GridViewProps) {
                   </button>
                   <button
                     className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
-                    onClick={() => { useEditorStore.getState().addBackCoverPage(); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
+                    onClick={() => { useEditorStore.getState().applyBackCoverTemplate('backcover-1'); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
                   >
                     📗 {t('editor.gridView.addBackCover')}
                   </button>

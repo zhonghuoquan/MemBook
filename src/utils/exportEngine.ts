@@ -45,7 +45,6 @@ import type { AlbumPage, Photo, PhotoPlacement, StickerElement, StickyNote, Page
 import { getSlotZIndex } from '../types';
 import { preloadStickerSrc } from '../hooks/useStickerSrc';
 import { ensurePhotoAnalyzed } from '../engine/content-aware';
-import { drawCoverDecoration } from './coverDecoration';
 import { logger } from './logger';
 // 静态导入 jsPDF：避免动态 import 在 Vite dev 环境下偶发 "Failed to fetch dynamically imported module" 错误
 import jsPDF from 'jspdf';
@@ -756,9 +755,6 @@ async function drawPage(
   for (const item of items) {
     item.draw();
   }
-
-  // ── 4.6 封面/封底装饰层（渲染层感知 pageKind：全幅蒙版 + 品牌装饰线） ──
-  drawCoverDecoration(ctx, page, canvasW, canvasH, mmToPx);
 
   ctx.restore();
 

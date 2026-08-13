@@ -1,40 +1,82 @@
-import type { AlbumPage, SlotLayout, AlbumTypeId } from '../../types';
+import type { AlbumPage, SlotLayout, PresetTextElement, PresetShapeElement, PageTextElement, ShapeElement } from '../../types';
 import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById } from '../../types';
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
-import { generateCoverPage, generateBackCoverPage, buildCoverPalette, regenerateCoverDesign, buildBackCoverTextElements, buildCoverTextElements } from '../../engine/cover-generator';
 import { findCoverTemplateById } from '../../types/cover-templates';
 import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
 
-/** 从已有封面页反推配色，供封底复用以保持首尾呼应 */
-function derivePaletteFromPage(coverPage: AlbumPage): ReturnType<typeof buildCoverPalette> {
-  const background = coverPage.background || '#FFFFFF';
-  const titleEl = coverPage.textElements?.find((el) => el.id.startsWith('cover-title-'));
-  const dark = /^#[0-9a-fA-F]{3,6}$/.test(background) ? luminanceOf(background) < 0.45 : false;
-  return {
-    background,
-    dark,
-    titleColor: titleEl?.color ?? (dark ? '#FFF8EC' : '#2B2A4A'),
-    bodyColor: titleEl?.color ? mixOpacity(titleEl.color) : (dark ? 'rgba(255,248,236,0.82)' : 'rgba(43,42,74,0.72)'),
-  };
+/**
+ * 将模板的预设文字元素（百分比坐标）转换为页面的 textElements（mm 坐标）。
+ * 占位符 {albumName}/{date} 在此处替换为实际值，用户可在画布上继续编辑。
+ */
+function presetTextToPageElements(
+  presets: PresetTextElement[] | undefined,
+  pageMm: { width: number; height: number },
+  albumName: string,
+  dateRange: string | undefined,
+): PageTextElement[] {
+  if (!presets || presets.length === 0) return [];
+  const scaleX = (v: number) => (v / 100) * pageMm.width;
+  const scaleY = (v: number) => (v / 100) * pageMm.height;
+  return presets.map((p) => {
+    let text = p.text;
+    if (p.placeholder === 'albumName') text = albumName || text;
+    else if (p.placeholder === 'date') text = dateRange || text;
+    return {
+      id: `cover-text-${p.id}-${Date.now().toString(36)}`,
+      x: scaleX(p.x), y: scaleY(p.y),
+      width: scaleX(p.width), height: scaleY(p.height),
+      text,
+      fontSize: p.fontSize,
+      fontFamily: p.fontFamily,
+      color: p.color,
+      align: p.align,
+      bold: p.bold,
+      italic: p.italic,
+      rotation: p.rotation,
+      zIndex: 100,
+    };
+  });
 }
 
-function luminanceOf(hex: string): number {
-  const h = hex.replace('#', '');
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
-  const n = parseInt(full, 16);
-  if (Number.isNaN(n)) return 1;
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+/**
+ * 将模板的预设形状元素（百分比坐标）转换为页面的 shapeElements（mm 坐标）。
+ * 坐标基于元素中心点（与现有 ShapeElement 一致）。
+ */
+function presetShapeToPageElements(
+  presets: PresetShapeElement[] | undefined,
+  pageMm: { width: number; height: number },
+): ShapeElement[] {
+  if (!presets || presets.length === 0) return [];
+  const scaleX = (v: number) => (v / 100) * pageMm.width;
+  const scaleY = (v: number) => (v / 100) * pageMm.height;
+  return presets.map((p) => ({
+    id: `cover-shape-${p.id}-${Date.now().toString(36)}`,
+    x: scaleX(p.x) + scaleX(p.width) / 2,  // 中心点
+    y: scaleY(p.y) + scaleY(p.height) / 2,
+    width: scaleX(p.width),
+    height: scaleY(p.height),
+    type: p.type,
+    fill: p.fill,
+    stroke: p.stroke,
+    strokeWidth: p.strokeWidth,
+    opacity: p.opacity,
+    rotation: p.rotation,
+    zIndex: 50,
+  }));
 }
 
-function mixOpacity(hex: string): string {
-  const n = parseInt(hex.replace('#', ''), 16);
-  if (Number.isNaN(n)) return hex;
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r},${g},${b},0.82)`;
+/** 从相册照片中提取日期年份区间（如 2023-2024） */
+function deriveDateRange(photos: { date?: string }[]): string | undefined {
+  const years = photos
+    .map((p) => (p.date ? new Date(p.date).getFullYear() : NaN))
+    .filter((y) => !Number.isNaN(y));
+  if (years.length === 0) return undefined;
+  const min = Math.min(...years);
+  const max = Math.max(...years);
+  return min === max ? String(min) : `${min}–${max}`;
 }
 
 /* ── 页面增删改查 slice ── */
@@ -302,28 +344,67 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
     pushSnapshot(get);
   },
 
-  /** 智能生成封面页并插入到首部（复用 cover-generator 本地规则引擎） */
-  addCoverPage: (options) => {
+  /**
+   * 应用封面模板：插入封面页或切换已有封面的模板。
+   * - 当前无封面：创建新封面页插入首部，照片从相册池按序填入槽位
+   * - 当前已有封面：切换模板，保留已填照片（按序迁移到新槽位），重新落位预设文字/形状
+   */
+  applyCoverTemplate: (templateId) => {
+    const template = findCoverTemplateById(templateId);
+    if (!template) return;
     const size = get().albumSize;
     const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
     const albumName = get().projectName || '我的相册';
-    const albumType = get().albumType as AlbumTypeId | undefined;
     const photos = usePhotoStore.getState().photos;
-    const result = generateCoverPage({ photos, albumName, albumType, ...options }, new Map(), pageMm);
-    const { page } = result;
+    const dateRange = deriveDateRange(photos);
+
+    // 预设元素落位（百分比→mm）
+    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange);
+    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm);
+
+    // 照片槽位 placements：从相册照片按序填入
+    const photoIds = photos.slice(0, template.slots.length).map((p) => p.id);
+    const placements = template.slots.map((slot, i) => ({
+      slotId: slot.id,
+      photoId: photoIds[i] ?? null,
+    }));
+
+    const newPage: AlbumPage = {
+      id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      templateId,
+      pageKind: 'cover',
+      placements,
+      background: template.presetBackground ?? '#FFFFFF',
+      slotCornerRadius: 4,
+      textElements,
+      shapeElements,
+    };
+
     set((s) => {
       const hasCover = s.pages.some((p) => p.pageKind === 'cover');
       const newPages = [...s.pages];
+      let coverIdx: number;
       if (hasCover) {
-        // 已有封面 → 用新生成页面替换旧封面（保留其位置，通常为首位）
-        const idx = newPages.findIndex((p) => p.pageKind === 'cover');
-        newPages[idx] = page;
+        // 切换封面模板：保留当前已填照片（按序迁移到新槽位）
+        const oldCover = newPages.find((p) => p.pageKind === 'cover')!;
+        const oldPhotoIds = oldCover.placements
+          .filter((pl) => pl.photoId)
+          .map((pl) => pl.photoId!) as string[];
+        // 用旧照片填新槽位（不足则留空）
+        newPage.placements = template.slots.map((slot, i) => ({
+          slotId: slot.id,
+          photoId: oldPhotoIds[i] ?? null,
+        }));
+        coverIdx = newPages.findIndex((p) => p.pageKind === 'cover');
+        newPages[coverIdx] = newPage;
       } else {
-        newPages.unshift(page);
+        newPages.unshift(newPage);
+        coverIdx = 0;
       }
-      return { pages: newPages, currentPageIndex: 0 };
+      return { pages: newPages, currentPageIndex: coverIdx };
     });
-    // 记录历史快照并应用边距约束（与 addPage 对齐）
+
+    // 应用边距约束
     const idx = get().pages.findIndex((p) => p.pageKind === 'cover');
     const marginResult = pageMarginService.calcMarginForPage(idx, get().pages);
     if (marginResult) {
@@ -337,159 +418,58 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
   },
 
   /**
-   * 一键换设计：基于当前封面重新智能生成下一款设计（切换版式/主图/配色），保留用户文案。
-   * step>0 向后切换，step<0 向前。
+   * 应用封底模板：插入封底页或切换已有封底的模板。
+   * 逻辑同 applyCoverTemplate，pageKind='backCover'，插入到尾部。
    */
-  regenerateCoverPage: (step = 1) => {
+  applyBackCoverTemplate: (templateId) => {
+    const template = findCoverTemplateById(templateId);
+    if (!template) return;
     const size = get().albumSize;
     const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
     const albumName = get().projectName || '我的相册';
-    const albumType = get().albumType as AlbumTypeId | undefined;
     const photos = usePhotoStore.getState().photos;
-    const coverIdx = get().pages.findIndex((p) => p.pageKind === 'cover');
-    if (coverIdx < 0) return;
-    const current = get().pages[coverIdx];
-    const result = regenerateCoverDesign(
-      current,
-      { photos, albumName, albumType },
-      new Map(),
-      pageMm,
-      step,
-    );
-    set((s) => {
-      const np = [...s.pages];
-      np[coverIdx] = result.page;
-      return { pages: np };
-    });
-    pushSnapshot(get);
-  },
+    const dateRange = deriveDateRange(photos);
 
-  /** 更新封面/封底页的结构化元信息（标题/副标题/作者/日期/封底文案），并同步文字层 */
-  updateCoverFields: (pageIndex, patch) => {
-    const size = get().albumSize;
-    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
-    set((s) => {
-      const np = [...s.pages];
-      const page = np[pageIndex];
-      if (!page || !page.pageKind || page.pageKind === 'content') return s;
-      const cf = { ...(page.coverFields ?? {}), ...patch } as NonNullable<AlbumPage['coverFields']>;
-      np[pageIndex] = { ...page, coverFields: cf };
-      // 封面：重建文字层（标题/副标题/作者/日期），修复"改了没反应"的体验 bug
-      if (page.pageKind === 'cover') {
-        const palette = page.background
-          ? { background: page.background, dark: luminanceOf(page.background) < 0.45, titleColor: '#FFF8EC', bodyColor: 'rgba(255,248,236,0.82)' }
-          : { background: '#FFFFFF', dark: false, titleColor: '#2B2A4A', bodyColor: 'rgba(43,42,74,0.72)' };
-        const template = findCoverTemplateById(page.templateId);
-        if (template) {
-          const els = buildCoverTextElements(
-            template,
-            { title: cf.title ?? '', date: cf.dateText, subtitle: cf.subtitle, author: cf.author },
-            palette,
-          ).map((el) => ({
-            ...el,
-            x: (el.x / 100) * pageMm.width,
-            y: (el.y / 100) * pageMm.height,
-            width: (el.width / 100) * pageMm.width,
-            height: (el.height / 100) * pageMm.height,
-          }));
-          np[pageIndex] = { ...np[pageIndex], textElements: els };
-        }
-      }
-      // 封底：直接更新落款文字层
-      if (page.pageKind === 'backCover') {
-        const palette = page.background
-          ? { background: page.background, dark: luminanceOf(page.background) < 0.45, titleColor: '#FFF8EC', bodyColor: 'rgba(255,248,236,0.82)' }
-          : { background: '#FFFFFF', dark: false, titleColor: '#2B2A4A', bodyColor: 'rgba(43,42,74,0.72)' };
-        const date = cf.dateText;
-        const els = buildBackCoverTextElements({ backText: cf.backText, date, author: cf.author }, palette, pageMm);
-        np[pageIndex] = { ...np[pageIndex], textElements: els };
-      }
-      return { pages: np };
-    });
-    pushSnapshot(get);
-  },
+    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange);
+    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm);
 
-  /** 切换封面版式：在当前封面上应用另一款封面模板，保留主图与文案 */
-  switchCoverTemplate: (pageIndex, templateId) => {
-    const size = get().albumSize;
-    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
-    const albumName = get().projectName || '我的相册';
-    const albumType = get().albumType as AlbumTypeId | undefined;
-    const photos = usePhotoStore.getState().photos;
-    set((s) => {
-      const np = [...s.pages];
-      const page = np[pageIndex];
-      if (!page || page.pageKind !== 'cover') return s;
-      // 保留当前主图 photoId 与用户文案
-      const mainPhotoId = page.placements.find((pl) => pl.slotId === 'main')?.photoId ?? undefined;
-      const cf = page.coverFields ?? {};
-      const result = generateCoverPage(
-        { photos, albumName, albumType, templateId, coverPhotoId: mainPhotoId },
-        new Map(),
-        pageMm,
-      );
-      const newPage = result.page;
-      // 覆盖为新模板并保留用户文案
-      const newCf = { ...(newPage.coverFields ?? {}), ...cf };
-      newPage.coverFields = newCf;
-      np[pageIndex] = newPage;
-      return { pages: np };
-    });
-    pushSnapshot(get);
-  },
+    // 封底通常无照片槽位或单小图
+    const photoIds = photos.slice(0, template.slots.length).map((p) => p.id);
+    const placements = template.slots.map((slot, i) => ({
+      slotId: slot.id,
+      photoId: photoIds[i] ?? null,
+    }));
 
-  /** 智能生成封底页并插入到尾部（复用封面配色，保持首尾呼应） */
-  addBackCoverPage: (options) => {
-    const size = get().albumSize;
-    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
-    const albumName = get().projectName || '我的相册';
-    const albumType = get().albumType as AlbumTypeId | undefined;
-    const photos = usePhotoStore.getState().photos;
-    // 复用现有封面配色（若无封面则用品牌紫系默认配色）
-    const coverPage = get().pages.find((p) => p.pageKind === 'cover');
-    const palette = coverPage?.background
-      ? derivePaletteFromPage(coverPage)
-      : buildCoverPalette([108, 99, 255]); // 品牌紫 #6C63FF 兜底
-    const backPage = generateBackCoverPage({ photos, albumName, albumType, templateId: options?.templateId }, palette, pageMm);
+    const newPage: AlbumPage = {
+      id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      templateId,
+      pageKind: 'backCover',
+      placements,
+      background: template.presetBackground ?? '#FFFFFF',
+      slotCornerRadius: 4,
+      textElements,
+      shapeElements,
+    };
+
     set((s) => {
       const hasBack = s.pages.some((p) => p.pageKind === 'backCover');
       const newPages = [...s.pages];
       if (hasBack) {
+        // 切换封底模板
+        const oldBack = newPages.find((p) => p.pageKind === 'backCover')!;
+        const oldPhotoIds = oldBack.placements
+          .filter((pl) => pl.photoId)
+          .map((pl) => pl.photoId!) as string[];
+        newPage.placements = template.slots.map((slot, i) => ({
+          slotId: slot.id,
+          photoId: oldPhotoIds[i] ?? null,
+        }));
         const idx = newPages.findIndex((p) => p.pageKind === 'backCover');
-        newPages[idx] = backPage;
+        newPages[idx] = newPage;
       } else {
-        newPages.push(backPage);
+        newPages.push(newPage);
       }
       return { pages: newPages };
-    });
-    pushSnapshot(get);
-  },
-
-  /** 切换封底版式：在当前封底上应用另一款封底模板，保留文案 */
-  switchBackCoverTemplate: (pageIndex, templateId) => {
-    const size = get().albumSize;
-    const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
-    const albumName = get().projectName || '我的相册';
-    const albumType = get().albumType as AlbumTypeId | undefined;
-    const photos = usePhotoStore.getState().photos;
-    set((s) => {
-      const np = [...s.pages];
-      const page = np[pageIndex];
-      if (!page || page.pageKind !== 'backCover') return s;
-      // 保留当前封底文案
-      const cf = page.coverFields ?? {};
-      // 复用封面配色（若当前封底有背景则用其本身）
-      const palette = page.background
-        ? derivePaletteFromPage(page)
-        : buildCoverPalette([108, 99, 255]);
-      const newPage = generateBackCoverPage(
-        { photos, albumName, albumType, templateId },
-        palette,
-        pageMm,
-      );
-      newPage.coverFields = { ...(newPage.coverFields ?? {}), ...cf };
-      np[pageIndex] = newPage;
-      return { pages: np };
     });
     pushSnapshot(get);
   },

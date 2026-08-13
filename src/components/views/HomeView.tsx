@@ -24,6 +24,7 @@ import {
   type ExportProgress, type ExportResult, type ImportProgress, type ImportResult, type MergeMode,
 } from '../../utils/dataMigration';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, findTemplateById } from '../../types';
+import { findCoverTemplateById } from '../../types/cover-templates';
 import { useTheme } from '../../contexts/ThemeContext';
 import { APP_VERSION } from '../../version';
 import type { AlbumSize, AlbumPage, AlbumProject, PageMargin } from '../../types';
@@ -327,7 +328,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
       openLicenseDialog(t('home.create.projectLimit'));
       return;
     }
-    const template = findTemplateById(templateId);
+    const template = findCoverTemplateById(templateId);
     if (!template) return;
 
     photoService.cleanupProjectResources();
@@ -336,16 +337,7 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     const size: AlbumSize = { id: 'standard', name: '标准', width: 210, height: 280, desc: '标准' };
     const margin: PageMargin = { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT };
 
-    // 封面页：应用所选封面模板，标记 pageKind（由 templateId 前缀自动判定）
-    const page: AlbumPage = {
-      id: `page-${Date.now()}`,
-      templateId,
-      placements: template.slots.map((slot) => ({ slotId: slot.id, photoId: null })),
-      background: '#FFFFFF',
-      slotCornerRadius: DEFAULT_SLOT_CORNER_RADIUS,
-    };
-
-    setPages([page]);
+    // 先设置相册尺寸/名称/边距/间距，applyCoverTemplate 依赖这些状态构造预设元素
     setAlbumSize(size);
     useEditorStore.getState().setProjectName(name);
     useEditorStore.getState().setPageMargin({
@@ -353,9 +345,18 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     });
     useEditorStore.getState().setSlotGap(margin.gap);
     useEditorStore.getState().setDefaultSlotCornerRadius(DEFAULT_SLOT_CORNER_RADIUS);
-
-    const projectId = await createAndSaveProject(name, size, [page], margin, undefined, undefined);
     setPhotos([]);
+    setPages([]);
+
+    // 应用封面/封底模板：构造完整封面页（书脊 + 预设文字/形状/背景 + 照片槽位）
+    if (templateId.startsWith('cover-')) {
+      useEditorStore.getState().applyCoverTemplate(templateId);
+    } else {
+      useEditorStore.getState().applyBackCoverTemplate(templateId);
+    }
+
+    const pagesToSave = useEditorStore.getState().pages;
+    const projectId = await createAndSaveProject(name, size, pagesToSave, margin, undefined, undefined);
     await savePhotos([], projectId);
     setStorageMode(null);
     clearSmartLayoutState();

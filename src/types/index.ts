@@ -149,24 +149,6 @@ export const BACK_COVER_TEMPLATE_PREFIX = 'backcover-';
 /** 页面类型：content=普通内容页 / cover=封面 / backCover=封底 */
 export type PageKind = 'content' | 'cover' | 'backCover';
 
-/**
- * 封面/封底专属字段（仅当 pageKind 为 cover / backCover 时使用）。
- * 封面视觉仍复用现有 textElements 文字元素体系渲染，这里只保存"结构化的封面元信息"，
- * 供快捷面板编辑、智能重排、以及导出预览时直接取用。
- */
-export type CoverFields = {
-  /** 封面主标题（如"我们的旅行 2024"），缺省时用相册名 */
-  title?: string;
-  /** 副标题 / 一句话引言（情绪锚点） */
-  subtitle?: string;
-  /** 作者 / 纪念人 */
-  author?: string;
-  /** 日期 / 年份区间（如 2023-2024） */
-  dateText?: string;
-  /** 封底专用：居中纪念语 / 版权信息 */
-  backText?: string;
-};
-
 /** 判断页面是否为封面页 */
 export function isCoverPage(page: { templateId: string }): boolean {
   return page.templateId.startsWith(COVER_TEMPLATE_PREFIX);
@@ -220,6 +202,46 @@ export type Template = {
   tags?: string[];
   /** 9+ 图模板的子分类，用于筛选器细分：grid=网格阵列, collage=拼贴叠加, magazine=杂志集锦 */
   subCategory?: 'grid' | 'collage' | 'magazine';
+  /** 预设文字元素（百分比坐标，应用时换算为 mm；主要用于封面/封底模板） */
+  presetTextElements?: PresetTextElement[];
+  /** 预设形状元素（百分比坐标，应用时换算为 mm；主要用于封面/封底模板） */
+  presetShapeElements?: PresetShapeElement[];
+  /** 预设背景色（主要用于封面/封底模板） */
+  presetBackground?: string;
+};
+
+/**
+ * 预设文字元素：与 slots 同为百分比坐标（0-100），应用模板时按页面 mm 尺寸换算。
+ * 用于封面/封底模板内置的标题、日期、引言等，让模板开箱即用，用户只需改文字。
+ */
+export type PresetTextElement = {
+  id: string;
+  x: number; y: number; width: number; height: number; // 百分比 0-100
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  align: 'left' | 'center' | 'right';
+  bold: boolean;
+  italic: boolean;
+  rotation: number;
+  /** 占位符：应用时自动替换为相册名/日期，用户可再编辑 */
+  placeholder?: 'albumName' | 'date' | 'none';
+};
+
+/**
+ * 预设形状元素：百分比坐标，用于封面/封底模板内置的装饰线、色块、几何形状。
+ * 复用现有 ShapeType，与工具栏形状统一，应用后用户可用形状工具继续编辑。
+ */
+export type PresetShapeElement = {
+  id: string;
+  x: number; y: number; width: number; height: number; // 百分比 0-100
+  type: ShapeType;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  opacity: number;
+  rotation: number;
 };
 
 /* ── 照片 ── */
@@ -368,8 +390,6 @@ export type AlbumPage = {
   hiddenTemplateSlotIds?: string[];
   /** 页面类型：content=普通内容页 / cover=封面 / backCover=封底。缺省 = 'content'，兼容旧数据 */
   pageKind?: PageKind;
-  /** 封面/封底结构化元信息（仅 pageKind 为 cover/backCover 时使用） */
-  coverFields?: CoverFields;
 };
 
 /** 读取槽位 zIndex：未配置时返回 0（与装饰元素共享同一命名空间） */

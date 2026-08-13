@@ -63,18 +63,10 @@ export interface PageSlice {
   resetPageLayout: (pageIndex: number) => void;
   /** 在当前页添加一个照片槽位（默认居中，30%×30%，百分比坐标） */
   addPhotoSlot: () => void;
-  /** 智能生成封面页并插入到首部（复用 cover-generator 本地规则引擎） */
-  addCoverPage: (options?: { templateId?: string; coverPhotoId?: string }) => void;
-  /** 智能生成封底页并插入到尾部（复用封面配色） */
-  addBackCoverPage: (options?: { templateId?: string }) => void;
-  /** 一键换设计：基于当前封面重新智能生成下一款设计（切换版式/主图/配色），保留用户文案 */
-  regenerateCoverPage: (step?: number) => void;
-  /** 更新封面/封底页的结构化元信息（标题/副标题/作者/日期/封底文案），并同步文字层 */
-  updateCoverFields: (pageIndex: number, patch: Partial<NonNullable<AlbumPage['coverFields']>>) => void;
-  /** 切换封面版式：在当前封面上应用另一款封面模板，保留主图与文案 */
-  switchCoverTemplate: (pageIndex: number, templateId: string) => void;
-  /** 切换封底版式：在当前封底上应用另一款封底模板，保留文案 */
-  switchBackCoverTemplate: (pageIndex: number, templateId: string) => void;
+  /** 应用封面模板：插入封面页或切换已有封面的模板（保留已填照片） */
+  applyCoverTemplate: (templateId: string) => void;
+  /** 应用封底模板：插入封底页或切换已有封底的模板 */
+  applyBackCoverTemplate: (templateId: string) => void;
 }
 
 /* ── 槽位/照片编辑 ──

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { COVER_TEMPLATES, BACK_COVER_TEMPLATES } from '../../types/cover-templates';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
+import type { Template } from '../../types';
+import { CoverPreview } from '../common/CoverPreview';
 
 interface CoverGalleryProps {
   /** 用封面模板新建相册并进入编辑器（templateId 为封面/封底模板 id） */
@@ -11,7 +13,7 @@ interface CoverGalleryProps {
 /**
  * CoverGallery —— 主页「封面」设计库
  * ─────────────────────────────────────────
- * 预设多款好看实用的封面/封底模板（类似布局模板，槽位百分比坐标自动适应页面尺寸）。
+ * 预设多款 Mixbook 风格封面/封底模板（含书脊 + 真实图片占位 + 预设文字/形状）。
  * 用户点选某款封面 → 以该封面新建相册进入编辑器，之后只改照片、改文字即可完成封面制作。
  */
 export function CoverGallery({ onCreateFromCover }: CoverGalleryProps) {
@@ -37,8 +39,7 @@ export function CoverGallery({ onCreateFromCover }: CoverGalleryProps) {
             {COVER_TEMPLATES.map((tmpl) => (
               <CoverCard
                 key={tmpl.id}
-                name={tmpl.name}
-                slots={tmpl.slots}
+                template={tmpl}
                 badge={t('home.coverGallery.coverBadge')}
                 useLabel={t('home.coverGallery.use')}
                 onClick={() => onCreateFromCover(tmpl.id)}
@@ -54,8 +55,7 @@ export function CoverGallery({ onCreateFromCover }: CoverGalleryProps) {
             {BACK_COVER_TEMPLATES.map((tmpl) => (
               <CoverCard
                 key={tmpl.id}
-                name={tmpl.name}
-                slots={tmpl.slots}
+                template={tmpl}
                 badge={t('home.coverGallery.backCoverBadge')}
                 useLabel={t('home.coverGallery.use')}
                 onClick={() => onCreateFromCover(tmpl.id)}
@@ -73,10 +73,9 @@ export function CoverGallery({ onCreateFromCover }: CoverGalleryProps) {
 }
 
 function CoverCard({
-  name, slots, badge, useLabel, onClick,
+  template, badge, useLabel, onClick,
 }: {
-  name: string;
-  slots: { id: string; x: number; y: number; width: number; height: number }[];
+  template: Template;
   badge: string;
   useLabel: string;
   onClick: () => void;
@@ -91,28 +90,17 @@ function CoverCard({
                  bg-white cursor-pointer transition-all duration-150 hover:-translate-y-0.5
                  border-[var(--color-border)] hover:border-[var(--color-primary-300)] hover:shadow-[var(--shadow-soft)]"
     >
-      <div className="w-full aspect-[3/4] rounded-[8px] relative overflow-hidden" style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-        {slots.map((s) => (
-          <div
-            key={s.id}
-            className="absolute rounded-[3px]"
-            style={{
-              left: `${s.x}%`, top: `${s.y}%`,
-              width: `${s.width}%`, height: `${s.height}%`,
-              backgroundColor: hovered ? 'var(--color-brand)' : 'var(--color-gray-400)',
-              opacity: 0.75,
-            }}
-          />
-        ))}
+      <div className="relative">
+        <CoverPreview template={template} rounded={8} />
         {/* 悬浮操作 */}
-        <div className={`absolute inset-0 flex items-center justify-center bg-black/30 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`absolute inset-0 flex items-center justify-center bg-black/30 transition-opacity rounded-[8px] ${hovered ? 'opacity-100' : 'opacity-0'}`}>
           <span className="px-3 py-1.5 text-[11px] font-[600] text-white bg-[var(--color-brand)] rounded-full shadow">
             {useLabel}
           </span>
         </div>
       </div>
-      <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-[600] rounded-full bg-black/50 text-white">{badge}</span>
-      <span className="text-[11px] text-[var(--color-gray-700)] text-center leading-tight px-1">{name}</span>
+      <span className="absolute top-3 left-3 px-1.5 py-0.5 text-[9px] font-[600] rounded-full bg-black/55 text-white backdrop-blur-sm">{badge}</span>
+      <span className="text-[11px] text-[var(--color-gray-700)] text-center leading-tight px-1">{template.name}</span>
     </button>
   );
 }
