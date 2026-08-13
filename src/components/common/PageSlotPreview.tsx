@@ -1,5 +1,5 @@
 import { useEditorStore } from '../../store';
-import { DEFAULT_SLOT_CORNER_RADIUS } from '../../types';
+import { normalizeSlotCornerRadius } from '../../types';
 import { SLOT_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { calcPagePreviewFit } from '../../utils/sharedRender';
 import type { AlbumPage, Template } from '../../types';
@@ -35,7 +35,7 @@ export function PageSlotPreview({
     : width * 1.4);
 
   const fit = calcPagePreviewFit(albumSize, width, containerHeight);
-  const cornerRadius = (page.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS) * fit.scale;
+  const cornerRadius = normalizeSlotCornerRadius(page.slotCornerRadius) * fit.scale;
 
   return (
     <div

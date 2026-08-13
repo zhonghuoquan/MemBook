@@ -473,7 +473,7 @@ function drawExportTemplateSlot(
   ctx: CanvasRenderingContext2D,
   slot: SlotRect,
   index: number,
-  cornerRadius: number,
+  cornerRadius: number | [number, number, number, number],
 ): void {
   ctx.save();
   const [startColor, endColor] = SLOT_CANVAS_PALETTE[index % SLOT_CANVAS_PALETTE.length];
@@ -483,7 +483,7 @@ function drawExportTemplateSlot(
   ctx.fillStyle = gradient;
   ctx.strokeStyle = SLOT_BORDER_COLORS[index % SLOT_BORDER_COLORS.length];
   ctx.lineWidth = 1;
-  if (cornerRadius > 0) {
+  if (hasRadius(cornerRadius)) {
     roundRect(ctx, slot.x, slot.y, slot.width, slot.height, cornerRadius);
     ctx.fill();
     ctx.stroke();
@@ -610,7 +610,11 @@ async function drawPage(
   drawPageBackground(ctx, page.background, canvasW, canvasH);
 
   // ── 1.5 模板风格空槽位背景（与网格缩略图/模板面板风格一致） ──
-  const slotCornerRadius = (page.slotCornerRadius ?? 5) * (canvasW / ((useEditorStore.getState().albumSize?.width || 210) * MM_TO_PX));
+  const cornerScale = canvasW / ((useEditorStore.getState().albumSize?.width || 210) * MM_TO_PX);
+  const rawCorner = page.slotCornerRadius ?? 5;
+  const slotCornerRadius: number | [number, number, number, number] = typeof rawCorner === 'number'
+    ? rawCorner * cornerScale
+    : [rawCorner[0] * cornerScale, rawCorner[1] * cornerScale, rawCorner[2] * cornerScale, rawCorner[3] * cornerScale];
   const template = resolveTemplate(page);
   const allSlots = template?.slots ?? [];
   const filledSlotIds = new Set(page.placements.filter(pl => pl.photoId).map(pl => pl.slotId));
@@ -808,7 +812,7 @@ function drawPlacement(
   img: CanvasImageSource,
   slot: SlotRect,
   params: PhotoRenderParams,
-  slotCornerRadius: number,
+  slotCornerRadius: number | [number, number, number, number],
 ): void {
   // 用户可配置阴影：仅 placement.shadow=true 时绘制，在 clip 之前
   if (placement.shadow) {
@@ -821,7 +825,7 @@ function drawPlacement(
     ctx.shadowOffsetY = shadowOffsetY;
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    if (slotCornerRadius > 0) {
+    if (hasRadius(slotCornerRadius)) {
       roundRect(ctx, slot.x, slot.y, slot.width, slot.height, slotCornerRadius);
     } else {
       ctx.rect(slot.x, slot.y, slot.width, slot.height);
@@ -832,7 +836,7 @@ function drawPlacement(
 
   ctx.save();
   ctx.beginPath();
-  if (slotCornerRadius > 0) {
+  if (hasRadius(slotCornerRadius)) {
     roundRect(ctx, slot.x, slot.y, slot.width, slot.height, slotCornerRadius);
   } else {
     ctx.rect(slot.x, slot.y, slot.width, slot.height);
@@ -914,7 +918,7 @@ function drawPlacement(
     const vigAlpha = (vignetteVal / 100) * 0.6;
     ctx.save();
     ctx.beginPath();
-    if (slotCornerRadius > 0) {
+    if (hasRadius(slotCornerRadius)) {
       roundRect(ctx, slot.x, slot.y, slot.width, slot.height, slotCornerRadius);
     } else {
       ctx.rect(slot.x, slot.y, slot.width, slot.height);
@@ -1400,18 +1404,27 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
+/** 判断圆角值是否有实际圆角（number > 0 或数组任一元素 > 0） */
+function hasRadius(r: number | [number, number, number, number] | undefined): boolean {
+  if (r == null) return false;
+  if (typeof r === 'number') return r > 0;
+  return r.some((v) => v > 0);
+}
+
 /** 绘制圆角矩形路径 */
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number | [number, number, number, number]) {
+  const radii = typeof r === 'number' ? [r, r, r, r] : r;
+  const [tl, tr, br, bl] = radii;
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + tr);
+  ctx.lineTo(x + w, y + h - br);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+  ctx.lineTo(x + bl, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - bl);
+  ctx.lineTo(x, y + tl);
+  ctx.quadraticCurveTo(x, y, x + tl, y);
   ctx.closePath();
 }
 

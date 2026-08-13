@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore, usePhotoStore } from '../../store';
-import { GOOGLE_PHOTOS_TEMPLATE_ID, DEFAULT_SLOT_CORNER_RADIUS } from '../../types';
+import { GOOGLE_PHOTOS_TEMPLATE_ID, normalizeSlotCornerRadius } from '../../types';
 import type { Photo, AlbumPage, PhotoPlacement, SlotOverride } from '../../types';
 import type { SmartLayoutSettings } from '../../store';
 import {
@@ -1065,7 +1065,7 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
   const pageW = albumSize.width;
   const pageH = albumSize.height;
   const pageRatio = pageW / pageH;
-  const slotCornerRadius = editorPages[currentPageIndex]?.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS;
+  const slotCornerRadius = normalizeSlotCornerRadius(editorPages[currentPageIndex]?.slotCornerRadius);
   const scaledCornerRadius = Math.max(0, slotCornerRadius * (thumbZoom / (pageW * MM_TO_PX)));
 
   return (

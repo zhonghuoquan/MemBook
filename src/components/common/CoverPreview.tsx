@@ -22,6 +22,7 @@ export function CoverPreview({
   // mask 类形状渲染在照片之上（渐变蒙版）
   const maskShapes = shapes.filter((s) => s.id === 'mask');
   const baseShapes = shapes.filter((s) => s.id !== 'mask');
+  const spineShape = shapes.find((s) => s.id === 'spine');
   const spineTexts = texts.filter((t) => t.id === 'spineText');
   const otherTexts = texts.filter((t) => t.id !== 'spineText');
 
@@ -35,7 +36,7 @@ export function CoverPreview({
         <ShapePreview key={shape.id} shape={shape} />
       ))}
 
-      {/* 2. 照片槽位（真实图片占位） */}
+      {/* 2. 照片槽位（真实图片占位 + 微阴影增加印刷质感） */}
       {template.slots.map((s) => (
         <div
           key={s.id}
@@ -49,6 +50,7 @@ export function CoverPreview({
             backgroundColor: active ? 'var(--color-brand)' : '#B8C0CA',
             outline: active ? '1px solid var(--color-brand)' : '1px solid rgba(255,255,255,0.4)',
             outlineOffset: '-1px',
+            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.18)',
           }}
         />
       ))}
@@ -58,12 +60,27 @@ export function CoverPreview({
         <ShapePreview key={shape.id} shape={shape} />
       ))}
 
-      {/* 4. 书脊文字（竖排） */}
+      {/* 4. 书脊折痕阴影：在书脊右侧（书脊与封面正面的交界处）叠加一道柔和暗影，
+            模拟真实装订凹槽，让书脊有立体感（Mixbook 风格）。仅预览层叠加，不写入数据。 */}
+      {spineShape && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: `${spineShape.x + spineShape.width}%`,
+            top: 0,
+            width: '3%',
+            height: '100%',
+            background: 'linear-gradient(to right, rgba(0,0,0,0.22), rgba(0,0,0,0.06) 60%, rgba(0,0,0,0))',
+          }}
+        />
+      )}
+
+      {/* 5. 书脊文字（竖排） */}
       {spineTexts.map((txt) => (
         <TextPreview key={txt.id} txt={txt} />
       ))}
 
-      {/* 5. 其他文字 */}
+      {/* 6. 其他文字 */}
       {otherTexts.map((txt) => (
         <TextPreview key={txt.id} txt={txt} />
       ))}

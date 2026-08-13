@@ -1,5 +1,5 @@
 import type { AlbumSize, PageMarginSettings } from '../../types';
-import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage } from '../../types';
+import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, isCoverOrBackCoverPage } from '../../types';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot } from './helpers';
 import type { EditorSlice, AlbumMetaSlice } from './types';
@@ -53,10 +53,12 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
     });
 
     if (applyAll) {
-      // 全局应用：立即重算所有页（含圆角），并重新约束照片位置防止露白
+      // 全局应用：立即重算所有内容页（含圆角），并重新约束照片位置防止露白
+      // 封面/封底页不受边距/间距/圆角影响，仅尺寸调整时自适应
       set((s) => {
         const np = [...s.pages];
         for (let i = 0; i < np.length; i++) {
+          if (isCoverOrBackCoverPage(np[i])) continue;
           const result = pageMarginService.calcMarginForPage(i, s.pages);
           np[i] = result
             ? { ...result.newPage, slotCornerRadius: cornerRadius }
@@ -65,16 +67,18 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
         return { pages: np };
       });
     } else {
-      // 仅当前页：即时重算并重新约束照片位置
+      // 仅当前页：即时重算并重新约束照片位置（封面/封底页不应用圆角）
+      const cp = get().pages[currentPageIndex];
+      const isCover = cp ? isCoverOrBackCoverPage(cp) : false;
       const result = pageMarginService.calcMarginForPage(currentPageIndex, get().pages);
-      if (result || cornerRadius !== undefined) {
+      if (result || (cornerRadius !== undefined && !isCover)) {
         set((s) => {
           const np = [...s.pages];
           const cp = np[currentPageIndex];
           if (cp) {
             np[currentPageIndex] = result
-              ? { ...result.newPage, slotCornerRadius: cornerRadius }
-              : { ...cp, slotCornerRadius: cornerRadius };
+              ? { ...result.newPage, ...(isCover ? {} : { slotCornerRadius: cornerRadius }) }
+              : (isCover ? cp : { ...cp, slotCornerRadius: cornerRadius });
           }
           return { pages: np };
         });
@@ -125,7 +129,7 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
     }
   },
   setDefaultSlotCornerRadius: (r) => set({ defaultSlotCornerRadius: r }),
-  /** 设置当前页的槽位圆角（按页独立，开启"应用到全部页面"时同步所有页） */
+  /** 设置当前页的槽位圆角（按页独立，开启"应用到全部页面"时同步所有内容页，封面/封底不受影响） */
   setPageSlotCornerRadius: (pageIndex, r) => {
     const { applyMarginToAll } = get();
     set((s) => {
@@ -133,6 +137,7 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
       if (!newPages[pageIndex]) return s;
       if (applyMarginToAll) {
         for (let i = 0; i < newPages.length; i++) {
+          if (isCoverOrBackCoverPage(newPages[i])) continue;
           newPages[i] = { ...newPages[i], slotCornerRadius: r };
         }
       } else {

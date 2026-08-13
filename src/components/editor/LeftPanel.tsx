@@ -41,6 +41,17 @@ const tabs: TabItem[] = [
     ),
   },
   {
+    tab: 'covers',
+    labelKey: 'editor.toolbar.covers',
+    icon: (
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+        <path d="M4 3.5h11a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 15V5A1.5 1.5 0 0 1 4 3.5z" />
+        <line x1="6" y1="3.5" x2="6" y2="16.5" />
+        <rect x="8" y="7" width="5" height="4" rx="0.5" />
+      </svg>
+    ),
+  },
+  {
     tab: 'stickers',
     labelKey: 'editor.toolbar.stickers',
     icon: (
@@ -58,16 +69,6 @@ const tabs: TabItem[] = [
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-5 h-5">
         <circle cx="10" cy="10" r="3" />
         <path d="M15 5l3-3M18 7v-4h-4" />
-      </svg>
-    ),
-  },
-  {
-    tab: 'covers',
-    labelKey: 'editor.toolbar.covers',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-        <path d="M3 5h14a1 1 0 011 1v9a1 1 0 01-1 1H3a1 1 0 01-1-1V6a1 1 0 011-1z" />
-        <path d="M3 5l7 5 7-5" />
       </svg>
     ),
   },

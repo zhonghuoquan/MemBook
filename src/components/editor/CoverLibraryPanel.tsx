@@ -129,7 +129,6 @@ function CoverTemplateCard({
       >
         {badge}
       </span>
-      <span className="text-[11px] text-[var(--color-gray-700)] text-center leading-tight px-1">{template.name}</span>
     </button>
   );
 }

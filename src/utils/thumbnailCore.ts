@@ -21,6 +21,7 @@ import {
 import {
   resolveTemplate,
   getSlotZIndex,
+  normalizeSlotCornerRadius,
   type AlbumPage,
   type Photo,
   type PhotoPlacement,
@@ -164,8 +165,8 @@ export function drawPageToCanvas(
   const photoMap = new Map(photos.map((p) => [p.id, p]));
   let drawnPhotoCount = 0;
 
-  // ── 槽位圆角 ──
-  const slotCornerRadius = page.slotCornerRadius ?? 5;
+  // ── 槽位圆角 ──（缩略图不支持每角单独圆角，归一化为平均值）
+  const slotCornerRadius = normalizeSlotCornerRadius(page.slotCornerRadius);
   const template = resolveTemplate(page);
   const slots = template?.slots ?? [];
 

@@ -165,6 +165,17 @@ export function isCoverOrBackCoverPage(page: { templateId: string }): boolean {
 }
 
 /**
+ * 将 slotCornerRadius 归一化为单一数值（取四角平均值）。
+ * 用于缩略图/预览/SmartLayout 等不支持每角单独圆角的渲染场景；
+ * 编辑器 Canvas 与导出引擎走 roundRect 原生支持联合类型，无需归一化。
+ */
+export function normalizeSlotCornerRadius(r: number | [number, number, number, number] | undefined): number {
+  if (r === undefined) return 2;
+  if (typeof r === 'number') return r;
+  return (r[0] + r[1] + r[2] + r[3]) / 4;
+}
+
+/**
  * 解析页面最终使用的模板（统一入口）：
  * 静态模板优先；Google Photos 等动态布局页面回退到 slotOverrides 构造的虚拟模板。
  * 用户通过"添加照片位"按钮创建的额外槽位（extraSlots，百分比坐标）会合并到返回的 slots 中。
@@ -327,7 +338,7 @@ export type AlbumPage = {
   placements: PhotoPlacement[];
   background: string; // color hex
   slotOverrides?: Record<string, SlotOverride>; // slotId → 用户自定义位置/尺寸
-  slotCornerRadius?: number; // 本页独立槽位圆角 px，默认 2
+  slotCornerRadius?: number | [number, number, number, number]; // 本页独立槽位圆角 px，number=统一，[tl,tr,br,bl]=每角单独，默认 2
   slotOrder?: string[];        // 槽位渲染顺序（slotId 数组），后渲染的在上层
   /** 槽位层级映射（slotId → zIndex 数值），与装饰元素共享同一命名空间，使槽位可超越/低于装饰元素 */
   slotZIndices?: Record<string, number>;
