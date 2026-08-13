@@ -22,7 +22,6 @@ interface CreateDialogProps {
     albumType?: AlbumTypeId,
     description?: string,
     cornerRadius?: number,
-    autoGenerateCover?: boolean,
   ) => void;
   title?: string;
 }
@@ -44,8 +43,6 @@ export function CreateDialog({ open, onClose, onCreate, title }: CreateDialogPro
   const [gapVal, setGapVal] = useState(STANDARD_PRESET.gap);
   const [cornerRadius, setCornerRadius] = useState(STANDARD_PRESET.cornerRadius);
   const [flipped, setFlipped] = useState(false);
-  // 创建时是否自动生成封面 + 封底（默认开启，减少新手心智负担）
-  const [autoGenerateCover, setAutoGenerateCover] = useState(true);
 
   // 弹窗每次打开时复位所有状态为默认值
   useEffect(() => {
@@ -61,7 +58,6 @@ export function CreateDialog({ open, onClose, onCreate, title }: CreateDialogPro
     setMarginVal(STANDARD_PRESET.margin);
     setGapVal(STANDARD_PRESET.gap);
     setCornerRadius(STANDARD_PRESET.cornerRadius);
-    setAutoGenerateCover(true);
   }, [open]);
 
   const currentSize = useMemo((): { width: number; height: number } => {
@@ -86,12 +82,12 @@ export function CreateDialog({ open, onClose, onCreate, title }: CreateDialogPro
           width: currentSize.width, height: currentSize.height,
           desc: `${currentSize.width}×${currentSize.height} mm`,
         };
-    onCreate(albumName, finalSize, { margin: marginVal, gap: gapVal }, albumType, description.trim() || undefined, cornerRadius, autoGenerateCover);
+    onCreate(albumName, finalSize, { margin: marginVal, gap: gapVal }, albumType, description.trim() || undefined, cornerRadius);
     setName(''); setAlbumType(undefined); setDescription('');
     setSelectedPreset(SIZE_PRESETS[0]); setIsCustom(false); setFlipped(false);
     setCustomW(CUSTOM_SIZE_DEFAULT); setCustomH(CUSTOM_SIZE_DEFAULT);
     setMarginVal(STANDARD_PRESET.margin); setGapVal(STANDARD_PRESET.gap);
-    setCornerRadius(STANDARD_PRESET.cornerRadius); setAutoGenerateCover(true);
+    setCornerRadius(STANDARD_PRESET.cornerRadius);
     onClose();
   };
 
@@ -139,22 +135,6 @@ export function CreateDialog({ open, onClose, onCreate, title }: CreateDialogPro
         <div>
           <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-700)] mb-1.5">{t('home.createDialog.albumName')}</label>
           <input type="text" className="w-full h-9 px-3 bg-white border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--text-body)] text-[var(--color-gray-800)] placeholder:text-[var(--color-text-tertiary)] outline-none hover:border-[var(--color-border-hover)] focus:border-[var(--color-border-focus)] focus:shadow-[0_0_0_3px_rgba(108,99,255,0.15)] transition-all" placeholder={t('home.createDialog.albumNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} autoFocus maxLength={30} />
-        </div>
-
-        {/* ═══════ 自动生成封面/封底开关 ═══════ */}
-        <div className="flex items-center justify-between bg-[var(--color-primary-50)] border border-[var(--color-primary-150)] rounded-[var(--radius-md)] px-3 py-2.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-base leading-none">📕</span>
-            <div className="min-w-0">
-              <div className="text-[var(--text-caption)] font-[600] text-[var(--color-gray-800)]">{t('home.createDialog.autoCover')}</div>
-              <div className="text-[var(--text-nano)] text-[var(--color-text-secondary)] truncate">{t('home.createDialog.autoCoverHint')}</div>
-            </div>
-          </div>
-          <button role="switch" aria-checked={autoGenerateCover}
-            onClick={() => setAutoGenerateCover((v) => !v)}
-            className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer shrink-0 ${autoGenerateCover ? 'bg-[var(--color-brand)]' : 'bg-[var(--color-gray-300)]'}`}>
-            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoGenerateCover ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-          </button>
         </div>
 
         {/* ═══════ 相册类型 + 尺寸预览（左右排版，统一高度） ═══════ */}

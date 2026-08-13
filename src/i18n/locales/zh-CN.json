@@ -183,9 +183,7 @@
       "albumDescriptionOptional": "选填",
       "albumDescriptionPlaceholder": "简单描述这个相册，如时间、地点、人物等",
       "unnamedAlbum": "未命名相册",
-      "flipped": "（翻转）",
-      "autoCover": "自动生成封面 / 封底",
-      "autoCoverHint": "创建时智能生成封面与封底，可随时编辑或关闭"
+      "flipped": "（翻转）"
     },
     "projectGrid": {
       "myAlbums": "我的相册",
@@ -1052,22 +1050,6 @@
       "photosMovedFromPages": "其中部分照片来自 {{pages}}，将同时从原页移除。",
       "dropPhotoPlaceholder": "拖入照片"
     },
-    "coverPanel": {
-      "regenerate": "换一个",
-      "regenerateHint": "重新智能生成下一款设计（切换版式/主图/配色）",
-      "template": "封面版式",
-      "title": "主标题",
-      "titlePlaceholder": "相册名或标题",
-      "subtitle": "副标题 / 引言",
-      "subtitlePlaceholder": "一句话记忆（可选）",
-      "author": "作者 / 落款",
-      "authorPlaceholder": "作者或纪念人（可选）",
-      "date": "日期",
-      "datePlaceholder": "如 2023-2024",
-      "backText": "封底文案",
-      "backTextPlaceholder": "版权 / 纪念语",
-      "freeTextHint": "封面文字是自由的文字元素：双击文字即可编辑内容，拖拽移动位置，或使用「工具」面板调整字体、颜色、大小。可先添加文字再排版。"
-    },
     "coverLibrary": {
       "title": "封面 / 封底",
       "coverSection": "封面模板",
@@ -1243,7 +1225,7 @@
       "textHint": "点击「添加文字」在页面上添加文字元素，双击编辑内容",
       "textStickyHint": "选中画布上的文字或便利贴后，此处显示对应属性设置",
       "shapeSection": "形状",
-      "addShape": "添加形状",
+      "addShape": "选择形状",
       "shapeProperties": "形状属性",
       "shapeWidth": "宽",
       "shapeHeight": "高",
@@ -1253,7 +1235,7 @@
       "shapeStrokeWidth": "描边粗细",
       "shapeRotation": "旋转",
       "deleteShape": "删除形状",
-      "shapeHint": "点击上方形状图标添加到页面，可调整尺寸、颜色、描边、透明度",
+      "shapeHint": "点击上方形状图标，然后在工作区按住拖拽绘制对应形状",
       "shape_rectangle": "矩形",
       "shape_square": "正方形",
       "shape_circle": "圆形",
@@ -2002,6 +1984,10 @@
       "copy": "复制",
       "hide": "隐藏",
       "delete": "删除"
+    },
+    "colorPalette": {
+      "tabSolid": "主题色",
+      "tabGradient": "渐变色"
     }
   },
   "about": {

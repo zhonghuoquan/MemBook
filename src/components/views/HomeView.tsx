@@ -226,7 +226,6 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     albumType?: string,
     description?: string,
     cornerRadius?: number,
-    autoGenerateCover?: boolean,
   ) => {
     // P0: 新建项目前清理旧项目缓存，释放 blob URL 和 ImageBitmap 内存
     photoService.cleanupProjectResources();
@@ -261,11 +260,6 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
       setStorageMode(null);  // 重置存储偏好，下次导入时重新选择
       clearSmartLayoutState();
       useUIStore.getState().setCanvasZoom(1); // 新相册重置缩放为 100%
-      // 创建时自动生成封面 + 封底（默认开启）：纯本地规则引擎，照片导入后可重新生成
-      if (autoGenerateCover !== false) {
-        useEditorStore.getState().addCoverPage();
-        useEditorStore.getState().addBackCoverPage();
-      }
       onNavigateToEditor();
     };
 

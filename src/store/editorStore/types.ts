@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type {
   AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings, AlbumTypeId,
-  EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, ShapeElement, WatermarkSettings,
+  EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, ShapeElement, ShapeType, WatermarkSettings,
 } from '../../types';
 
 /* ── Editor Store (当前编辑状态) ── */
@@ -146,9 +146,12 @@ export interface ToolsSlice {
   brushSettings: BrushSettings;
   /* 自动编辑信号：ToolsPanel 添加文字后通知 Canvas 打开内联编辑器 */
   pendingTextEditId: string | null;
+  /* 待绘制形状类型：选中形状图标后，进入 shape 工具模式，等待在工作区拖拽绘制 */
+  pendingShapeType: ShapeType | null;
   setActiveTool: (tool: EditorTool) => void;
   setBrushSettings: (patch: Partial<BrushSettings>) => void;
   setPendingTextEditId: (id: string | null) => void;
+  setPendingShapeType: (type: ShapeType | null) => void;
 }
 
 /* ── 画笔/便利贴/文字/贴纸/层级 ── */

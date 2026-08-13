@@ -8,8 +8,11 @@ export const createToolsSlice: EditorSlice<ToolsSlice> = (set) => ({
   brushSettings: DEFAULT_BRUSH_SETTINGS,
   /* 自动编辑信号：ToolsPanel 添加文字后通知 Canvas 打开内联编辑器 */
   pendingTextEditId: null,
+  /* 待绘制形状类型（选中形状图标后等待工作区拖拽绘制） */
+  pendingShapeType: null,
 
   setActiveTool: (tool) => set({ activeTool: tool }),
   setBrushSettings: (patch) => set((s) => ({ brushSettings: { ...s.brushSettings, ...patch } })),
   setPendingTextEditId: (id) => set({ pendingTextEditId: id }),
+  setPendingShapeType: (type) => set({ pendingShapeType: type }),
 });
