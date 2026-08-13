@@ -5,7 +5,6 @@ import { LeftPanel } from '../editor/LeftPanel';
 import { Canvas } from '../editor/Canvas';
 import { EditorEmptyState } from '../editor/EditorEmptyState';
 import { EditFlyout } from '../editor/EditFlyout';
-import { CoverPanel } from '../editor/CoverPanel';
 import { PageToolbar } from '../editor/PageToolbar';
 import { PageDisplayModeToggle } from '../editor/PageDisplayModeToggle';
 import { BottomNav } from '../editor/BottomNav';
@@ -476,8 +475,6 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
             <PageToolbar />
             <PageDisplayModeToggle />
             <EditFlyout />
-            {/* 封面/封底专属编辑面板（当前页为封面/封底时叠加显示） */}
-            <CoverPanel />
           </div>
           <BottomNav />
         </div>
