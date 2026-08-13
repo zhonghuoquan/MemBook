@@ -1225,7 +1225,7 @@
       "textHint": "点击「添加文字」在页面上添加文字元素，双击编辑内容",
       "textStickyHint": "选中画布上的文字或便利贴后，此处显示对应属性设置",
       "shapeSection": "形状",
-      "addShape": "添加形状",
+      "addShape": "选择形状",
       "shapeProperties": "形状属性",
       "shapeWidth": "宽",
       "shapeHeight": "高",
@@ -1235,7 +1235,7 @@
       "shapeStrokeWidth": "描边粗细",
       "shapeRotation": "旋转",
       "deleteShape": "删除形状",
-      "shapeHint": "点击上方形状图标添加到页面，可调整尺寸、颜色、描边、透明度",
+      "shapeHint": "点击上方形状图标，然后在工作区按住拖拽绘制对应形状",
       "shape_rectangle": "矩形",
       "shape_square": "正方形",
       "shape_circle": "圆形",
@@ -1984,6 +1984,10 @@
       "copy": "复制",
       "hide": "隐藏",
       "delete": "删除"
+    },
+    "colorPalette": {
+      "tabSolid": "主题色",
+      "tabGradient": "渐变色"
     }
   },
   "about": {

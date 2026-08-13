@@ -488,6 +488,14 @@ export type ShapeElement = {
 /** 形状默认尺寸（mm） */
 export const DEFAULT_SHAPE_SIZE = { width: 60, height: 60 };
 
+/** 形状默认样式：新建形状的统一外观（填充/描边/粗细/透明度） */
+export const DEFAULT_SHAPE_STYLE = {
+  fill: '#6C63FF',
+  stroke: '#6C63FF',
+  strokeWidth: 2,
+  opacity: 1,
+};
+
 /** 形状支持的类型列表（供工具面板展示） */
 export const SHAPE_TYPES: ShapeType[] = [
   'rectangle', 'square', 'circle', 'ellipse',
@@ -496,7 +504,7 @@ export const SHAPE_TYPES: ShapeType[] = [
 ];
 
 /* ── 编辑器工具模式 ── */
-export type EditorTool = 'none' | 'brush' | 'eraser' | 'text' | 'sticky';
+export type EditorTool = 'none' | 'brush' | 'eraser' | 'text' | 'sticky' | 'shape';
 
 /* ── 画笔设置 ── */
 export type BrushSettings = {

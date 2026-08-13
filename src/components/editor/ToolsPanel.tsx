@@ -2,12 +2,13 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../store';
 import {
-  STICKY_COLORS, TEXT_STYLE_PRESETS, SHAPE_TYPES, DEFAULT_SHAPE_SIZE,
+  STICKY_COLORS, TEXT_STYLE_PRESETS, SHAPE_TYPES,
 } from '../../types';
-import type { BrushType, PageTextElement, StickyNote, ShapeElement, ShapeType } from '../../types';
+import type { BrushType, PageTextElement, StickyNote, ShapeType } from '../../types';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { BrushPreview } from './tools/BrushPreview';
 import { ColorPicker } from './tools/ColorPicker';
+import { ColorPalette } from './tools/ColorPalette';
 import { BackgroundPicker } from './tools/BackgroundPicker';
 
 /* ── 画笔类型 SVG 图标 ── */
@@ -34,6 +35,7 @@ export function ToolsPanel() {
   const { t } = useTranslation();
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const pendingShapeType = useEditorStore((s) => s.pendingShapeType);
   const brushSettings = useEditorStore((s) => s.brushSettings);
   const setBrushSettings = useEditorStore((s) => s.setBrushSettings);
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
@@ -42,10 +44,10 @@ export function ToolsPanel() {
   const addTextElement = useEditorStore((s) => s.addTextElement);
   const sb = useScrollbarVisibility<HTMLDivElement>();
   const addStickyNote = useEditorStore((s) => s.addStickyNote);
-  const addShapeElement = useEditorStore((s) => s.addShapeElement);
   const updateShapeElement = useEditorStore((s) => s.updateShapeElement);
   const removeShapeElement = useEditorStore((s) => s.removeShapeElement);
   const setPendingTextEditId = useEditorStore((s) => s.setPendingTextEditId);
+  const setPendingShapeType = useEditorStore((s) => s.setPendingShapeType);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
   const pages = useEditorStore((s) => s.pages);
   const currentPage = pages[currentPageIndex];
@@ -131,28 +133,21 @@ export function ToolsPanel() {
     setPendingTextEditId(note.id);
   }, [currentPage, currentPageIndex, addStickyNote, setSelectedTextId, setSelectedStickyId, setPendingTextEditId]);
 
-  /* ── 添加形状 ── */
-  const handleAddShape = useCallback((type: ShapeType) => {
-    if (!currentPage) return;
-    const shape: ShapeElement = {
-      id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      x: 105, y: 140,   // 页面中心附近（mm）
-      width: DEFAULT_SHAPE_SIZE.width,
-      height: DEFAULT_SHAPE_SIZE.height,
-      type,
-      fill: '#6C63FF',
-      stroke: '#6C63FF',
-      strokeWidth: 2,
-      opacity: 1,
-      rotation: 0,
-      zIndex: 0,
-    };
-    addShapeElement(currentPageIndex, shape);
-    // 自动选中新形状
+  /* ── 选择形状：进入形状绘制模式（PPT 式：选择后在工作区按住拖拽绘制） ── */
+  const handlePickShape = useCallback((type: ShapeType) => {
+    // 再次点击同一形状：退出绘制模式
+    if (activeTool === 'shape' && pendingShapeType === type) {
+      setActiveTool('none');
+      setPendingShapeType(null);
+      return;
+    }
+    setPendingShapeType(type);
+    setActiveTool('shape');
+    // 清空其它元素的选中态，避免与绘制模式混淆
     setSelectedTextId(null);
     setSelectedStickyId(null);
-    setSelectedShapeId(shape.id);
-  }, [currentPage, currentPageIndex, addShapeElement, setSelectedTextId, setSelectedStickyId, setSelectedShapeId]);
+    setSelectedShapeId(null);
+  }, [activeTool, pendingShapeType, setPendingShapeType, setActiveTool, setSelectedTextId, setSelectedStickyId, setSelectedShapeId]);
 
   /* ── 清除当前页所有笔迹 ── */
   const handleClearAllStrokes = useCallback(() => {
@@ -354,13 +349,11 @@ export function ToolsPanel() {
               </div>
               {/* 颜色 */}
               <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.textColor')}</div>
-                <div className="flex items-center gap-2">
-                  <input type="color" value={selectedTextEl.color} onChange={(e) => updateTextElement(currentPageIndex, selectedTextEl.id, { color: e.target.value })}
-                    className="w-8 h-7 border border-[var(--color-border)] rounded cursor-pointer p-0" />
-                  <input type="text" value={selectedTextEl.color} onChange={(e) => updateTextElement(currentPageIndex, selectedTextEl.id, { color: e.target.value })}
-                    className="flex-1 h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
-                </div>
+                <ColorPalette
+                  label={t('editor.tools.textColor')}
+                  selectedColor={selectedTextEl.color}
+                  onColorChange={(c) => updateTextElement(currentPageIndex, selectedTextEl.id, { color: c })}
+                />
               </div>
               {/* 对齐 */}
               <div>
@@ -490,11 +483,12 @@ export function ToolsPanel() {
               {SHAPE_TYPES.map((st) => (
                 <button
                   key={st}
-                  onClick={() => handleAddShape(st)}
+                  onClick={() => handlePickShape(st)}
                   title={t(`editor.tools.shape_${st}`)}
-                  className="flex items-center justify-center h-10 rounded-[var(--radius-sm)] border border-[var(--color-border)]
-                             bg-white text-[var(--color-gray-500)] hover:border-[var(--color-brand)]
-                             hover:text-[var(--color-brand)] cursor-pointer transition-colors"
+                  className={`flex items-center justify-center h-10 rounded-[var(--radius-sm)] border cursor-pointer transition-colors
+                             ${activeTool === 'shape' && pendingShapeType === st
+                               ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
+                               : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]'}`}
                 >
                   <ShapeIcon type={st} className="w-5 h-5" />
                 </button>
@@ -522,38 +516,19 @@ export function ToolsPanel() {
                 </div>
               </div>
               {/* 填充色（支持无填充） */}
-              <div>
-                <div className="flex items-center justify-between text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">
-                  <span>{t('editor.tools.shapeFill')}</span>
-                  <button
-                    onClick={() => updateShapeElement(currentPageIndex, selectedShape.id, { fill: '' })}
-                    className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer ${selectedShape.fill === '' ? 'border-[var(--color-brand)] text-[var(--color-brand)]' : 'border-[var(--color-border)] text-[var(--color-gray-400)]'}`}
-                  >
-                    {t('editor.tools.shapeNoFill')}
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input type="color" value={selectedShape.fill || '#000000'}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: e.target.value })}
-                    disabled={selectedShape.fill === ''}
-                    className="w-8 h-7 border border-[var(--color-border)] rounded cursor-pointer p-0 disabled:opacity-40" />
-                  <input type="text" value={selectedShape.fill || ''}
-                    placeholder={t('editor.tools.shapeNoFill')}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: e.target.value })}
-                    className="flex-1 h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
-                </div>
-              </div>
+              <ColorPalette
+                label={t('editor.tools.shapeFill')}
+                selectedColor={selectedShape.fill}
+                onColorChange={(c) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: c })}
+                allowEmpty
+              />
               {/* 描边 */}
               <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeStroke')}</div>
-                <div className="flex items-center gap-2">
-                  <input type="color" value={selectedShape.stroke || '#000000'}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: e.target.value })}
-                    className="w-8 h-7 border border-[var(--color-border)] rounded cursor-pointer p-0" />
-                  <input type="text" value={selectedShape.stroke}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: e.target.value })}
-                    className="flex-1 h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
-                </div>
+                <ColorPalette
+                  label={t('editor.tools.shapeStroke')}
+                  selectedColor={selectedShape.stroke}
+                  onColorChange={(c) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: c })}
+                />
                 <div className="mt-2">
                   <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
                     <span>{t('editor.tools.shapeStrokeWidth')}</span>

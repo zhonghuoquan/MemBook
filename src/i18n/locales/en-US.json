@@ -1224,7 +1224,7 @@
       "textHint": "Click \"Add Text\" to add a text element, double-click to edit content",
       "textStickyHint": "Select a text or sticky note on the canvas to edit its properties",
       "shapeSection": "Shapes",
-      "addShape": "Add shape",
+      "addShape": "Pick a shape",
       "shapeProperties": "Shape properties",
       "shapeWidth": "Width",
       "shapeHeight": "Height",
@@ -1234,7 +1234,7 @@
       "shapeStrokeWidth": "Stroke width",
       "shapeRotation": "Rotation",
       "deleteShape": "Delete shape",
-      "shapeHint": "Click a shape above to add it to the page. Adjust size, color, stroke and opacity.",
+      "shapeHint": "Pick a shape above, then press and drag on the canvas to draw it",
       "shape_rectangle": "Rectangle",
       "shape_square": "Square",
       "shape_circle": "Circle",
@@ -1984,6 +1984,10 @@
       "copy": "Copy",
       "hide": "Hide",
       "delete": "Delete"
+    },
+    "colorPalette": {
+      "tabSolid": "Theme",
+      "tabGradient": "Gradient"
     }
   },
   "about": {
