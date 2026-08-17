@@ -194,6 +194,7 @@
       "sortCreatedAt": "创建时间",
       "sortName": "名称",
       "sortNameAZ": "名称 A-Z",
+      "fullscreenView": "真实效果预览",
       "select": "选择",
       "createAlbum": "创建相册",
       "noMatch": "没有找到匹配的相册",
@@ -284,7 +285,7 @@
       "backCoverBadge": "📗 封底",
       "use": "使用",
       "defaultAlbumName": "我的相册",
-      "hint": "点击「使用」即以该封面新建相册并进入编辑器。封面版面会自动适应页面尺寸，进入后可自由修改照片、双击文字编辑，或使用「工具」面板添加形状、调整字体颜色。"
+      "hint": "点击「使用」即以该封面新建相册并进入编辑器。每款封面都内置配套封底，应用时自动同步生成，封面与封底整体成套。进入后可自由修改照片、双击文字编辑，或使用「工具」面板添加形状、调整字体颜色。"
     },
     "emptyState": {
       "title": "还没有相册",
@@ -1034,6 +1035,11 @@
     }
   },
   "editor": {
+    "objectPanel": {
+      "title": "属性",
+      "collapse": "收起面板",
+      "expand": "展开面板"
+    },
     "displayMode": {
       "full": "全显",
       "page": "页面",
@@ -1059,9 +1065,13 @@
       "switched": "已切换封面版式",
       "coverAdded": "已添加封面页",
       "backCoverAdded": "已添加封底页",
+      "switchTitle": "使用此封面",
+      "previewTitle": "封面预览",
+      "previewCover": "封面页",
+      "previewBack": "封底页",
       "onCoverPageHint": "当前为封面/封底页：点击上方模板可直接切换版式（保留照片与文字）。",
       "onNormalPageHint": "当前为普通页：点击封面模板会插入新的封面/封底页。",
-      "hint": "封面模板的版面会自动适应页面尺寸。应用后可直接在画布上双击文字编辑，或使用「工具」面板调整。"
+      "hint": "每款封面都内置配套封底，应用时自动同步生成封底，封面与封底整体成套。应用后可直接在画布上双击文字编辑，或使用「工具」面板调整。"
     },
     "toolbar": {
       "photos": "照片",
@@ -1192,10 +1202,14 @@
       "brushHint": "选择「画笔」在页面上自由绘制，或「橡皮擦」擦除笔迹",
       "textSection": "文字",
       "textStickySection": "文字 / 便利贴",
+      "elementsSection": "添加元素",
+      "elementsHint": "添加后在画布上选中，可在右侧面板调整属性",
       "stickySection": "便利贴",
       "addText": "添加文字",
       "quickStyles": "快速样式",
       "textProperties": "文字属性",
+      "textTabBasic": "基础设置",
+      "textTabColor": "颜色",
       "fontFamily": "字体",
       "fontSize": "字号",
       "bold": "加粗",
@@ -1205,9 +1219,15 @@
       "alignLeft": "左对齐",
       "alignCenter": "居中",
       "alignRight": "右对齐",
+      "verticalAlign": "垂直对齐",
+      "alignTop": "顶端对齐",
+      "alignMiddle": "垂直居中",
+      "alignBottom": "底端对齐",
       "textDirection": "文字方向",
       "horizontal": "横向",
       "vertical": "竖向",
+      "lineSpacing": "行间距",
+      "letterSpacing": "字间距",
       "addSticky": "添加便利贴",
       "defaultSize": "默认大小",
       "sizeSmall": "小",
@@ -1227,6 +1247,10 @@
       "shapeSection": "形状",
       "addShape": "选择形状",
       "shapeProperties": "形状属性",
+      "shapeTabBasic": "基础设置",
+      "shapeTabFill": "填充",
+      "shapeTabStroke": "描边",
+      "shapeNoStroke": "无描边",
       "shapeWidth": "宽",
       "shapeHeight": "高",
       "shapeFill": "填充色",
@@ -1236,8 +1260,26 @@
       "shapeRotation": "旋转",
       "deleteShape": "删除形状",
       "shapeHint": "点击上方形状图标，然后在工作区按住拖拽绘制对应形状",
+      "shapeGradient": "渐变填充",
+      "shapeGradientLinear": "线性",
+      "shapeGradientRadial": "径向",
+      "gradientStops": "渐变色标",
+      "gradientStart": "起点",
+      "gradientEnd": "终点",
+      "gradientStopOpacity": "透明度",
+      "gradientPosition": "位置",
+      "gradientNoFill": "无填充",
+      "gradientAngle": "角度",
       "shape_rectangle": "矩形",
-      "shape_square": "正方形",
+      "shape_roundedRect": "圆角矩形",
+      "shape_singleRoundRect": "单角圆角矩形",
+      "shape_diagonalRoundRect": "对角圆角矩形",
+      "shape_parallelogram": "平行四边形",
+      "shape_trapezoid": "梯形",
+      "shape_cutCornerRect": "切角矩形",
+      "shape_cutDiagonalRect": "减去对角矩形",
+      "shapeCornerRadius": "圆角",
+      "shapeCornerCut": "切角大小",
       "shape_circle": "圆形",
       "shape_ellipse": "椭圆",
       "shape_triangle": "三角形",
@@ -1249,13 +1291,27 @@
       "shape_line": "直线",
       "backgroundSection": "背景",
       "background": {
-        "tabSolid": "纯色",
-        "tabGradient": "渐变",
+        "tabColor": "颜色",
         "tabTexture": "纹理",
+        "tabImage": "图片",
         "customPicker": "自定义取色器",
         "eyeDropper": "屏幕取色",
         "eyeDropperUnsupported": "当前环境不支持屏幕取色，已回退到取色器",
-        "applyToAll": "应用到所有页面"
+        "applyToAll": "应用到所有页面",
+        "applyScope": "应用范围",
+        "scopeCurrent": "当前页",
+        "scopeNormal": "普通页",
+        "scopeCover": "封面",
+        "scopeBack": "封底",
+        "scopeAll": "全部",
+        "uploadImage": "上传背景图片",
+        "uploading": "上传中…",
+        "pickImage": "选择背景图片",
+        "imageFilter": "图片文件",
+        "preview": "背景图片预览",
+        "fitCover": "铺满",
+        "fitContain": "居中完整",
+        "removeImage": "移除背景图片"
       }
     },
     "dragDrop": {
@@ -1406,6 +1462,7 @@
       "backup": "备份数据",
       "page": "页面",
       "pageSettings": "页面设置",
+      "coverSettings": "封面设置",
       "timeWatermark": "时间水印"
     },
     "guard": {
@@ -1418,6 +1475,26 @@
     },
     "saveBtn": "保存",
     "exportBtn": "导出",
+    "bookPreviewBtn": "预览",
+    "exitBookPreviewBtn": "退出预览",
+    "bookPreview": {
+      "title": "真实效果预览",
+      "rendering": "正在生成翻页预览…",
+      "page": "第 {{current}} / {{total}} 页",
+      "prev": "上一页",
+      "next": "下一页",
+      "empty": "暂无页面可预览",
+      "coverStage": "封面",
+      "coverHint": "点击封面打开相册",
+      "coverAlt": "相册封面",
+      "openCover": "打开相册",
+      "backStage": "封底",
+      "backHint": "翻到最后一页，展示封底",
+      "backAlt": "相册封底",
+      "backToFlip": "返回翻页",
+      "goCover": "封面",
+      "goBack": "封底"
+    },
     "backup": {
       "title": "备份当前相册",
       "confirm": "确认备份",
@@ -1903,6 +1980,8 @@
       "slotGap": "槽位间距",
       "slotRadius": "槽位圆角",
       "coverSlotRadius": "封面照片位圆角",
+      "spine": "书脊",
+      "spineColor": "书脊底色",
       "uniform": "统一",
       "perCorner": "每角单独",
       "cornerTL": "左上",
@@ -1912,6 +1991,19 @@
       "applyToAll": "应用到所有页面",
       "marginGuide": "显示边距辅助线",
       "guides": "显示对齐辅助线",
+      "resetDefault": "恢复默认"
+    },
+    "coverSettings": {
+      "title": "封面设置",
+      "coverSlotRadius": "封面照片位圆角",
+      "spine": "书脊",
+      "spineColor": "书脊底色",
+      "uniform": "统一",
+      "perCorner": "每角单独",
+      "cornerTL": "左上",
+      "cornerTR": "右上",
+      "cornerBR": "右下",
+      "cornerBL": "左下",
       "resetDefault": "恢复默认"
     },
     "emptyState": {
@@ -1928,7 +2020,7 @@
       "marginHint": "空白页面将自动应用当前边距与圆角设置"
     },
     "textElement": {
-      "placeholder": "点击输入文字"
+      "placeholder": "双击输入文字"
     },
     "stickyNote": {
       "placeholder": "双击编辑"
@@ -1994,7 +2086,13 @@
     },
     "colorPalette": {
       "tabSolid": "主题色",
-      "tabGradient": "渐变色"
+      "tabGradient": "渐变色",
+      "standardColors": "标准色",
+      "colorWheel": "色盘",
+      "noGradient": "无渐变",
+      "customColor": "自定义颜色",
+      "tripleGradient": "三色渐变",
+      "quadGradient": "四色渐变"
     }
   },
   "about": {

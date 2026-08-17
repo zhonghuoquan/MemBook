@@ -16,12 +16,16 @@ import {
   MM_TO_PX,
   getSlotRect,
   calcPhotoRenderParams,
+  wrapTextLines,
+  paintTextureTile,
+  getTextureBaseColor,
   type SlotRect,
 } from './sharedRender';
 import {
   resolveTemplate,
   getSlotZIndex,
   normalizeSlotCornerRadius,
+  isCoverPage,
   type AlbumPage,
   type Photo,
   type PhotoPlacement,
@@ -33,6 +37,9 @@ import {
 } from '../types';
 import type { PhotoContentInfo } from '../engine/content-aware';
 import { SLOT_BORDER_COLORS, SLOT_CANVAS_PALETTE } from '../constants/templatePalette';
+import { toRgba, linearGradientEndpoints } from '../constants/colorPalette';
+import { getShapePolygonPoints, getRectCornerRadii } from './shapeGeometry';
+import { MIN_SHAPE_SIZE_MM, MIN_STROKE_WIDTH } from '../components/editor/canvas/constants';
 
 /** 兼容 OffscreenCanvas 与 HTMLCanvasElement 的 2D 上下文类型 */
 type AnyCtx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -86,17 +93,27 @@ function parseCssGradientColors(css: string): (string | number)[] {
   return stops;
 }
 
-/** 纹理背景的基础色（与画布 getTextureBaseColor 一致） */
-function getTextureBaseColor(texture: string): string {
-  const map: Record<string, string> = {
-    'texture-ricepaper': '#F5F0E8',
-    'texture-kraft': '#C4A882',
-    'texture-dots': '#F9FAFB',
-    'texture-grid': '#F9FAFB',
-    'texture-stripes': '#FAFAFA',
-    'texture-linen': '#F0EDE8',
-  };
-  return map[texture] || '#FFFFFF';
+/** 生成纹理背景 tile（OffscreenCanvas 兼容 Worker；主线程用 document 回退） */
+function createTextureTile(texture: string): CanvasImageSource | null {
+  const size = 32;
+  try {
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const c = new OffscreenCanvas(size, size);
+      const octx = c.getContext('2d');
+      if (!octx) return null;
+      paintTextureTile(octx, texture, size);
+      return c;
+    }
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    paintTextureTile(ctx, texture, size);
+    return c;
+  } catch {
+    return null;
+  }
 }
 
 /** 绘制页面背景（支持纯色 / CSS linear-gradient / texture- 前缀，与编辑器/导出引擎一致） */
@@ -122,10 +139,45 @@ function drawPageBackground(ctx: AnyCtx2D, bg: string | undefined, w: number, h:
   if (value.startsWith('texture-')) {
     ctx.fillStyle = getTextureBaseColor(value);
     ctx.fillRect(0, 0, w, h);
+    // Worker 环境无 document，用 OffscreenCanvas 生成 pattern（主线程亦然），与画布图案一致
+    const tile = createTextureTile(value);
+    if (tile) {
+      const pattern = ctx.createPattern(tile, 'repeat');
+      if (pattern) {
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
     return;
   }
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, w, h);
+}
+
+/** 在背景之上叠加背景图片位图（cover=铺满裁剪 / contain=完整居中，与画布/导出一致） */
+function drawBackgroundImageOn(
+  ctx: AnyCtx2D,
+  img: HTMLImageElement | ImageBitmap,
+  w: number,
+  h: number,
+  fit: 'cover' | 'contain',
+): void {
+  const iw = img.width;
+  const ih = img.height;
+  if (!iw || !ih) return;
+  if (fit === 'contain') {
+    const scale = Math.min(w / iw, h / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  } else {
+    const scale = Math.max(w / iw, h / ih);
+    const sw = w / scale;
+    const sh = h / scale;
+    const sx = (iw - sw) / 2;
+    const sy = (ih - sh) / 2;
+    ctx.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, w, h);
+  }
 }
 
 /**
@@ -157,9 +209,43 @@ export function drawPageToCanvas(
    *  主线程不传时 calcPhotoRenderParams 自己查全局缓存。
    *  Worker 必须传入，否则 Worker 内全局缓存为空 → 永远居中。 */
   contentInfoMap?: Map<string, PhotoContentInfo>,
+  /** 背景图片位图（主线程/Worker 预加载后传入；无则仅画底色） */
+  backgroundImageBitmap?: HTMLImageElement | ImageBitmap,
 ): number {
+  // 封面页在缩略图/全屏中只展示封面正面内容（不含书脊）：
+  // 封面文字/形状在数据层整体右移了书脊宽（印刷一体，无视觉间隙），槽位经 slotOverrides 也含该偏移。
+  // 在此构造"去书脊偏移"的页面副本（文字/形状减 mm 偏移、槽位减 px 偏移；无 slotOverrides 时
+  // 槽位用模板默认坐标，本就在 [0,pageW]），使所有元素坐标统一到逻辑宽 logicalW（页面宽）内，
+  // 封面正面恰好填满缩略图；书脊 logo 不再绘制。spineWidth 置 0 避免后续逻辑重复加偏移。
+  if (isCoverPage(page) && (page.spineWidth ?? 0) > 0) {
+    // 封面正面内容在数据层整体右移书脊宽（印刷一体，无视觉间隙），缩略图只显示封面正面（不含书脊）：
+    // 整体左移书脊宽，使封面正面填满逻辑宽 logicalW（页面宽）。
+    const offsetMm = (page.spineWidth ?? 0);
+    const offsetPx = offsetMm * MM_TO_PX;
+    page = {
+      ...page,
+      spineWidth: 0,
+      textElements: (page.textElements || []).map((el) => ({ ...el, x: el.x - offsetMm })),
+      shapeElements: (page.shapeElements || []).map((sh) => ({ ...sh, x: sh.x - offsetMm })),
+      stickerElements: (page.stickerElements || []).map((st) => ({ ...st, x: st.x - offsetMm })),
+      brushStrokes: (page.brushStrokes || []).map((s) => ({
+        ...s,
+        points: s.points.map((v, i) => (i % 2 === 0 ? v - offsetMm : v)),
+      })),
+      slotOverrides: page.slotOverrides
+        ? (Object.fromEntries(
+            Object.entries(page.slotOverrides).map(([id, o]) => [id, { ...o, x: o.x - offsetPx }]),
+          ) as AlbumPage['slotOverrides'])
+        : undefined,
+    };
+  }
+
   // ── 页面背景（支持纯色 / CSS linear-gradient / texture- 前缀，与编辑器/导出引擎一致）──
   drawPageBackground(ctx, page.background, logicalW, logicalH);
+  // ── 背景图片叠加（若已预加载位图，与画布 PageBackgroundRect 一致：cover/contain）──
+  if (backgroundImageBitmap) {
+    drawBackgroundImageOn(ctx, backgroundImageBitmap, logicalW, logicalH, (page.backgroundImageFit ?? 'cover') as 'cover' | 'contain');
+  }
 
   // ── 收集照片映射 ──
   const photoMap = new Map(photos.map((p) => [p.id, p]));
@@ -406,38 +492,90 @@ function drawTextElement(ctx: AnyCtx2D, te: PageTextElement): void {
   if (te.bold) fontStyle += 'bold ';
   if (te.italic || !hasText) fontStyle += 'italic ';
   ctx.font = `${fontStyle}${fs}px ${te.fontFamily || 'sans-serif'}`;
-  ctx.fillStyle = hasText ? (te.color || '#333') : '#999';
   ctx.textBaseline = 'top';
+  // 渐变填充（与画布 TextElementNode / exportEngine 一致：线性=左上→右下，径向=中心向外）
+  let fillValue: string | CanvasGradient = hasText ? (te.color || '#333') : '#999';
+  if (hasText && te.gradient && te.gradient.length >= 2) {
+    if (te.gradientType === 'radial') {
+      const cx = tx + tw / 2;
+      const cy = ty + th / 2;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(tw, th) / 2);
+      for (const s of te.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      fillValue = grad;
+    } else {
+      const { startX, startY, endX, endY } = linearGradientEndpoints(tw, th, te.gradientAngle ?? 45);
+      const cxx = tx + tw / 2;
+      const cyy = ty + th / 2;
+      const grad = ctx.createLinearGradient(cxx + startX, cyy + startY, cxx + endX, cyy + endY);
+      for (const s of te.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      fillValue = grad;
+    }
+  }
+  ctx.fillStyle = fillValue;
 
-  // 竖排（春联）模式：rotation === -90 时逐字竖排，从右到左
-  if (te.rotation === -90) {
+  // 竖排（春联）模式：isVertical 标志为 true 时逐字竖排，从右到左
+  if (te.isVertical) {
     ctx.textAlign = 'left';
     const text = te.text || '';
-    const stepY = fs + 2;
-    const stepX = fs + 6;
-    let cx = tx + tw - fs - pad;
-    let cy = ty + pad;
+    const stepY = fs + (te.letterSpacing ?? 0);
+    const stepX = fs + ((te.lineHeight ?? 1.2) - 1) * fs;
+    const top = ty + pad;
+    const bottom = ty + th - pad;
+    let colX = tx + tw - fs - pad; // 从最右侧开始
+    let cy = top;
+    const nodes: { ch: string; x: number; y: number }[] = [];
     for (const ch of text) {
       if (ch === '\n') {
-        cx -= stepX;
-        cy = ty + pad;
+        colX -= stepX;
+        cy = top;
         continue;
       }
-      if (cy + fs > ty + th - pad) {
-        cx -= stepX;
-        cy = ty + pad;
+      if (cy + fs > bottom) {
+        colX -= stepX;
+        cy = top;
       }
-      ctx.fillText(ch, cx, cy);
+      nodes.push({ ch, x: colX, y: cy });
       cy += stepY;
     }
+    // 对齐：根据 align 水平定位整块列（左/居/右对齐）
+    if (nodes.length > 0) {
+      const xs = nodes.map((n) => n.x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs) + fs;
+      let shift: number;
+      if (te.align === 'left') shift = tx + pad - minX;
+      else if (te.align === 'right') shift = tx + tw - fs - pad - maxX;
+      else shift = tx + tw / 2 - (minX + maxX) / 2; // 居中
+      for (const n of nodes) n.x += shift;
+      // 垂直对齐：竖排整块内容在框内按 verticalAlign（top/center/bottom）定位
+      const ys = nodes.map((n) => n.y);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys) + fs;
+      const contentH = th - pad * 2;
+      const blockH = maxY - minY;
+      const valign = te.verticalAlign ?? 'center';
+      let vshift = 0;
+      if (valign === 'center') vshift = (contentH - blockH) / 2;
+      else if (valign === 'bottom') vshift = contentH - blockH;
+      if (vshift > 0) for (const n of nodes) n.y += vshift;
+    }
+    for (const n of nodes) ctx.fillText(n.ch, n.x, n.y);
     return;
   }
 
-  // 横排模式
+  // 横排模式（断行与编辑器 DOM 文字层 TextDomNode 同源：CJK 逐字可断、Latin 按空格断行，
+  // 测量计入字距；内容宽 = 盒宽 − 左右内边距 − 末尾一字距，与 fitTextSize 同口径）
   ctx.textAlign = (te.align as CanvasTextAlign) || 'left';
-  const lines = wrapText(ctx, te.text || '', tw - pad * 2);
-  const lineHeight = fs * 1.2;
+  const hLs = te.letterSpacing ?? 0;
+  ctx.letterSpacing = `${hLs}px`;
+  const lines = wrapTextLines(ctx, te.text || '', tw - pad * 2 - hLs, hLs);
+  const lineHeight = fs * (te.lineHeight ?? 1.2);
+  // 垂直对齐：顶/居中/底（与编辑器 TextElementNode / exportEngine 一致，默认居中）
+  const totalH = lines.length * lineHeight;
+  const verticalAlign = te.verticalAlign ?? 'center';
   let y = ty + pad;
+  if (verticalAlign === 'center') y += Math.max(0, (th - pad * 2 - totalH) / 2);
+  else if (verticalAlign === 'bottom') y = Math.max(ty + pad, ty + th - pad - totalH);
   for (const line of lines) {
     let x = tx + pad;
     if (te.align === 'center') x = tx + tw / 2;
@@ -445,6 +583,7 @@ function drawTextElement(ctx: AnyCtx2D, te: PageTextElement): void {
     ctx.fillText(line, x, y);
     y += lineHeight;
   }
+  ctx.letterSpacing = '0px';
 }
 
 /** 绘制便利贴（按 style 字段渲染，与 StickyNoteNode.tsx / exportEngine.drawStickyNote 一致） */
@@ -562,65 +701,84 @@ function drawSticker(
   ctx.restore();
 }
 
-/** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform，逻辑与 exportEngine.drawShape 一致） */
+/** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform 与最小尺寸下限，逻辑与 exportEngine.drawShape 一致） */
 function drawShape(ctx: AnyCtx2D, sh: ShapeElement): void {
   const px = sh.x * MM_TO_PX;
   const py = sh.y * MM_TO_PX;
-  const pw = Math.max(sh.width * MM_TO_PX, 10);
-  const ph = Math.max(sh.height * MM_TO_PX, 10);
+  // 最小尺寸下限与编辑器 ShapeNode 同源（MIN_SHAPE_SIZE_MM），确保小尺寸形状在缩略图与编辑模式一致
+  const pw = Math.max(sh.width * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
+  const ph = Math.max(sh.height * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
 
   ctx.save();
   ctx.translate(px, py);
   ctx.rotate((sh.rotation * Math.PI) / 180);
   ctx.globalAlpha = typeof sh.opacity === 'number' ? sh.opacity : 1;
 
-  const lineWidth = Math.max(0.5, sh.strokeWidth || 0);
+  const lineWidth = Math.max(MIN_STROKE_WIDTH, sh.strokeWidth || 0);
   ctx.lineWidth = lineWidth;
-  if (sh.fill) ctx.fillStyle = sh.fill;
-  if (sh.stroke) ctx.strokeStyle = sh.stroke;
-
-  const minDim = Math.min(pw, ph);
   const halfW = pw / 2;
   const halfH = ph / 2;
+  // 渐变填充（与画布 ShapeGlyph / exportEngine 一致：线性=左上→右下，径向=中心向外）
+  const hasFill = !!(sh.fill || (sh.gradient && sh.gradient.length >= 2));
+  if (sh.gradient && sh.gradient.length >= 2) {
+    if (sh.gradientType === 'radial') {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.min(pw, ph) / 2);
+      for (const s of sh.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      ctx.fillStyle = grad;
+    } else {
+      const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.gradientAngle ?? 45);
+      const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+      for (const s of sh.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      ctx.fillStyle = grad;
+    }
+  } else if (sh.fill) {
+    ctx.fillStyle = sh.fill;
+  }
+  if (sh.strokeGradient && sh.strokeGradient.length >= 2) {
+    const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.strokeGradientAngle ?? 45);
+    const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+    for (const s of sh.strokeGradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+    ctx.strokeStyle = grad;
+  } else if (sh.stroke) {
+    ctx.strokeStyle = sh.stroke;
+  }
 
   const beginShape = () => {
-    if (sh.fill) ctx.fill();
-    if (sh.stroke && lineWidth > 0) ctx.stroke();
+    if (hasFill) ctx.fill();
+    if ((sh.stroke || (sh.strokeGradient && sh.strokeGradient.length >= 2)) && lineWidth > 0) ctx.stroke();
   };
 
   switch (sh.type) {
     case 'circle':
-      ctx.beginPath(); ctx.arc(0, 0, minDim / 2, 0, Math.PI * 2); beginShape(); break;
     case 'ellipse':
+      // 圆形/椭圆都填满 pw×ph 盒子（与 ShapeGlyph / exportEngine 一致）
       ctx.beginPath(); ctx.ellipse(0, 0, halfW, halfH, 0, 0, Math.PI * 2); beginShape(); break;
-    case 'triangle': {
-      ctx.beginPath(); const r = minDim / 2;
-      ctx.moveTo(0, -r); ctx.lineTo(r, r); ctx.lineTo(-r, r); ctx.closePath(); beginShape(); break;
-    }
-    case 'diamond': {
-      ctx.beginPath(); const r = minDim / 2;
-      ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath(); beginShape(); break;
-    }
-    case 'square':
-      ctx.beginPath(); ctx.rect(-halfW, -halfW, pw, pw); beginShape(); break;
+    case 'triangle':
+    case 'diamond':
+    case 'pentagon':
+    case 'hexagon':
+    case 'star':
+    case 'parallelogram':
+    case 'trapezoid':
+    case 'cutCornerRect':
+    case 'cutDiagonalRect':
+      // 多边形/星形/切角矩形：用共享顶点填满 pw×ph（最外边缘贴合控制盒）
+      ctx.beginPath();
+      {
+        const pts = getShapePolygonPoints(sh.type, pw, ph, sh.cornerCut);
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      }
+      ctx.closePath(); beginShape(); break;
     case 'rectangle':
+    case 'roundedRect':
+    case 'singleRoundRect':
+    case 'diagonalRoundRect':
+      // 矩形类：每角圆角半径由共享 getRectCornerRadii 计算（支持 cornerRadius 调节）
+      roundRectPerCorner(ctx, -halfW, -halfH, pw, ph, getRectCornerRadii(sh.type, pw, ph, sh.cornerRadius) as [number, number, number, number]);
+      beginShape(); break;
     default:
       ctx.beginPath(); ctx.rect(-halfW, -halfH, pw, ph); beginShape(); break;
-    case 'pentagon': {
-      ctx.beginPath(); const r = minDim / 2;
-      for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; const x = Math.cos(a) * r, y = Math.sin(a) * r; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
-      ctx.closePath(); beginShape(); break;
-    }
-    case 'hexagon': {
-      ctx.beginPath(); const r = minDim / 2;
-      for (let i = 0; i < 6; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 6; const x = Math.cos(a) * r, y = Math.sin(a) * r; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
-      ctx.closePath(); beginShape(); break;
-    }
-    case 'star': {
-      ctx.beginPath(); const outer = minDim / 2, inner = minDim / 4;
-      for (let i = 0; i < 10; i++) { const r = i % 2 === 0 ? outer : inner; const a = -Math.PI / 2 + (i * Math.PI) / 5; const x = Math.cos(a) * r, y = Math.sin(a) * r; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
-      ctx.closePath(); beginShape(); break;
-    }
     case 'arrow': {
       const tip = halfW, tail = -halfW;
       const headLen = Math.min(24, pw / 3);
@@ -634,7 +792,7 @@ function drawShape(ctx: AnyCtx2D, sh: ShapeElement): void {
       ctx.beginPath(); ctx.moveTo(-halfW, 0); ctx.lineTo(halfW, 0);
       ctx.lineCap = 'round';
       ctx.strokeStyle = sh.stroke || sh.fill || '#6C63FF';
-      ctx.lineWidth = Math.max(1, sh.strokeWidth || 2);
+      ctx.lineWidth = Math.max(MIN_STROKE_WIDTH, sh.strokeWidth || 2);
       ctx.stroke(); break;
     }
   }
@@ -643,6 +801,28 @@ function drawShape(ctx: AnyCtx2D, sh: ShapeElement): void {
 }
 
 /* ══════════════════════════ 工具函数 ══════════════════════════ */
+
+/** 绘制圆角矩形路径（每角独立半径，兼容不支持原生 roundRect 的 WebView2）。radii 顺序：左上、右上、右下、左下 */
+function roundRectPerCorner(
+  ctx: AnyCtx2D,
+  x: number, y: number, w: number, h: number,
+  radii: [number, number, number, number],
+): void {
+  const [tl, tr, br, bl] = radii;
+  const maxR = Math.min(w / 2, h / 2);
+  const r = (v: number) => Math.max(0, Math.min(v, maxR));
+  ctx.beginPath();
+  ctx.moveTo(x + r(tl), y);
+  ctx.lineTo(x + w - r(tr), y);
+  ctx.arcTo(x + w, y, x + w, y + r(tr), r(tr));
+  ctx.lineTo(x + w, y + h - r(br));
+  ctx.arcTo(x + w, y + h, x + w - r(br), y + h, r(br));
+  ctx.lineTo(x + r(bl), y + h);
+  ctx.arcTo(x, y + h, x, y + h - r(bl), r(bl));
+  ctx.lineTo(x, y + r(tl));
+  ctx.arcTo(x, y, x + r(tl), y, r(tl));
+  ctx.closePath();
+}
 
 /** 简单文字换行 */
 function wrapText(ctx: AnyCtx2D, text: string, maxWidth: number): string[] {

@@ -207,6 +207,8 @@ export type SlotLayout = {
 export type Template = {
   id: string;
   name: string;
+  /** 中文名称（中文界面显示用；缺省时回退 name） */
+  nameZh?: string;
   category: 'classic' | 'creative' | 'personality';
   slots: SlotLayout[];
   preview: string;
@@ -219,6 +221,18 @@ export type Template = {
   presetShapeElements?: PresetShapeElement[];
   /** 预设背景色（主要用于封面/封底模板） */
   presetBackground?: string;
+  /** 封面模板：书脊背景色（仅封面模板需要） */
+  spineColor?: string;
+  /**
+   * 封面/封底照片槽位四角圆角（px）：number=统一，[tl,tr,br,bl]=每角单独（顺时针左上→右上→右下→左下）。
+   * 按模板设计美观性自定义：全幅照片槽圆角 0（铺满），局部/贴边照片槽按风格设圆角。缺省 4。
+   */
+  slotCornerRadius?: number | [number, number, number, number];
+  /**
+   * 封面模板配套的封底模板（整体设计）：每套封面都内置一套风格统一的封底，
+   * 应用封面时自动同步应用配套封底，不拆分开。仅封面模板需要。
+   */
+  backCover?: Template;
 };
 
 /**
@@ -236,8 +250,21 @@ export type PresetTextElement = {
   bold: boolean;
   italic: boolean;
   rotation: number;
+  /**
+   * 垂直对齐：顶/居中/底（默认居中）。文本框高度大于文字时生效。
+   * 封面模板文字框高度通常贴合文字，缺省视为居中。
+   */
+  verticalAlign?: 'top' | 'center' | 'bottom';
+  /** 字间距（逻辑像素，默认 0）。横排=水平字符间距，竖排=垂直字符间距 */
+  letterSpacing?: number;
+  /** 行距因子（相对字号倍数，默认 1.2）。横排=行高，竖排=列间距的额外部分 */
+  lineHeight?: number;
   /** 占位符：应用时自动替换为相册名/日期，用户可再编辑 */
   placeholder?: 'albumName' | 'date' | 'none';
+  /** 渐变填充文字：设置后替代 color 渲染线性渐变（与文字工具一致，仅线性） */
+  gradient?: GradientStop[];
+  /** 线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  gradientAngle?: number;
 };
 
 /**
@@ -253,6 +280,18 @@ export type PresetShapeElement = {
   strokeWidth: number;
   opacity: number;
   rotation: number;
+  /** 渐变填充：设置后替代 fill 渲染线性渐变（与形状工具一致，仅线性） */
+  gradient?: GradientStop[];
+  /** 线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  gradientAngle?: number;
+  /** 描边渐变：设置后替代 stroke 渲染渐变描边 */
+  strokeGradient?: GradientStop[];
+  /** 描边线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  strokeGradientAngle?: number;
+  /** 圆角占比（0-1，仅矩形类生效，矩形类默认 0，roundRect 系列默认 0.15） */
+  cornerRadius?: number;
+  /** 切角大小（0-1 比例，仅切角矩形类生效，默认 0.25） */
+  cornerCut?: number;
 };
 
 /* ── 照片 ── */
@@ -288,6 +327,8 @@ export type Photo = {
   locationStatus?: LocationStatus;
   /** 所属项目 ID，用于项目间照片隔离 */
   albumId?: string;
+  /** 封面预设照片标记：系统自动为封面照片位生成的占位图，仅封面显示、不出现在照片列表中 */
+  isCoverPreset?: boolean;
   /** P1-1 清晰度评分（0-1，Laplacian variance 归一化），用于评分系统识别失焦废图。 */
   clarityScore?: number;
 };
@@ -401,7 +442,30 @@ export type AlbumPage = {
   hiddenTemplateSlotIds?: string[];
   /** 页面类型：content=普通内容页 / cover=封面 / backCover=封底。缺省 = 'content'，兼容旧数据 */
   pageKind?: PageKind;
+  /** 封面/封底：书脊宽度（mm，默认 0 表示无书脊）。计算方式：书脊宽度 ≈ 页数 × 纸张厚度。 */
+  spineWidth?: number;
+  /** 封面/封底：书脊背景色（从模板继承，可用户修改） */
+  spineColor?: string;
+  /** 背景图片（用户上传）：dataURL 或 blob URL，叠加在 background 底色之上。无则仅用 background 纯色/渐变/纹理 */
+  backgroundImage?: string;
+  /** 背景图片填充方式：cover=铺满裁剪（默认）/ contain=完整缩放居中 */
+  backgroundImageFit?: 'cover' | 'contain';
 };
+
+/** 背景应用描述：同时设置底色（纯色 hex / 渐变 css / 纹理 texture-xxx）与背景图片 */
+export type BackgroundApply = {
+  background?: string;
+  backgroundImage?: string;
+  backgroundImageFit?: 'cover' | 'contain';
+};
+
+/** 背景「应用到」范围：区分封面/封底/普通页面，避免混为一谈全部改动 */
+export type BackgroundApplyScope =
+  | 'current'   // 仅当前页
+  | 'normal'    // 所有普通页面（不含封面/封底）
+  | 'cover'     // 封面页
+  | 'back'      // 封底页
+  | 'all';      // 全部页面（含封面/封底）
 
 /** 读取槽位 zIndex：未配置时返回 0（与装饰元素共享同一命名空间） */
 export function getSlotZIndex(page: { slotZIndices?: Record<string, number> }, slotId: string): number {
@@ -471,12 +535,31 @@ export type PageTextElement = {
   fontFamily: string;
   color: string;              // 文字颜色
   align: 'left' | 'center' | 'right';
+  /** 垂直对齐：顶/居中/底（默认居中）。文本框高度大于文字时生效 */
+  verticalAlign?: 'top' | 'center' | 'bottom';
   bold: boolean;
   italic: boolean;
   underline?: boolean;        // 下划线
   rotation: number;
+  /** 竖排模式（春联/书脊等逐字排列）。与 rotation 解耦：仅此标志为 true 时逐字竖排，旋转角度不影响竖排判断 */
+  isVertical?: boolean;
+  /** 字间距（逻辑像素，默认 0）。横排=水平字符间距，竖排=垂直字符间距 */
+  letterSpacing?: number;
+  /** 行距因子（相对字号倍数，默认 1.2）。横排=行高，竖排=列间距的额外部分（(lineHeight-1)*fontSize） */
+  lineHeight?: number;
+  /** 渐变填充：设置后将替代 color 渲染渐变。undefined 表示纯色模式 */
+  gradient?: GradientStop[];
+  /** 渐变类型：linear=线性渐变，radial=径向渐变 */
+  gradientType?: 'linear' | 'radial';
+  /** 线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  gradientAngle?: number;
   zIndex: number;
 };
+
+/** 文字默认行距因子（与渲染层 lineHeight=1.2 一致） */
+export const DEFAULT_TEXT_LINE_HEIGHT = 1.2;
+/** 文字默认字间距（逻辑像素） */
+export const DEFAULT_TEXT_LETTER_SPACING = 0;
 
 /* ── 贴纸元素（页面内） ── */
 export type StickerElement = {
@@ -491,9 +574,19 @@ export type StickerElement = {
 
 /* ── 形状元素（页面内，类似 PPT 添加形状） ── */
 export type ShapeType =
-  | 'rectangle' | 'square' | 'circle' | 'ellipse'
+  | 'rectangle' | 'roundedRect' | 'singleRoundRect' | 'diagonalRoundRect'
+  | 'parallelogram' | 'trapezoid' | 'cutCornerRect' | 'cutDiagonalRect'
+  | 'circle' | 'ellipse'
   | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
   | 'star' | 'arrow' | 'line';
+
+/** 渐变颜色停止点 */
+export type GradientStop = {
+  offset: number; // 0-1
+  color: string;
+  /** 该色标不透明度 0-1（默认 1 不透明），用于让渐变某端变半透明 */
+  alpha?: number;
+};
 
 /**
  * 形状元素：可调整尺寸、填充色、描边、透明度、旋转。
@@ -504,7 +597,7 @@ export type ShapeElement = {
   x: number; y: number;        // mm，页面内位置（中心点）
   width: number; height: number; // mm，外形包围盒
   type: ShapeType;
-  /** 填充色（hex），支持空字符串表示无填充 */
+  /** 填充色（hex），支持空字符串表示无填充。渐变模式下 fill 作为渐变起始色 */
   fill: string;
   /** 描边色（hex） */
   stroke: string;
@@ -514,6 +607,20 @@ export type ShapeElement = {
   opacity: number;
   rotation: number;
   zIndex: number;
+  /** 渐变填充：设置后将替代 fill 渲染渐变。undefined 表示纯色模式 */
+  gradient?: GradientStop[];
+  /** 渐变类型：linear=线性渐变，radial=径向渐变 */
+  gradientType?: 'linear' | 'radial';
+  /** 线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  gradientAngle?: number;
+  /** 描边渐变：设置后将替代 stroke 渲染渐变描边。undefined 表示纯色描边 */
+  strokeGradient?: GradientStop[];
+  /** 描边线性渐变角度（0-360 度，默认 45 = 左上到右下） */
+  strokeGradientAngle?: number;
+  /** 圆角占比（0-1，为 min(w,h)/2 的倍数，仅矩形类生效）：rectangle 默认 0，roundRect 系列默认 0.15，可被 PPT 式调节手柄调整；100%（=1）时正方形变为正圆 */
+  cornerRadius?: number;
+  /** 切角大小（0-1 比例，为 min(w,h)/2 的倍数，仅切角矩形类生效）：cutCornerRect/cutDiagonalRect 默认 0.25，可被 PPT 式调节手柄调整 */
+  cornerCut?: number;
 };
 
 /** 形状默认尺寸（mm） */
@@ -529,7 +636,9 @@ export const DEFAULT_SHAPE_STYLE = {
 
 /** 形状支持的类型列表（供工具面板展示） */
 export const SHAPE_TYPES: ShapeType[] = [
-  'rectangle', 'square', 'circle', 'ellipse',
+  'rectangle', 'roundedRect', 'singleRoundRect', 'diagonalRoundRect',
+  'parallelogram', 'trapezoid', 'cutCornerRect', 'cutDiagonalRect',
+  'circle', 'ellipse',
   'triangle', 'diamond', 'pentagon', 'hexagon',
   'star', 'arrow', 'line',
 ];
@@ -2088,29 +2197,45 @@ export const TEMPLATES: Template[] = [
 /* ── 背景主题色 ── */
 export const THEME_BACKGROUNDS = [
   { name: '纯白', color: '#FFFFFF' },
-  { name: '暖灰', color: '#F8F9FA' },
-  { name: '米白', color: '#FFF8E7' },
-  { name: '浅粉', color: '#FFF0F0' },
-  { name: '薰衣草', color: '#F0EFFF' },
-  { name: '浅蓝', color: '#EFF6FF' },
-  { name: '薄荷', color: '#ECFDF5' },
-  { name: '淡黄', color: '#FFFBEB' },
-  { name: '高级灰', color: '#F1F3F5' },
-  { name: '墨黑', color: '#1A1A1A' },
-  { name: '藏青', color: '#1E3A5F' },
-  { name: '复古绿', color: '#2D5016' },
+  { name: '暖灰', color: '#F7F7F5' },
+  { name: '米白', color: '#F5F0E8' },
+  { name: '灰粉', color: '#F3ECE9' },
+  { name: '灰紫', color: '#EFEBF2' },
+  { name: '雾蓝', color: '#EDF1F5' },
+  { name: '雾青', color: '#ECF2F2' },
+  { name: '鼠尾草', color: '#F0F1EC' },
+  { name: '燕麦', color: '#F6F1E7' },
+  { name: '高级灰', color: '#E9E9E6' },
+  { name: '墨黑', color: '#1F1F1E' },
+  { name: '藏青', color: '#2A3441' },
 ];
 
-/* ── 渐变背景预设 ── */
+/* ── 渐变背景预设（莫兰迪 + 鲜艳，与形状/文字共用同一套渐变） ── */
 export const GRADIENT_BACKGROUNDS = [
-  { name: '暖阳', value: 'linear-gradient(135deg, #FFF1EB 0%, #ACE0F9 100%)' },
-  { name: '晚霞', value: 'linear-gradient(135deg, #FFD1FF 0%, #FAD0C4 50%, #FFD89B 100%)' },
-  { name: '薄荷冰', value: 'linear-gradient(135deg, #A1C4FD 0%, #C2E9FB 100%)' },
-  { name: '薰衣草', value: 'linear-gradient(135deg, #E8D5F5 0%, #F5E6CC 100%)' },
-  { name: '森林', value: 'linear-gradient(135deg, #D4FC79 0%, #96E6A1 100%)' },
+  // 莫兰迪
+  { name: '晨雾', value: 'linear-gradient(135deg, #E8E7E4 0%, #A6B8C9 100%)' },
+  { name: '暮霭', value: 'linear-gradient(135deg, #D9CCBE 0%, #8A9BA8 100%)' },
+  { name: '陶土', value: 'linear-gradient(135deg, #E8C4BA 0%, #B4553F 100%)' },
+  { name: '杏橙', value: 'linear-gradient(135deg, #F0E3BC 0%, #C97B4A 100%)' },
+  { name: '苔藓', value: 'linear-gradient(135deg, #D3DACB 0%, #7A8B6F 100%)' },
+  { name: '雾青', value: 'linear-gradient(135deg, #C9DADA 0%, #6F8F8F 100%)' },
+  { name: '雾蓝', value: 'linear-gradient(135deg, #D3DCE7 0%, #7A8DA6 100%)' },
+  { name: '丁香', value: 'linear-gradient(135deg, #DDD6E4 0%, #8A7A9E 100%)' },
+  { name: '裸粉', value: 'linear-gradient(135deg, #EED8D5 0%, #B98A8A 100%)' },
+  { name: '卡其', value: 'linear-gradient(135deg, #D9CCBE 0%, #8A7668 100%)' },
+  // 鲜艳
+  { name: '日落', value: 'linear-gradient(135deg, #FF512F 0%, #F09819 100%)' },
+  { name: '晚霞', value: 'linear-gradient(135deg, #FF6A88 0%, #FFD89B 100%)' },
+  { name: '蜜桃', value: 'linear-gradient(135deg, #FF9A9E 0%, #FAD0C4 100%)' },
+  { name: '柠檬', value: 'linear-gradient(135deg, #F6D365 0%, #FDA085 100%)' },
+  { name: '薄荷', value: 'linear-gradient(135deg, #43E97B 0%, #38F9D7 100%)' },
+  { name: '海洋', value: 'linear-gradient(135deg, #2193B0 0%, #6DD5ED 100%)' },
+  { name: '天蓝', value: 'linear-gradient(135deg, #36D1DC 0%, #5B86E5 100%)' },
   { name: '星空', value: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)' },
-  { name: '深海', value: 'linear-gradient(135deg, #0C3483 0%, #A2B2DF 100%)' },
-  { name: '日落', value: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)' },
+  { name: '紫罗兰', value: 'linear-gradient(135deg, #8E2DE2 0%, #4A00E0 100%)' },
+  { name: '品牌紫', value: 'linear-gradient(135deg, #6C63FF 0%, #926BFF 100%)' },
+  { name: '梦幻粉紫', value: 'linear-gradient(135deg, #F09BFF 0%, #A18CD1 100%)' },
+  { name: '夜幕', value: 'linear-gradient(135deg, #0F2027 0%, #2C5364 100%)' },
 ];
 
 /* ── 纹理背景预设 ── */

@@ -8,8 +8,7 @@
  * - 8 方向 resize（角点独立宽高 + 边点单维度），缩放锚点含旋转修正
  * - rotation === -90 时保持竖排（春联）模式，逐字正立排列
  */
-import { memo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { memo, useRef } from 'react';
 import { Group, Rect, Text, Circle, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
@@ -28,22 +27,26 @@ function TextElementNodeImpl({
   onUpdate: (patch: Partial<PageTextElement>, recordHistory?: boolean) => void;
   onRemove: () => void;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
-  onDblClick: () => void;
+  /** 双击进入编辑：回调双击点在文本框本地坐标（左上角为原点，逻辑像素），供编辑浮层定位光标 */
+  onDblClick: (localX: number, localY: number) => void;
 }) {
-  const { t } = useTranslation();
   // el.x/y 为左上角；组件内部换算为中心坐标，与便利贴/贴纸保持一致
   const cx = el.x + el.width / 2;
   const cy = el.y + (el.height ?? 20) / 2;
   const px = cx * mmToPx;
   const py = cy * mmToPx;
-  const pw = Math.max(el.width * mmToPx, 50);
-  const ph = Math.max((el.height ?? 20) * mmToPx, 20);
-  const [hovered, setHovered] = useState(false);
+  // 最小尺寸（mm，按 PPT 文本逻辑）：横排可缩到窄矮（宽 8mm / 高 4mm），竖排可缩到窄高（宽 4mm / 高 8mm）。
+  // 仅保留极小下限保证可选中/可操作，不再一刀切锁死 30×14mm。
+  const isV = el.isVertical === true;
+  const MIN_W_MM = isV ? 4 : 8;
+  const MIN_H_MM = isV ? 8 : 4;
+  // 渲染命中区最小：与 resize 下限一致（mm×mmToPx），避免"所见非所得"（框比 resize 允许的更大）
+  const pw = Math.max(el.width * mmToPx, MIN_W_MM * mmToPx);
+  const ph = Math.max((el.height ?? 20) * mmToPx, MIN_H_MM * mmToPx);
 
-  // 竖排（春联）模式：rotation === -90 时逐字竖排，文字保持正立，Group 不旋转
-  const isVertical = el.rotation === -90;
-  // 非竖排模式下应用实际旋转角度
-  const groupRotation = isVertical ? 0 : (el.rotation ?? 0);
+  // 旋转角度与竖排标志解耦：横排/竖排都应用实际旋转角度，旋转按钮可正常旋转整块文字
+  // （文字内容横排/竖排的渲染均由 Canvas 的 DOM 文字层 TextDomNode 承载）
+  const groupRotation = el.rotation ?? 0;
 
   // 控制点尺寸随缩放自适应
   const hsz = 6 / canvasZoom;
@@ -119,7 +122,7 @@ function TextElementNodeImpl({
             axes: 'both',
             cos, sin, anchorPX, anchorPY,
           };
-          const onMove = () => {
+          const onMove = (me: KonvaEventObject<MouseEvent>) => {
             const pos = stage.getPointerPosition();
             if (!pos) return;
             const { startW, startH, startPos: sp, isLeft, isTop, cos: c, sin: s, anchorPX: aPX, anchorPY: aPY } = resizeRef.current;
@@ -127,8 +130,17 @@ function TextElementNodeImpl({
             const sdy = (pos.y - sp.y) / mmToPx / canvasZoom;
             const { lx: dx, ly: dy } = screenDeltaToLocal(sdx, sdy);
             // 角点独立宽高缩放（不等比）
-            const nw = Math.max(30, startW + (isLeft ? -dx : dx));
-            const nh = Math.max(14, startH + (isTop ? -dy : dy));
+            let nw = Math.max(MIN_W_MM, startW + (isLeft ? -dx : dx));
+            let nh = Math.max(MIN_H_MM, startH + (isTop ? -dy : dy));
+            // Shift 保持宽高比（PPT 角点等比）：以移动量更大的维度为准，另一维度按原比例推导
+            if (me.evt?.shiftKey && startW > 0.01 && startH > 0.01) {
+              const ratio = startW / startH;
+              if (Math.abs(nw - startW) >= Math.abs(nh - startH)) {
+                nh = Math.max(MIN_H_MM, nw / ratio);
+              } else {
+                nw = Math.max(MIN_W_MM, nh * ratio);
+              }
+            }
             const newAnchorLX = isLeft ? nw / 2 : -nw / 2;
             const newAnchorLY = isTop ? nh / 2 : -nh / 2;
             const newCenterX = aPX - (newAnchorLX * c - newAnchorLY * s);
@@ -192,9 +204,9 @@ function TextElementNodeImpl({
             const { lx: dx, ly: dy } = screenDeltaToLocal(sdx, sdy);
             let nw = startW, nh = startH;
             if (ax === 'h') {
-              nw = Math.max(30, startW + (isLeft ? -dx : dx));
+              nw = Math.max(MIN_W_MM, startW + (isLeft ? -dx : dx));
             } else {
-              nh = Math.max(14, startH + (isTop ? -dy : dy));
+              nh = Math.max(MIN_H_MM, startH + (isTop ? -dy : dy));
             }
             const newAnchorLX = ax === 'h' ? (isLeft ? nw / 2 : -nw / 2) : 0;
             const newAnchorLY = ax === 'v' ? (isTop ? nh / 2 : -nh / 2) : 0;
@@ -223,9 +235,19 @@ function TextElementNodeImpl({
       listening={interactive}
       draggable={!isEditing && interactive}
       onClick={(e) => { e.cancelBubble = true; onClick(e); }}
-      onDblClick={(e) => { e.cancelBubble = true; onDblClick(); }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onDblClick={(e) => {
+        e.cancelBubble = true;
+        // 换算双击点在文本框本地坐标（左上角为原点，逻辑像素），供编辑浮层定位光标
+        const groupNode = mainGroupRef.current;
+        const stage = groupNode?.getStage();
+        const pointer = stage?.getPointerPosition();
+        if (groupNode && pointer) {
+          const local = groupNode.getAbsoluteTransform().copy().invert().point(pointer);
+          onDblClick(local.x + pw / 2, local.y + ph / 2);
+        } else {
+          onDblClick(0, 0);
+        }
+      }}
       onDragStart={(e) => {
         e.cancelBubble = true;
         const stage = e.target.getStage()!;
@@ -262,64 +284,23 @@ function TextElementNodeImpl({
         onUpdate({ x: finalX, y: finalY }, true);
       }}
     >
-      {/* hover/选中 背景 */}
-      {(hovered || isSelected) && (
+      {/* 选中虚线框（非编辑态由 Konva 绘制；编辑态由 TextEditHandles HTML 控制点层绘制，避免重复） */}
+      {isSelected && !isEditing && (
         <Rect
           x={-pw / 2} y={-ph / 2}
           width={pw} height={ph}
           fill="transparent"
-          stroke={isSelected ? '#6C63FF' : 'rgba(108,99,255,0.3)'}
-          strokeWidth={isSelected ? 1.5 / canvasZoom : 1 / canvasZoom}
-          dash={isSelected ? [5 / canvasZoom, 3 / canvasZoom] : undefined}
+          stroke="#6C63FF"
+          strokeWidth={1.5 / canvasZoom}
+          dash={[5 / canvasZoom, 3 / canvasZoom]}
           strokeScaleEnabled={false}
         />
       )}
-      {/* 文字内容 */}
-      {isVertical ? (
-        /* 竖向（春联）：每个字符正立，从上到下排列，\n 或超出高度自动换列（右→左） */
-        (() => {
-          const text = el.text || t('editor.textElement.placeholder');
-          const stepY = el.fontSize + 2;
-          const stepX = el.fontSize + 6;
-          let ccx = pw / 2 - el.fontSize - 4; // 从最右侧开始
-          let ccy = -ph / 2 + 4;
-          const nodes: { char: string; x: number; y: number }[] = [];
-          for (const ch of text) {
-            if (ch === '\n') {
-              ccx -= stepX;
-              ccy = -ph / 2 + 4;
-              continue;
-            }
-            if (ccy + el.fontSize > ph / 2 - 4) {
-              ccx -= stepX;
-              ccy = -ph / 2 + 4;
-            }
-            nodes.push({ char: ch, x: ccx, y: ccy });
-            ccy += stepY;
-          }
-          return nodes.map((n, i) => (
-            <Text key={i} x={n.x} y={n.y}
-              text={n.char}
-              fontSize={el.fontSize} fontFamily={el.fontFamily}
-              fill={el.color}
-              fontStyle={`${el.bold ? 'bold' : 'normal'} ${el.italic ? 'italic' : 'normal'}`}
-            />
-          ));
-        })()
-      ) : (
-        /* 横向：普通横排 */
-        <Text
-          x={-pw / 2 + 4} y={-ph / 2 + 4}
-          width={pw - 8}
-          text={el.text || t('editor.textElement.placeholder')}
-          fontSize={el.fontSize} fontFamily={el.fontFamily}
-          fill={el.text ? el.color : '#999'}
-          fontStyle={`${el.bold ? 'bold' : 'normal'} ${el.italic ? 'italic' : 'normal'}${!el.text ? ' italic' : ''}`}
-          align={el.align} wrap="word"
-        />
-      )}
-      {/* 选中态：8方向控制点 */}
-      {isSelected && (
+      {/* 命中区：文字内容由 Canvas 的 DOM 文字层（TextDomNode，单一排版引擎）渲染，
+          Konva 仅承载命中/拖拽/选中框/控制点。透明填充即可命中（Konva hit canvas 按色键绘制）。 */}
+      <Rect x={-pw / 2} y={-ph / 2} width={pw} height={ph} fill="transparent" />
+      {/* 选中态：8方向控制点（编辑时隐藏，避免误操作缩放/旋转） */}
+      {isSelected && !isEditing && (
         <>
           {/* 4 角（圆形，独立宽高缩放） */}
           {cornerHandle(-pw / 2, -ph / 2, 'nw-resize')}
@@ -333,8 +314,8 @@ function TextElementNodeImpl({
           {edgeHandle(pw / 2, 0, 'e-resize', 'h')}
         </>
       )}
-      {/* 旋转手柄（白色圆底 + ↻ 图标，以中心点旋转，单击旋转 90°） */}
-      {isSelected && (
+      {/* 旋转手柄（白色圆底 + ↻ 图标，以中心点旋转，单击旋转 90°）；编辑时隐藏 */}
+      {isSelected && !isEditing && (
         <>
           <Line
             points={[0, ph / 2, 0, ph / 2 + ICON_OFFSET]}
@@ -390,11 +371,8 @@ function TextElementNodeImpl({
                 const onUp = () => {
                   stage.off('mousemove.rotate mouseup.rotate');
                   document.body.style.cursor = '';
-                  if (!didMove) {
-                    onUpdate({ rotation: ((el.rotation ?? 0) + 90) % 360 }, true);
-                  } else {
-                    onUpdate({}, true);
-                  }
+                  // 单击不再 +90°（避免误触角度跳变）；仅实际拖动旋转时记录历史
+                  if (didMove) onUpdate({}, true);
                 };
                 stage.on('mousemove.rotate', onMove);
                 stage.on('mouseup.rotate', onUp);

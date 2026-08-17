@@ -86,8 +86,7 @@ export function StickerPanel() {
   return (
     <div ref={sb.ref} className={`h-full overflow-y-auto ps-scroll ${sb.className}`} {...sb.handlers}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-[var(--color-border-light)] sticky top-0 bg-white z-10">
-        <h3 className="text-[var(--text-body)] font-[700] text-[var(--color-gray-800)]">{t('editor.sticker.title')}</h3>
+      <div className="flex items-center justify-end p-4 border-b border-[var(--color-border-light)] sticky top-0 bg-white z-10">
         <button
           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[image:var(--gradient-brand)] text-white
                      rounded-[var(--radius-md)] text-[var(--text-caption)] font-[600]

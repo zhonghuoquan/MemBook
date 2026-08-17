@@ -128,7 +128,7 @@ function StickyNoteNodeImpl({
             axes: 'both',
             cos, sin, anchorPX, anchorPY,
           };
-          const onMove = (_me: KonvaEventObject<MouseEvent>) => {
+          const onMove = (me: KonvaEventObject<MouseEvent>) => {
             const pos = stage.getPointerPosition();
             if (!pos) return;
             const { startW, startH, startPos: sp, isLeft, isTop, cos: c, sin: s, anchorPX: aPX, anchorPY: aPY } = resizeRef.current;
@@ -136,8 +136,17 @@ function StickyNoteNodeImpl({
             const sdy = (pos.y - sp.y) / mmToPx / canvasZoom;
             const { lx: dx, ly: dy } = screenDeltaToLocal(sdx, sdy);
             // 角点独立宽高缩放（不等比，与文字工具一致）
-            const newW = Math.max(20, startW + (isLeft ? -dx : dx));
-            const newH = Math.max(20, startH + (isTop ? -dy : dy));
+            let newW = Math.max(20, startW + (isLeft ? -dx : dx));
+            let newH = Math.max(20, startH + (isTop ? -dy : dy));
+            // Shift 保持宽高比（PPT 角点等比）：以移动量更大的维度为准，另一维度按原比例推导
+            if (me.evt?.shiftKey && startW > 0.01 && startH > 0.01) {
+              const ratio = startW / startH;
+              if (Math.abs(newW - startW) >= Math.abs(newH - startH)) {
+                newH = Math.max(20, newW / ratio);
+              } else {
+                newW = Math.max(20, newH * ratio);
+              }
+            }
             const newAnchorLX = isLeft ? newW / 2 : -newW / 2;
             const newAnchorLY = isTop ? newH / 2 : -newH / 2;
             const newCenterX = aPX - (newAnchorLX * c - newAnchorLY * s);
@@ -477,11 +486,8 @@ function StickyNoteNodeImpl({
                 const onUp = () => {
                   stage.off('mousemove.rotate mouseup.rotate');
                   document.body.style.cursor = '';
-                  if (!didMove) {
-                    onUpdate({ rotation: (note.rotation + 90) % 360 }, true);
-                  } else {
-                    onUpdate({}, true);
-                  }
+                  // 单击不再 +90°（避免误触角度跳变）；仅实际拖动旋转时记录历史
+                  if (didMove) onUpdate({}, true);
                 };
                 stage.on('mousemove.rotate', onMove);
                 stage.on('mouseup.rotate', onUp);

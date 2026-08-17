@@ -14,8 +14,9 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { HomeOnboardingTour, shouldShowHomeOnboarding } from '../editor/OnboardingTour';
 import { useEditorStore, usePhotoStore, useUIStore } from '../../store';
-import { createAndSaveProject, savePhotos, loadPhotos, loadProject, setCurrentProjectId } from '../../db';
+import { createAndSaveProject, savePhotos, loadPhotos, loadProject, setCurrentProjectId, migrateCoverSpineGapOnce } from '../../db';
 import { restoreDirectoryHandle, makeDirectPhotoUrl, acquirePhotoUrl } from '../../engine/storage-engine';
+import coverLandscape from '../../assets/cover-landscape.jpg';
 import { photoService } from '../../services/photoService';
 
 import { useLicenseStore } from '../../license';
@@ -73,6 +74,11 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     if (!shouldShowHomeOnboarding()) return;
     const timer = setTimeout(() => setShowHomeTour(true), 500);
     return () => clearTimeout(timer);
+  }, []);
+
+  // 一次性封面间距迁移：旧版封面书脊与封面正面含视觉间隙，新版印刷一体连续，进入主页时迁移已有项目
+  useEffect(() => {
+    void migrateCoverSpineGapOnce();
   }, []);
 
   const setPages = useEditorStore((s) => s.setPages);
@@ -345,19 +351,19 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
     });
     useEditorStore.getState().setSlotGap(margin.gap);
     useEditorStore.getState().setDefaultSlotCornerRadius(DEFAULT_SLOT_CORNER_RADIUS);
+    // 新建相册：清空照片/页面，交给 applyCoverTemplate 为每个照片位自动填入预设照片
     setPhotos([]);
     setPages([]);
 
-    // 应用封面/封底模板：构造完整封面页（书脊 + 预设文字/形状/背景 + 照片槽位）
-    if (templateId.startsWith('cover-')) {
-      useEditorStore.getState().applyCoverTemplate(templateId);
-    } else {
-      useEditorStore.getState().applyBackCoverTemplate(templateId);
-    }
+    // 应用封面模板：构造完整封面页（书脊 + 预设文字/形状/背景 + 照片槽位），
+    // 自动为每个照片位补齐预设照片，并同步应用配套封底（template.backCover），
+    // 封面与封底整体成套、不拆分开。
+    await useEditorStore.getState().applyCoverTemplate(templateId);
 
     const pagesToSave = useEditorStore.getState().pages;
+    const photosToSave = usePhotoStore.getState().photos;
     const projectId = await createAndSaveProject(name, size, pagesToSave, margin, undefined, undefined);
-    await savePhotos([], projectId);
+    await savePhotos(photosToSave, projectId);
     setStorageMode(null);
     clearSmartLayoutState();
     useUIStore.getState().setCanvasZoom(1);
@@ -403,6 +409,8 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
         savedPhotos.map(async (p) => {
           // 确保运行时 albumId 与当前项目一致
           p.albumId = project.id;
+          // 封面预设照片：src 为打包静态资源，已持久化；旧数据可能 src 为空，补齐资源路径
+          if (p.isCoverPreset) { if (!p.src) p.src = coverLandscape; return; }
           if (p.storageMode === 'direct') {
             // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
             // P0-fix-2: 用 acquirePhotoUrl（refCount=1）替代 readPhotoFromDB（refCount=0），

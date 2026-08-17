@@ -33,6 +33,10 @@ export interface ThumbnailWorkerRequest {
   bitmaps: [string, ImageBitmap][];
   /** 贴纸 blobId → ImageBitmap 对（转移所有权，key 形如 `sticker-blob-{stickerId}`） */
   stickerBitmaps?: [string, ImageBitmap][];
+  /** 书脊 MemBook logo 水印 ImageBitmap（转移所有权，仅封面页使用） */
+  logoBitmap?: ImageBitmap;
+  /** 背景图片 ImageBitmap（转移所有权；无则仅画底色） */
+  backgroundImageBitmap?: ImageBitmap;
   /** 页面边距（mm），Worker 无法读取主线程 store，需由调用方传入 */
   margin?: { left: number; right: number; top: number; bottom: number };
   /** P1-fix: 内容感知信息映射（photoId → contentInfo），Worker 无法访问主线程全局缓存 */
@@ -59,7 +63,7 @@ interface WorkerScope {
 const ctx = self as unknown as WorkerScope;
 
 ctx.onmessage = async (e: MessageEvent<ThumbnailWorkerRequest>) => {
-  const { id, page, photos, albumSize, scale, baseWidth, bitmaps, stickerBitmaps, margin, contentInfoMap } = e.data;
+  const { id, page, photos, albumSize, scale, baseWidth, bitmaps, stickerBitmaps, logoBitmap, backgroundImageBitmap, margin, contentInfoMap } = e.data;
   const bitmapMap = new Map<string, ImageBitmap>(bitmaps);
   const stickerMap = new Map<string, ImageBitmap>(stickerBitmaps ?? []);
   // P1-fix: 接收主线程传入的内容感知信息映射
@@ -87,7 +91,7 @@ ctx.onmessage = async (e: MessageEvent<ThumbnailWorkerRequest>) => {
     const drawScale = thumbW / logicalW;
     offCtx.scale(drawScale, drawScale);
 
-    const drawnPhotoCount = drawPageToCanvas(offCtx, page, photos, logicalW, logicalH, bitmapMap, stickerMap, margin, contentInfoMapObj);
+    const drawnPhotoCount = drawPageToCanvas(offCtx, page, photos, logicalW, logicalH, bitmapMap, stickerMap, margin, contentInfoMapObj, backgroundImageBitmap);
 
     // 编码为 PNG blob → dataURL（Worker 内无 canvas.toDataURL，用 convertToBlob + 手动 base64）
     // OffscreenCanvas.convertToBlob 返回 Promise<Blob>，需 await
@@ -96,10 +100,14 @@ ctx.onmessage = async (e: MessageEvent<ThumbnailWorkerRequest>) => {
     reply({ id, dataURL, drawnPhotoCount });
     closeAllBitmaps(bitmapMap);
     closeAllBitmaps(stickerMap);
+    if (logoBitmap) try { logoBitmap.close(); } catch { /* ignore */ }
+    if (backgroundImageBitmap) try { backgroundImageBitmap.close(); } catch { /* ignore */ }
   } catch (err) {
     reply({ id, dataURL: null, error: String(err) });
     closeAllBitmaps(bitmapMap);
     closeAllBitmaps(stickerMap);
+    if (logoBitmap) try { logoBitmap.close(); } catch { /* ignore */ }
+    if (backgroundImageBitmap) try { backgroundImageBitmap.close(); } catch { /* ignore */ }
   }
 };
 

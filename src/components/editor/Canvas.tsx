@@ -1,9 +1,11 @@
-import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useCallback, useLayoutEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line, Image } from 'react-konva';
 import Konva from 'konva';
+import logoLight from '../../assets/logo-light.png';
+import logoDark from '../../assets/logo-dark.png';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
-import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, DEFAULT_SHAPE_STYLE } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, DEFAULT_SHAPE_STYLE, DEFAULT_SHAPE_SIZE, isCoverPage } from '../../types';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement, ShapeElement } from '../../types';
@@ -19,7 +21,7 @@ import { DEFAULT_WATERMARK_SETTINGS } from '../../types';
 import { calcCoverFitWithRotation, computePhotoBounds, computePanForResizedSlot, clampPhotoToSlotBounds } from '../../utils/photoGeometry';
 import { CANVAS_WORKSPACE_EXTRA } from '../../utils/sharedRender';
 import { isActivated } from '../../license/licenseService';
-import { DEFAULT_W, DEFAULT_H, MM_TO_PX, MIN_SLOT_SIZE, applySlotResizeConstraints, isDarkBackground, getTextureBaseColor } from './canvas/constants';
+import { DEFAULT_W, DEFAULT_H, MM_TO_PX, MIN_SLOT_SIZE, MIN_SHAPE_SIZE_MM, applySlotResizeConstraints, isDarkBackground, getTextureBaseColor } from './canvas/constants';
 import { usePanZoom } from './canvas/usePanZoom';
 import { PageBackgroundRect } from './canvas/PageBackground';
 import { CanvasEmptyState } from './canvas/CanvasEmptyState';
@@ -27,8 +29,11 @@ import { EraserCursor, BrushCursor } from './canvas/ToolCursors';
 import { RotationIcon } from './canvas/RotationIcon';
 import { StickyNoteNode } from './canvas/StickyNoteNode';
 import { TextElementNode } from './canvas/TextElementNode';
+import { TextDomNode, setCaretAt, wrapTextLines } from './canvas/TextDomNode';
+import { TextEditHandles } from './canvas/TextEditHandles';
 import { StickerNode } from './canvas/StickerNode';
-import { ShapeNode, ShapeGlyph } from './canvas/ShapeNode';
+import { ShapeNode } from './canvas/ShapeNode';
+import { ShapeGlyph } from './canvas/ShapeGlyph';
 import { CanvasPhotoRenderer, DragPreviewPhoto } from './canvas/CanvasPhotoRenderer';
 import { useCanvasCentering } from './canvas/useCanvasCentering';
 import { useCanvasWheel } from './canvas/useCanvasWheel';
@@ -38,6 +43,55 @@ import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { slotEditService } from '../../services/slotEditService';
 import { useTranslation } from 'react-i18next';
+
+/**
+ * 估算双击点在文字元素内的字符索引（用于编辑浮层定位光标）。
+ * - 横排：行展开复用 wrapTextLines（与 TextDomNode DOM 排版 / fitTextSize 同一断行逻辑），
+ *   行内按字符宽度累加定位；跨行偏移按原始字符位置精确累计。
+ * - 竖排：直接定位到文本末尾（逐字换列定位复杂且收益低）。
+ * localX/localY 为相对文本框左上角（已含内边距）的逻辑像素坐标。
+ */
+function estimateTextIndexAtPoint(
+  el: Pick<PageTextElement, 'text' | 'fontSize' | 'fontFamily' | 'bold' | 'italic' | 'isVertical' | 'width' | 'lineHeight' | 'letterSpacing'>,
+  canvasZoom: number,
+  localX: number,
+  localY: number,
+): number {
+  const text = el.text || '';
+  if (!text) return 0;
+  if (el.isVertical) return text.length;
+  const fontSize = el.fontSize * canvasZoom;
+  const font = `${el.bold ? 'bold ' : ''}${el.italic ? 'italic ' : ''}${fontSize}px ${el.fontFamily}`;
+  const ctx = document.createElement('canvas').getContext('2d')!;
+  ctx.font = font;
+  const pad = 4 * canvasZoom; // 4px 内边距（与 TextDomNode textPad 一致）
+  const lsZoom = (el.letterSpacing ?? 0) * canvasZoom;
+  // 内容宽 = 盒宽(mm→px) − 左右内边距 − 末尾一个字距（末尾 letter-spacing 不占）；断行测量计入每字符字距
+  const contentW = Math.max(1, (el.width * MM_TO_PX - 8) * canvasZoom - lsZoom);
+  const lines = wrapTextLines(text, font, contentW, lsZoom);
+  const relX = localX - pad;
+  const relY = localY - pad;
+  const lineH = fontSize * (el.lineHeight ?? 1.2);
+  const line = Math.floor(relY / lineH);
+  if (line < 0) return 0;
+  if (line >= lines.length) return text.length;
+  const lineText = lines[line].text;
+  const lineStart = lines[line].start;
+  if (relX <= 0) return lineStart;
+  // 行内按字符宽度累加，中点定位
+  let acc = 0;
+  let idx = 0;
+  for (let i = 0; i < lineText.length; i++) {
+    const w = ctx.measureText(lineText[i]).width;
+    if (relX < acc + w / 2) {
+      idx = i;
+      break;
+    }
+    acc += w;
+    idx = i + 1;
+  }
+  return Math.min(text.length, lineStart + idx);
+}
 
 export function Canvas() {
   const { resolved } = useTheme();
@@ -63,6 +117,17 @@ export function Canvas() {
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   // 只订阅当前页，避免其他页面改动触发整片 Canvas 重渲染
   const currentPage = useEditorStore((s) => s.pages[s.currentPageIndex]);
+
+  // 书脊 MemBook logo 水印图：按书脊背景色深浅自动选黑/白 logo（亮底用黑色 logo-light，深底用白色 logo-dark）
+  // 书脊背景色 = 用户设置的 bookspineColor，缺省回退到页面背景色
+  const [spineLogoImg, setSpineLogoImg] = useState<HTMLImageElement | null>(null);
+  const spineBgColor = currentPage?.spineColor || currentPage?.background || '#FFFFFF';
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setSpineLogoImg(img);
+    img.src = isDarkBackground(spineBgColor) ? logoDark : logoLight;
+    return () => { img.onload = null; };
+  }, [spineBgColor]);
   const pagesLength = useEditorStore((s) => s.pages.length);
   const selectedSlotId = useEditorStore((s) => s.selectedSlotId);
   const clearSelection = useEditorStore((s) => s.clearSelection);
@@ -137,6 +202,7 @@ export function Canvas() {
   const shiftKeyRef = useRef(false);
   /* ── 工具模式 ── */
   const activeTool = useEditorStore((s) => s.activeTool);
+  const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const brushSettings = useEditorStore((s) => s.brushSettings);
   const addBrushStroke = useEditorStore((s) => s.addBrushStroke);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
@@ -172,6 +238,7 @@ export function Canvas() {
   /* ── 形状绘制状态（PPT 式：选择形状后按住拖拽绘制） ── */
   const addShapeElement = useEditorStore((s) => s.addShapeElement);
   const pendingShapeType = useEditorStore((s) => s.pendingShapeType);
+  const setPendingShapeType = useEditorStore((s) => s.setPendingShapeType);
   // 绘制起点（mm）与实时预览矩形（mm）
   const shapeStartRef = useRef<{ x: number; y: number } | null>(null);
   const [shapePreview, setShapePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -188,7 +255,70 @@ export function Canvas() {
   const selectedTextId = useEditorStore((s) => s.selectedTextId);
   const setSelectedTextId = useEditorStore((s) => s.setSelectedTextId);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // contentEditable 编辑浮层的 ref（单层可见文字：编辑时浮层直接显示文字，Konva 文字隐藏）
+  const editTextRef = useRef<HTMLDivElement>(null);
+  // 双击进入编辑时定位光标到双击处的字符索引（新建/工具栏入口为 null）
+  const [textEditCursorIndex, setTextEditCursorIndex] = useState<number | null>(null);
+  // 记录已初始化的编辑会话，确保浮层文字只在进入编辑时写入一次（contentEditable 无状态）
+  const lastInitEditId = useRef<string | null>(null);
+  // 进入编辑时初始化单层浮层的文字内容并聚焦（首帧绘制前，避免光标跳动）
+  useLayoutEffect(() => {
+    if (!editingTextId) { lastInitEditId.current = null; return; }
+    const div = editTextRef.current;
+    if (!div || !currentPage) return;
+    // 文字元素的编辑初始化由 TextDomNode（常驻 DOM 节点）自身承载，此处仅处理便利贴
+    if (currentPage.textElements?.some((e) => e.id === editingTextId)) return;
+    if (lastInitEditId.current === editingTextId) return;
+    lastInitEditId.current = editingTextId;
+    const isSticky = !!currentPage.stickyNotes?.find((n) => n.id === editingTextId);
+    const el = isSticky
+      ? currentPage.stickyNotes?.find((n) => n.id === editingTextId)
+      : currentPage.textElements?.find((e) => e.id === editingTextId);
+    div.textContent = String((el as { text?: string } | undefined)?.text ?? '');
+    div.focus();
+    if (textEditCursorIndex != null) {
+      setCaretAt(div, Math.max(0, Math.min(textEditCursorIndex, (div.textContent || '').length)));
+      setTextEditCursorIndex(null);
+    }
+  }, [editingTextId, textEditCursorIndex]);
+
+  // 进入/退出编辑时【同步】重绘 Konva：其默认 batchDraw 是异步的，会延迟一帧才隐藏/显示文字，
+  // 导致编辑瞬间 Konva 旧文字与浮层新文字短暂两层重叠而"跳一下"。同步 draw() 让隐藏在绘制前生效。
+  useLayoutEffect(() => {
+    if (stageRef.current) stageRef.current.draw();
+  }, [editingTextId]);
+
+  // 文字编辑期间锁定工作区滚动位置：输入导致断行/换行时，浏览器会尝试自动滚动容器到光标可见，
+  // 造成"工作区页面视图移动"。编辑期间持续纠正滚动位置，保持页面稳定；
+  // 用户主动滚动（滚轮/触控/拖滚动条）仍允许，并更新锁定基准。
+  useEffect(() => {
+    if (!editingTextId) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const lock = { left: el.scrollLeft, top: el.scrollTop };
+    let user = false;
+    const markUser = () => { user = true; };
+    const onScroll = () => {
+      if (user) {
+        lock.left = el.scrollLeft;
+        lock.top = el.scrollTop;
+        user = false;
+        return;
+      }
+      if (el.scrollLeft !== lock.left) el.scrollLeft = lock.left;
+      if (el.scrollTop !== lock.top) el.scrollTop = lock.top;
+    };
+    el.addEventListener('wheel', markUser, { passive: true });
+    el.addEventListener('touchstart', markUser, { passive: true });
+    el.addEventListener('pointerdown', markUser, { passive: true });
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', markUser);
+      el.removeEventListener('touchstart', markUser);
+      el.removeEventListener('pointerdown', markUser);
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [editingTextId]);
 
   /* ── 自动编辑：ToolsPanel 添加文字后触发 ── */
   const pendingTextEditId = useEditorStore((s) => s.pendingTextEditId);
@@ -263,7 +393,11 @@ export function Canvas() {
   }, [currentPageIndex, watermarkSettings, albumSize, currentPage]);
 
   // 画布尺寸：根据用户选择的相册尺寸（mm）换算为像素
-  const CANVAS_W = albumSize ? albumSize.width * MM_TO_PX : DEFAULT_W;
+  // 封面页：书脊背面 + 封面正面 印刷一体连续排布（无视觉间隙），画布整体加宽（spine + page）。封底不显示书脊。
+  const isCoverLike = currentPage ? isCoverPage(currentPage) : false;
+  const spineWidthMm = isCoverLike ? (currentPage?.spineWidth ?? 0) : 0;
+  const spinePx = spineWidthMm * MM_TO_PX;
+  const CANVAS_W = albumSize ? (albumSize.width + spineWidthMm) * MM_TO_PX : DEFAULT_W;
   const CANVAS_H = albumSize ? albumSize.height * MM_TO_PX : DEFAULT_H;
 
   // Canva 模式：Stage 大于容器以保留平移/缩放锚点空间，页面在内容 Group 中保持逻辑坐标
@@ -283,8 +417,10 @@ export function Canvas() {
     // 先在文字元素中查找
     const textEl = currentPage.textElements?.find((e) => e.id === pendingTextEditId);
     if (textEl) {
+      // PPT 风格：双击进入编辑不改动文字框大小，避免跳动
       setSelectedStickyId(null);
       setSelectedTextId(textEl.id);
+      setTextEditCursorIndex(null); // 新建文字不定位光标
       setEditingTextId(textEl.id);
       setPendingTextEditId(null);
       return;
@@ -294,10 +430,11 @@ export function Canvas() {
     if (stickyNote) {
       setSelectedTextId(null);
       setSelectedStickyId(stickyNote.id);
+      setTextEditCursorIndex(null);
       setEditingTextId(stickyNote.id);
       setPendingTextEditId(null);
     }
-  }, [pendingTextEditId, currentPage, setPendingTextEditId, setSelectedTextId, setSelectedStickyId]);
+  }, [pendingTextEditId, currentPage, canvasZoom, updateTextElement, currentPageIndex, setPendingTextEditId, setSelectedTextId, setSelectedStickyId, setTextEditCursorIndex]);
 
   const slotCornerRadius = currentPage?.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS;
   const template: Template | undefined = currentPage
@@ -1546,7 +1683,11 @@ export function Canvas() {
               setSelectedTextId(el.id);
             }
           }}
-          onDblClick={() => setEditingTextId(el.id)}
+          onDblClick={(lx, ly) => {
+            // PPT 风格：双击进入编辑不改动文字框大小，避免跳动；光标定位到双击处
+            setTextEditCursorIndex(estimateTextIndexAtPoint(elWithPreview, canvasZoom, lx, ly));
+            setEditingTextId(el.id);
+          }}
         />,
       });
     });
@@ -1566,7 +1707,7 @@ export function Canvas() {
           interactive={!isToolMode}
           onUpdate={(p: Partial<StickyNote>, rh?: boolean) => updateStickyNote(currentPageIndex, note.id, p, rh)}
           onRemove={() => { removeStickyNote(currentPageIndex, note.id); setSelectedStickyId(null); }}
-          onRequestEdit={(_t: string) => setEditingTextId(note.id)}
+          onRequestEdit={(_t: string) => { setTextEditCursorIndex(null); setEditingTextId(note.id); }}
           onSelect={(e) => {
             if (e.evt.ctrlKey || e.evt.metaKey) {
               toggleMultiSelect({ type: 'sticky', id: note.id });
@@ -1604,23 +1745,22 @@ export function Canvas() {
           }}
         />,
       });
+    });
     (currentPage.shapeElements || []).forEach((sh) => {
       const isMultiSelected = multiSelectedElements.some((m) => m.type === 'shape' && m.id === sh.id);
       const previewRect = multiPreviewRectMap.get(sh.id);
       const shWithPreview: ShapeElement = previewRect
         ? { ...sh, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
         : sh;
-      const inMultiSelectMode = multiSelectedElements.length >= 2;
       items.push({
         z: sh.zIndex || 0,
         typeOrder: 1,
         render: <ShapeNode
           key={sh.id} shape={shWithPreview} mmToPx={MM_TO_PX}
           isSelected={selectedShapeId === sh.id || isMultiSelected}
-          showHandles={!inMultiSelectMode}
-          interactive={!isToolMode}
-          onUpdate={(p: Partial<ShapeElement>, rh?: boolean) => updateShapeElement(currentPageIndex, sh.id, p, rh)}
-          onRemove={() => { removeShapeElement(currentPageIndex, sh.id); setSelectedShapeId(null); }}
+          // 形状在形状工具模式下也保持可交互（可点击选中），仅画笔/橡皮擦禁用，避免点击穿透到 Stage 误触发绘制
+          interactive={activeTool !== 'brush' && activeTool !== 'eraser'}
+          isMulti={isMultiSelected}
           onSelect={(e) => {
             if (e.evt.ctrlKey || e.evt.metaKey) {
               toggleMultiSelect({ type: 'shape', id: sh.id });
@@ -1628,9 +1768,11 @@ export function Canvas() {
               setSelectedShapeId(sh.id);
             }
           }}
+          onMove={(x, y) => updateShapeElement(currentPageIndex, sh.id, { x, y }, false)}
+          onMoveEnd={(x, y) => updateShapeElement(currentPageIndex, sh.id, { x, y }, true)}
+          onUpdate={(p, rh) => updateShapeElement(currentPageIndex, sh.id, p, rh)}
         />,
       });
-    });
     });
     // 排序：先按 z 升序（z 小的渲染在下层），z 相同时 typeOrder 小的（槽位）排前（渲染在装饰下方）
     const sorted = items.sort((a, b) => {
@@ -1866,6 +2008,23 @@ export function Canvas() {
 
             /* ── 形状绘制（PPT 式：按下确定起点） ── */
             if (activeTool === 'shape' && pendingShapeType && e.evt.button === 0) {
+              // 若点击落在已有形状上，则选中该形状而非开始绘制（形状在形状工具模式下可交互）
+              const t = e.target as Konva.Node;
+              const shapeNode = t.findAncestor?.('.shape-node') || (t.name && t.name().includes('shape-node') ? t : null);
+              if (shapeNode) {
+                const sid = shapeNode.id().replace('shape-node-', '');
+                if (sid) {
+                  // 普通点击：单选；Ctrl 点击交给 ShapeNode 的 onClick 处理多选，这里不阻止绘制外的操作
+                  if (!e.evt.ctrlKey && !e.evt.metaKey) {
+                    setSelectedTextId(null);
+                    setSelectedStickyId(null);
+                    setSelectedStickerId(null);
+                    setSelectedShapeId(sid);
+                    clearMultiSelect();
+                  }
+                  return;
+                }
+              }
               const pos = stage.getPointerPosition()!;
               const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
               const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
@@ -1923,7 +2082,7 @@ export function Canvas() {
               return;
             }
 
-            /* ── 形状绘制（拖拽实时预览） ── */
+            /* ── 形状绘制（拖拽实时预览，支持 PPT 修饰键：Shift 正形 / Alt 中心对称 / Shift+Alt 中心正形） ── */
             if (shapeStartRef.current && activeTool === 'shape') {
               const pos = stage.getPointerPosition()!;
               const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
@@ -1931,12 +2090,50 @@ export function Canvas() {
               const start = shapeStartRef.current;
               shapeEndRef.current = { x: lx, y: ly };
               setShapeEndState({ x: lx, y: ly });
-              const preview = {
-                x: Math.min(start.x, lx),
-                y: Math.min(start.y, ly),
-                width: Math.abs(lx - start.x),
-                height: Math.abs(ly - start.y),
-              };
+              const shiftKey = e.evt.shiftKey;
+              const altKey = e.evt.altKey;
+              const isLineLike = pendingShapeType === 'line' || pendingShapeType === 'arrow';
+              let preview: { x: number; y: number; width: number; height: number };
+              if (isLineLike) {
+                // 直线/箭头：Shift 将方向吸附到 15° 倍数
+                let ex = lx, ey = ly;
+                if (shiftKey) {
+                  const dx = lx - start.x, dy = ly - start.y;
+                  const len = Math.sqrt(dx * dx + dy * dy);
+                  if (len > 0.01) {
+                    const angle = Math.atan2(dy, dx);
+                    const snap = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
+                    ex = start.x + Math.cos(snap) * len;
+                    ey = start.y + Math.sin(snap) * len;
+                    shapeEndRef.current = { x: ex, y: ey };
+                    setShapeEndState({ x: ex, y: ey });
+                  }
+                }
+                preview = {
+                  x: Math.min(start.x, ex),
+                  y: Math.min(start.y, ey),
+                  width: Math.abs(ex - start.x),
+                  height: Math.abs(ey - start.y),
+                };
+              } else {
+                // 普通形状：Shift 宽高相等（正形）、Alt 以起点为中心对称扩展
+                let w = Math.abs(lx - start.x);
+                let h = Math.abs(ly - start.y);
+                let x = Math.min(start.x, lx);
+                let y = Math.min(start.y, ly);
+                if (shiftKey) {
+                  const m = Math.max(w, h);
+                  w = m; h = m;
+                  x = lx >= start.x ? start.x : start.x - m;
+                  y = ly >= start.y ? start.y : start.y - m;
+                }
+                if (altKey) {
+                  x = start.x - w;
+                  y = start.y - h;
+                  w *= 2; h *= 2;
+                }
+                preview = { x, y, width: w, height: h };
+              }
               shapePreviewRef.current = preview;
               setShapePreview(preview);
               return;
@@ -1970,7 +2167,7 @@ export function Canvas() {
               return;
             }
 
-            /* ── 形状完成绘制（提交新形状） ── */
+            /* ── 形状完成绘制（提交新形状；单击创建默认尺寸，拖拽自定义） ── */
             if (shapeStartRef.current && activeTool === 'shape') {
               const start = shapeStartRef.current;
               shapeStartRef.current = null;
@@ -1979,44 +2176,60 @@ export function Canvas() {
               setShapePreview(null);
               setShapeStartState(null);
               setShapeEndState(null);
-              const width = pv ? pv.width : 0;
-              const height = pv ? pv.height : 0;
               const type = pendingShapeType;
               const isLineLike = type === 'line' || type === 'arrow';
-              if (type && ((width >= 2 && height >= 2) || (isLineLike && (width >= 2 || height >= 2)))) {
-                let x = pv ? pv.x + pv.width / 2 : start.x;
-                let y = pv ? pv.y + pv.height / 2 : start.y;
-                let w = Math.max(width, 2);
-                let h = Math.max(height, 2);
-                let rotation = 0;
-                // 直线/箭头：宽度为线段长度，高度最小，旋转角由拖拽方向决定
-                if (isLineLike) {
-                  const end = shapeEndRef.current ?? start;
-                  const dx = end.x - start.x;
-                  const dy = end.y - start.y;
-                  const len = Math.sqrt(dx * dx + dy * dy);
-                  if (len < 2) { shapeEndRef.current = null; return; }
-                  w = len;
-                  h = 2;
-                  x = start.x + dx / 2;
-                  y = start.y + dy / 2;
-                  rotation = Math.atan2(dy, dx) * 180 / Math.PI;
-                }
+              if (!type) {
                 shapeEndRef.current = null;
+                return;
+              }
+              const MIN_SHAPE = MIN_SHAPE_SIZE_MM; // 拖拽尺寸阈值（mm），低于此值视为单击
+              const shapeBase = {
+                fill: DEFAULT_SHAPE_STYLE.fill,
+                stroke: DEFAULT_SHAPE_STYLE.stroke,
+                strokeWidth: DEFAULT_SHAPE_STYLE.strokeWidth,
+                opacity: DEFAULT_SHAPE_STYLE.opacity,
+              };
+              if (isLineLike) {
+                // 直线/箭头：长度 = 拖拽距离，方向 = 拖拽角度（Shift 已吸附）
+                const end = shapeEndRef.current ?? start;
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                shapeEndRef.current = null;
+                if (len < MIN_SHAPE) return;
                 const shape: ShapeElement = {
                   id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                  x, y, width: w, height: h, type,
-                  fill: DEFAULT_SHAPE_STYLE.fill,
-                  stroke: DEFAULT_SHAPE_STYLE.stroke,
-                  strokeWidth: DEFAULT_SHAPE_STYLE.strokeWidth,
-                  opacity: DEFAULT_SHAPE_STYLE.opacity,
-                  rotation, zIndex: 0,
+                  x: start.x + dx / 2, y: start.y + dy / 2,
+                  width: len, height: 2, type,
+                  ...shapeBase,
+                  rotation: Math.atan2(dy, dx) * 180 / Math.PI, zIndex: 0,
+                };
+                addShapeElement(currentPageIndex, shape);
+                setSelectedShapeId(shape.id);
+              } else if (pv && (pv.width >= MIN_SHAPE || pv.height >= MIN_SHAPE)) {
+                // 拖拽绘制：用含修饰键的包围盒中心/尺寸
+                const shape: ShapeElement = {
+                  id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  x: pv.x + pv.width / 2, y: pv.y + pv.height / 2,
+                  width: Math.max(pv.width, MIN_SHAPE), height: Math.max(pv.height, MIN_SHAPE),
+                  type, ...shapeBase, rotation: 0, zIndex: 0,
                 };
                 addShapeElement(currentPageIndex, shape);
                 setSelectedShapeId(shape.id);
               } else {
-                shapeEndRef.current = null;
+                // 单击（无拖拽）：在点击处创建默认尺寸形状（PPT 行为）
+                const shape: ShapeElement = {
+                  id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  x: start.x, y: start.y,
+                  width: DEFAULT_SHAPE_SIZE.width, height: DEFAULT_SHAPE_SIZE.height,
+                  type, ...shapeBase, rotation: 0, zIndex: 0,
+                };
+                addShapeElement(currentPageIndex, shape);
+                setSelectedShapeId(shape.id);
               }
+              // 一次性使用：绘制完成后取消形状选择，回到默认工具
+              setPendingShapeType(null);
+              setActiveTool('none');
               return;
             }
 
@@ -2040,9 +2253,40 @@ export function Canvas() {
           <Layer>
             {/* ── 缩放后的内容 Group（逻辑坐标 × canvasZoom → Stage 空间） ── */}
             <Group x={groupOX} y={groupOY} scaleX={canvasZoom} scaleY={canvasZoom}>
-              {/* 页面区域（逻辑坐标） */}
-              <PageBackgroundRect bg={currentPage.background} w={CANVAS_W} h={CANVAS_H} />
-              <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} stroke={(!currentPage.background || currentPage.background === '#FFFFFF') ? '#E9ECEF' : 'rgba(0,0,0,0.06)'} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+              {/* 页面区域（逻辑坐标）：
+                  封面页呈现为 书脊背面 + 封面正面 印刷一体连续一块（书脊与封面以一个整体背景渲染，折叠线标记交界）；
+                  其他页为整块背景 */}
+              {isCoverLike && spinePx > 0 ? (
+                <>
+                  {/* 印刷一体：书脊背面 + 封面正面 一整块连续背景 */}
+                  <PageBackgroundRect bg={currentPage.background} backgroundImage={currentPage.backgroundImage} backgroundImageFit={currentPage.backgroundImageFit} w={CANVAS_W} h={CANVAS_H} />
+                  <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} stroke={(!currentPage.background || currentPage.background === '#FFFFFF') ? '#E9ECEF' : 'rgba(0,0,0,0.06)'} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+                  {/* 折叠线：书脊与封面正面交界（印刷一体，仅视觉标记，不占宽度） */}
+                  <Line
+                    points={[spinePx, 0, spinePx, CANVAS_H]}
+                    stroke={(!currentPage.background || currentPage.background === '#FFFFFF') ? '#D9DEE5' : 'rgba(0,0,0,0.10)'}
+                    strokeWidth={1} dash={[4, 3]} strokeScaleEnabled={false} listening={false}
+                  />
+
+                  {/* 书脊 MemBook logo 水印（书脊背面顶部，半透明） */}
+                  {spineLogoImg && (
+                    <Image
+                      image={spineLogoImg}
+                      x={(spinePx - spinePx * 0.6) / 2}
+                      y={spinePx * 0.7}
+                      width={spinePx * 0.6}
+                      height={spinePx * 0.6 * (spineLogoImg.height / spineLogoImg.width)}
+                      opacity={0.8}
+                      listening={false}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  <PageBackgroundRect bg={currentPage.background} backgroundImage={currentPage.backgroundImage} backgroundImageFit={currentPage.backgroundImageFit} w={CANVAS_W} h={CANVAS_H} />
+                  <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} stroke={(!currentPage.background || currentPage.background === '#FFFFFF') ? '#E9ECEF' : 'rgba(0,0,0,0.06)'} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+                </>
+              )}
 
               {/* 边距虚线 —— 安全区边界（strokeScaleEnabled=false 保持所有缩放级别下线条一致） */}
               {showMarginGuide && albumSize && (() => {
@@ -2223,7 +2467,6 @@ export function Canvas() {
                       shape={previewShape}
                       pw={Math.max(pwx, 1)}
                       ph={Math.max(pwy, 1)}
-                      canvasZoom={canvasZoom}
                     />
                   </Group>
                 );
@@ -2461,6 +2704,68 @@ export function Canvas() {
           <Layer ref={guidesLayerRef} listening={false} />
         </Stage>
 
+        {/* ── 文字元素 DOM 渲染层（单一排版引擎：显示/编辑同一节点，进/出编辑零跳变） ──
+            容器定位到页面左上角（groupOX/OY），page 模式按页面边界裁剪（与 Konva clipFunc 一致）。
+            层级：位于 Stage 画布之上、工具栏浮层之下；显示态 pointer-events 穿透，命中由 Konva 命中区承载。 */}
+        {currentPage && (
+          <div
+            style={{
+              position: 'absolute',
+              left: groupOX, top: groupOY,
+              width: CANVAS_W * canvasZoom, height: CANVAS_H * canvasZoom,
+              overflow: pageDisplayMode === 'page' ? 'hidden' : 'visible',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          >
+            {[...(currentPage.textElements || [])]
+              .map((el, i) => ({ el, i, z: el.zIndex || 0 }))
+              .sort((a, b) => a.z - b.z || a.i - b.i)
+              .map(({ el }) => {
+                // 多选拖拽/缩放预览：与 Konva 层使用同一份预览几何
+                const previewRect = multiPreviewRectMap.get(el.id);
+                const elWithPreview: PageTextElement = previewRect
+                  ? { ...el, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+                  : el;
+                return (
+                  <TextDomNode
+                    key={el.id}
+                    el={elWithPreview}
+                    canvasZoom={canvasZoom}
+                    isEditing={editingTextId === el.id}
+                    cursorIndex={editingTextId === el.id ? textEditCursorIndex : null}
+                    onCaretPlaced={() => setTextEditCursorIndex(null)}
+                    onLiveText={(val) => updateTextElement(currentPageIndex, el.id, { text: val }, false)}
+                    onUpdate={(p, rh) => updateTextElement(currentPageIndex, el.id, p, rh)}
+                    onRequestExit={() => setEditingTextId(null)}
+                  />
+                );
+              })}
+          </div>
+        )}
+
+        {/* ── 文字编辑态 HTML 控制点层（位于文字 DOM 层之上、浮动工具栏之下） ──
+            编辑时文字浮层会拦截 Konva 控制点，故编辑态改用 HTML 控制点实现 PPT 式
+            “编辑时拖控制点缩放/旋转”；非编辑态仍由 Konva 绘制。 */}
+        {currentPage && editingTextId && (() => {
+          const editingEl = currentPage.textElements?.find((e) => e.id === editingTextId);
+          if (!editingEl) return null;
+          return (
+            <div
+              style={{
+                position: 'absolute', left: groupOX, top: groupOY,
+                width: 0, height: 0, pointerEvents: 'none', zIndex: 2,
+              }}
+            >
+              <TextEditHandles
+                el={editingEl}
+                canvasZoom={canvasZoom}
+                onUpdate={(p, rh) => updateTextElement(currentPageIndex, editingEl.id, p, rh)}
+              />
+            </div>
+          );
+        })()}
+
         {/* ── 文字浮动工具栏（动态定位在文字元素上方，旋转后用 AABB 包围盒顶部） ── */}
         {selectedTextId && (() => {
           const el = currentPage?.textElements?.find((e) => e.id === selectedTextId);
@@ -2473,14 +2778,22 @@ export function Canvas() {
           const centerY = el.y + elH / 2;
           const rad = elRot * Math.PI / 180;
           const bboxTopMm = centerY - (Math.abs(elW / 2 * Math.sin(rad)) + Math.abs(elH / 2 * Math.cos(rad)));
+          const bboxBottomMm = centerY + (Math.abs(elW / 2 * Math.sin(rad)) + Math.abs(elH / 2 * Math.cos(rad)));
           const offsetMm = 48 / (MM_TO_PX * canvasZoom);
           const toolX = centerX * MM_TO_PX * canvasZoom + groupOX;
-          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
+          // 旋转手柄位于文字框下方（本地 +y）。旋转到 90°~270° 时手柄会转到文字上方，
+          // 与顶部悬浮导航栏重叠导致无法选中。此时将工具栏翻转到文字下方，避免遮挡旋转按钮。
+          const handleOnTop = Math.cos(rad) < 0;
+          const toolY = (handleOnTop ? bboxBottomMm + offsetMm : bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
             <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
               style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
               {/* 编辑 */}
-              <button onClick={() => setEditingTextId(el.id)}
+              <button onClick={() => {
+                // PPT 风格：进入编辑不改动文字框大小，避免跳动
+                setTextEditCursorIndex(null);
+                setEditingTextId(el.id);
+              }}
                 className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('editor.toolbar.editText')}>
                 <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><path d="M8 2l2 2-6 6H2V8l6-6z"/></svg>
                 <span className="text-[10px]">{t('common.edit')}</span>
@@ -2513,69 +2826,65 @@ export function Canvas() {
           );
         })()}
 
-        {/* ── 直接编辑浮层（文字元素或便利贴） ── */}
+        {/* ── 便利贴直接编辑浮层（文字元素已由 TextDomNode 常驻承载，此处仅便利贴） ── */}
         {editingTextId && (() => {
           const isSticky = !!currentPage?.stickyNotes?.find((n) => n.id === editingTextId);
-          const el = isSticky
-            ? currentPage?.stickyNotes?.find((n) => n.id === editingTextId)
-            : currentPage?.textElements?.find((e) => e.id === editingTextId);
+          if (!isSticky) return null; // 文字元素编辑见上方 TextDomNode（单一引擎，无需浮层）
+          const el = currentPage?.stickyNotes?.find((n) => n.id === editingTextId);
           if (!el) { setEditingTextId(null); return null; }
-          // 尺寸阈值须与 Konva 渲染一致：便利贴 min 40，文字元素 min 50/20。
-          const tw = Math.max(el.width * MM_TO_PX, isSticky ? 40 : 50) * canvasZoom;
-          const textPad = (isSticky ? 6 : 4) * canvasZoom;
-          const boxH = Math.max(('height' in el ? el.height : 80) * MM_TO_PX, isSticky ? 40 : 20) * canvasZoom;
-          // 旋转角度：便利贴和文字元素都支持旋转。竖排模式(rotation===-90)不旋转 Group。
-          const elRotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
-          const isVert = elRotation === -90;
-          const editRotation = isVert ? 0 : elRotation;
-          // 中心定位（与 Konva Group 一致）：中心 = (el.x + w/2, el.y + h/2)
-          const centerX = el.x + el.width / 2;
-          const centerY = el.y + ('height' in el ? el.height : 80) / 2;
-          const tcx = centerX * MM_TO_PX * canvasZoom + groupOX;
-          const tcy = centerY * MM_TO_PX * canvasZoom + groupOY;
+          // 尺寸阈值/内边距须与 Konva 渲染一致：便利贴 min 40、8px 内边距（StickyNoteNode）
+          const tw = Math.max(el.width * MM_TO_PX, 40) * canvasZoom;
+          const boxH = Math.max(el.height * MM_TO_PX, 40) * canvasZoom;
+          const textPad = 8 * canvasZoom;
+          const elRotation = el.rotation ?? 0;
+          const tlX = el.x * MM_TO_PX * canvasZoom + groupOX;
+          const tlY = el.y * MM_TO_PX * canvasZoom + groupOY;
           const saveText = () => {
-            const val = editTextareaRef.current?.value || '';
-            if (isSticky) updateStickyNote(currentPageIndex, editingTextId, { text: val }, true);
-            else updateTextElement(currentPageIndex, editingTextId, { text: val }, true);
+            const val = editTextRef.current?.innerText?.replace(/\u200b/g, '') || '';
+            updateStickyNote(currentPageIndex, editingTextId, { text: val }, true);
             setEditingTextId(null);
           };
-          const fs = ('fontSize' in el ? el.fontSize : 14) * canvasZoom;
+          const fs = el.fontSize * canvasZoom;
+          // 便利贴始终顶部对齐（与 StickyNoteNode 一致）；半行距补偿保持既有视觉（translateY(-0.1*fs)）
+          const halfL = (0.2 * fs) / 2;
           return (
             <div className="absolute z-[var(--z-overlay)]"
               style={{
-                left: tcx, top: tcy, width: tw, height: boxH,
-                transform: `translate(-50%, -50%)${editRotation ? ` rotate(${editRotation}deg)` : ''}`,
+                left: tlX, top: tlY, width: tw, height: boxH,
+                transform: elRotation ? `rotate(${elRotation}deg)` : undefined,
                 transformOrigin: 'center center',
+                display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
+                alignItems: 'stretch',
+                overflow: 'hidden',
               }}>
-              {/* 选中边框提示 */}
-              <div className="absolute inset-0 border-2 border-[#6C63FF] border-dashed rounded-[2px] pointer-events-none" style={{ borderWidth: 2 * canvasZoom }} />
-              <textarea
-                ref={editTextareaRef}
-                value={el.text}
-                autoFocus
-                className="w-full h-full bg-transparent border-none resize-none outline-none overflow-hidden"
+              <div
+                ref={editTextRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="w-full outline-none overflow-hidden whitespace-pre-wrap"
                 style={{
-                  writingMode: isVert ? 'vertical-rl' : undefined,
-                  padding: `${textPad}px`,
+                  outline: 'none',
+                  boxShadow: 'none',
+                  wordBreak: 'normal',
+                  overflowWrap: 'normal',
                   fontSize: fs,
-                  fontFamily: ('fontFamily' in el ? el.fontFamily : '思源黑体'),
-                  color: 'transparent',
-                  fontWeight: ('bold' in el && el.bold ? 600 : 400),
-                  fontStyle: ('italic' in el && el.italic ? 'italic' : 'normal'),
-                  textDecoration: ('underline' in el && el.underline ? 'underline' : undefined),
-                  textAlign: ('align' in el ? el.align : 'left') as 'left' | 'center' | 'right',
-                  lineHeight: 1.2,
+                  fontFamily: el.fontFamily,
+                  color: el.color,
+                  textAlign: 'left',
+                  lineHeight: 1.4, // 与 StickyNoteNode 渲染一致
+                  transform: `translateY(${-halfL}px)`,
+                  padding: `${textPad}px`,
                   caretColor: '#6C63FF',
                 }}
-                onChange={(e) => {
-                  // 实时更新 Konva 文字，保持同步（不记录历史，避免每次按键都创建快照）
-                  if (isSticky) updateStickyNote(currentPageIndex, editingTextId, { text: e.target.value }, false);
-                  else updateTextElement(currentPageIndex, editingTextId, { text: e.target.value }, false);
+                onInput={(e) => {
+                  // 实时更新数据（不记录历史，避免每次按键都创建快照）
+                  const val = (e.currentTarget.innerText || '').replace(/\u200b/g, '');
+                  updateStickyNote(currentPageIndex, editingTextId, { text: val }, false);
                 }}
                 onBlur={saveText}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') { setEditingTextId(null); }
-                  else if (e.key === 'Enter' && !e.shiftKey && !isVert) { e.preventDefault(); saveText(); }
+                  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveText(); }
                 }}
               />
             </div>
@@ -2595,17 +2904,20 @@ export function Canvas() {
           const centerY = note.y + note.height / 2;
           // 包围盒顶部（mm）：旋转后便利贴最高点
           const bboxTopMm = centerY - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
+          const bboxBottomMm = centerY + (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
           // 48px 偏移转换为 mm（屏幕固定像素，不随缩放变化）
           const offsetMm = 48 / (MM_TO_PX * canvasZoom);
           // 工具栏 X = 便利贴中心 X（水平居中，旋转中心不变）
           const toolX = centerX * MM_TO_PX * canvasZoom + groupOX;
-          // 工具栏 Y = 包围盒顶部 - 偏移（始终在便利贴视觉上方，不遮挡内容）
-          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
+          // 旋转手柄位于便利贴下方（本地 +y）。旋转到 90°~270° 时手柄转到上方，与顶部工具栏重叠，
+          // 翻转工具栏到下方，避免遮挡旋转按钮。
+          const handleOnTop = Math.cos(rad) < 0;
+          const toolY = (handleOnTop ? bboxBottomMm + offsetMm : bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
             <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
               style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
               {/* 编辑 */}
-              <button onClick={() => setEditingTextId(note.id)}
+              <button onClick={() => { setTextEditCursorIndex(null); setEditingTextId(note.id); }}
                 className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('common.edit')}>
                 <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><path d="M8 2l2 2-6 6H2V8l6-6z"/></svg>
                 <span className="text-[10px]">{t('common.edit')}</span>
@@ -2700,17 +3012,23 @@ export function Canvas() {
           );
         })()}
 
-        {/* ── 形状浮动工具栏（置顶/置底/删除） ── */}
+        {/* ── 形状浮动工具栏（置顶/置底/删除，与文字工具栏一致：旋转后 AABB 定位 + 90°~270° 翻转避免遮挡旋转手柄） ── */}
         {selectedShapeId && (() => {
           const sh = currentPage?.shapeElements?.find((s) => s.id === selectedShapeId);
           if (!sh) return null;
           const rad = (sh.rotation ?? 0) * Math.PI / 180;
           const halfW = sh.width / 2;
           const halfH = sh.height / 2;
-          const bboxTopMm = sh.y - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
+          const centerX = sh.x;
+          const centerY = sh.y;
+          // AABB 包围盒顶部/底部（旋转后）
+          const bboxTopMm = centerY - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
+          const bboxBottomMm = centerY + (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
           const offsetMm = 48 / (MM_TO_PX * canvasZoom);
-          const toolX = sh.x * MM_TO_PX * canvasZoom + groupOX;
-          const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
+          const toolX = centerX * MM_TO_PX * canvasZoom + groupOX;
+          // 旋转到 90°~270° 时旋转手柄转到文字上方，工具栏翻转到下方避免遮挡
+          const handleOnTop = Math.cos(rad) < 0;
+          const toolY = (handleOnTop ? bboxBottomMm + offsetMm : bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
             <div className="absolute z-[var(--z-overlay)] flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-[var(--color-border)] px-2 py-1 whitespace-nowrap"
               style={{ left: toolX, top: toolY, transform: 'translateX(-50%)' }}>
@@ -2729,6 +3047,11 @@ export function Canvas() {
                 className="flex items-center gap-1 px-1.5 h-6 rounded hover:bg-[var(--color-error-light)] hover:text-[var(--color-error)] text-[var(--color-gray-500)] cursor-pointer border-none bg-transparent" title={t('common.delete')}>
                 <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0"><path d="M2 3h8M4 3V2a1 1 0 011-1h2a1 1 0 011 1v1M9 3v6a1 1 0 01-1 1H4a1 1 0 01-1-1V3"/></svg>
                 <span className="text-[10px]">{t('common.delete')}</span>
+              </button>
+              {/* 关闭（与文字/便利贴工具栏一致） */}
+              <button onClick={() => setSelectedShapeId(null)}
+                className="flex items-center justify-center w-6 h-6 rounded border-none cursor-pointer text-[var(--color-gray-400)] hover:bg-[var(--color-surface-hover)] ml-0.5" title={t('common.close')}>
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3"><path d="M3 3l6 6M9 3l-6 6"/></svg>
               </button>
             </div>
           );

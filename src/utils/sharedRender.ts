@@ -14,6 +14,137 @@ import { getCachedContentInfo, computeSmartObjectPosition, type PhotoContentInfo
 /** 编辑器内部使用的 mm→px 转换系数 */
 export const MM_TO_PX = 2;
 
+/* ══════════════════════════ 纹理背景 tile 绘制 ══════════════════════════ */
+
+/** 纹理背景基础色（与画布/导出一致） */
+export function getTextureBaseColor(texture: string): string {
+  const map: Record<string, string> = {
+    'texture-ricepaper': '#F5F0E8',
+    'texture-kraft': '#C4A882',
+    'texture-dots': '#F9FAFB',
+    'texture-grid': '#F9FAFB',
+    'texture-stripes': '#FAFAFA',
+    'texture-linen': '#F0EDE8',
+  };
+  return map[texture] || '#FFFFFF';
+}
+
+/**
+ * 在任意 2D context 上绘制纹理背景的 32×32 tile 图案。
+ * ctx 可为 CanvasRenderingContext2D 或 OffscreenCanvasRenderingContext2D，
+ * 供画布（createTextureCanvas）、导出与缩略图 Worker 三端共用，保证图案一致。
+ */
+export function paintTextureTile(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  texture: string,
+  size = 32,
+): void {
+  switch (texture) {
+    case 'texture-ricepaper': {
+      ctx.fillStyle = '#F5F0E8';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#E8E0D0';
+      const dots: [number, number][] = [[4, 6], [12, 3], [20, 8], [28, 5], [6, 14], [14, 18], [22, 12], [30, 16], [8, 24], [16, 28], [24, 22], [2, 30], [18, 24], [26, 30], [10, 10], [24, 4]];
+      for (const [x, y] of dots) {
+        ctx.beginPath();
+        ctx.arc(x, y, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'texture-kraft': {
+      ctx.fillStyle = '#C4A882';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(120, 90, 50, 0.15)';
+      ctx.lineWidth = 0.5;
+      const lines: [number, number, number, number][] = [[2, 0, 6, 32], [10, 0, 14, 32], [18, 0, 22, 32], [26, 0, 30, 32]];
+      for (const [x1, y1, x2, y2] of lines) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(100, 70, 30, 0.08)';
+      const spots: [number, number][] = [[5, 5], [15, 12], [25, 8], [8, 20], [20, 25], [28, 18]];
+      for (const [x, y] of spots) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'texture-dots': {
+      ctx.fillStyle = '#F9FAFB';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#D1D5DB';
+      const step = 12;
+      for (let x = step / 2; x < size; x += step) {
+        for (let y = step / 2; y < size; y += step) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
+    }
+    case 'texture-grid': {
+      ctx.fillStyle = '#F9FAFB';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = '#E5E7EB';
+      ctx.lineWidth = 1;
+      const step = 16;
+      for (let x = 0; x <= size; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, size);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= size; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(size, y);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'texture-stripes': {
+      ctx.fillStyle = '#FAFAFA';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = '#E5E7EB';
+      ctx.lineWidth = 1;
+      for (let i = -size; i < size * 2; i += 5) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + size, size);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'texture-linen': {
+      ctx.fillStyle = '#F0EDE8';
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(0,0,0,0.03)';
+      ctx.lineWidth = 1;
+      const step = 4;
+      for (let x = 0; x <= size; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, size);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= size; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(size, y);
+        ctx.stroke();
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 /** 工作区四周保留的额外滚动边距（px），使页面始终可平移并以鼠标为锚点缩放 */
 export const CANVAS_WORKSPACE_EXTRA = 500;
 
@@ -93,6 +224,41 @@ export function calcCoverFitWithRotation(
     boundingH,
     scale,
   };
+}
+
+/* ══════════════════════════ 文字断行（与编辑器 DOM 文字层同源） ══════════════════════════ */
+
+/**
+ * Canvas 版文字断行：与编辑器 DOM 文字层 TextDomNode.wrapTextLines 的排版规则完全同源。
+ * - CJK（含假名/全角/标点）逐字为独立 token 可断行；Latin 按空格分词整体断行（对应 DOM word-break:normal）
+ * - 测量计入每字符后的字距：ctx.letterSpacing 不影响 measureText，需手动加 s.length×letterSpacing
+ * - contentWpx 需传「盒宽 − 左右内边距 − 末尾一个字距」（与 wrapTextLines 调用方同口径）
+ * 纯函数、无 DOM 依赖，可在 Web Worker 中安全使用。
+ */
+export function wrapTextLines(
+  ctx: { measureText(s: string): { width: number } },
+  text: string,
+  contentWpx: number,
+  letterSpacing = 0,
+): string[] {
+  const w = (s: string) => ctx.measureText(s).width + s.length * letterSpacing;
+  const lines: string[] = [];
+  for (const para of text.split('\n')) {
+    if (para === '') { lines.push(''); continue; }
+    const tokens = para.split(/(\s+|[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\u3000-\u303f\uff00-\uffef])/).filter((s) => s.length > 0);
+    let line = '';
+    for (const tk of tokens) {
+      const test = line + tk;
+      if (w(test) > contentWpx && line !== '') {
+        lines.push(line);
+        line = tk.replace(/^\s+/, '');
+      } else {
+        line = test;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 /* ══════════════════════════ 槽位坐标计算 ══════════════════════════ */

@@ -18,15 +18,18 @@ import { useEditorStore, usePhotoStore } from '../store';
 import { makeDirectPhotoUrl, readPhotoFromDB } from '../engine/storage-engine';
 import { invalidateBlobUrlCache } from '../engine/storage/import-store';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../constants/templatePalette';
+import { toRgba, linearGradientEndpoints } from '../constants/colorPalette';
 import { isTauri, loadImage, readFileAsBlobUrl, saveFile, type SaveFileResult } from './tauri';
 import {
   MM_TO_PX,
   getSlotRect,
   calcPhotoRenderParams,
+  wrapTextLines,
   type SlotRect,
   type PhotoRenderParams,
+  getTextureBaseColor,
 } from './sharedRender';
-import { createTextureCanvas } from '../components/editor/canvas/constants';
+import { createTextureCanvas, MIN_SHAPE_SIZE_MM, MIN_STROKE_WIDTH, isDarkBackground } from '../components/editor/canvas/constants';
 import {
   resolveTemplate,
   isCoverPage,
@@ -43,13 +46,21 @@ import {
 } from './watermarkRenderer';
 import type { AlbumPage, Photo, PhotoPlacement, StickerElement, StickyNote, PageTextElement, BrushStroke, ShapeElement } from '../types';
 import { getSlotZIndex } from '../types';
+import { getShapePolygonPoints, getRectCornerRadii } from './shapeGeometry';
 import { preloadStickerSrc } from '../hooks/useStickerSrc';
 import { ensurePhotoAnalyzed } from '../engine/content-aware';
 import { logger } from './logger';
+import logoLight from '../assets/logo-light.png';
+import logoDark from '../assets/logo-dark.png';
 // 静态导入 jsPDF：避免动态 import 在 Vite dev 环境下偶发 "Failed to fetch dynamically imported module" 错误
 import jsPDF from 'jspdf';
 
 /* ══════════════════════════ 类型 ══════════════════════════ */
+
+/** 按书脊背景色深浅选择 MemBook logo 水印图（亮底用黑色 logo-light，深底用白色 logo-dark） */
+function spineLogoSrc(spineBg: string | undefined): string {
+  return isDarkBackground(spineBg || '#FFFFFF') ? logoDark : logoLight;
+}
 
 export type ExportFormat = 'pdf' | 'png' | 'jpg';
 
@@ -524,19 +535,6 @@ function parseCssGradientColors(css: string): (string | number)[] {
   return stops;
 }
 
-/** 纹理背景的基础色（与画布 getTextureBaseColor 一致） */
-function getTextureBaseColor(texture: string): string {
-  const map: Record<string, string> = {
-    'texture-ricepaper': '#F5F0E8',
-    'texture-kraft': '#C4A882',
-    'texture-dots': '#F9FAFB',
-    'texture-grid': '#F9FAFB',
-    'texture-stripes': '#FAFAFA',
-    'texture-linen': '#F0EDE8',
-  };
-  return map[texture] || '#FFFFFF';
-}
-
 /**
  * 绘制页面背景，与画布端 PageBackgroundRect 保持一致：
  * 支持纯色 / CSS linear-gradient / texture- 前缀纹理（取基础色）。
@@ -586,6 +584,36 @@ function drawPageBackground(
   ctx.fillRect(0, 0, w, h);
 }
 
+/** 在页面背景之上叠加背景图片（cover=铺满裁剪 / contain=完整居中，与画布 PageBackgroundRect 一致） */
+async function drawBackgroundImage(
+  ctx: CanvasRenderingContext2D,
+  page: AlbumPage,
+  w: number,
+  h: number,
+): Promise<void> {
+  if (!page.backgroundImage) return;
+  try {
+    const img = await loadImage(page.backgroundImage);
+    if (!img || !img.width || !img.height) return;
+    const fit = page.backgroundImageFit ?? 'cover';
+    if (fit === 'contain') {
+      const scale = Math.min(w / img.width, h / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    } else {
+      const scale = Math.max(w / img.width, h / img.height);
+      const sw = w / scale;
+      const sh = h / scale;
+      const sx = (img.width - sw) / 2;
+      const sy = (img.height - sh) / 2;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+    }
+  } catch {
+    // 背景图片加载失败时忽略，仅保留底色
+  }
+}
+
 /**
  * 用 Canvas 2D API 绘制单个页面。
  * 与编辑器 Canvas.tsx 的 globalLayerElements 渲染顺序保持一致：
@@ -602,15 +630,22 @@ async function drawPage(
   photoImages: Map<string, CanvasImageSource>,
   photoDataMap: Map<string, Photo>,
 ): Promise<void> {
-  const mmToPx = canvasW / (useEditorStore.getState().albumSize?.width || 210);
+  const albumW = useEditorStore.getState().albumSize?.width || 210;
+  const _isCoverLike = isCoverPage(page);
+  // 导出封面为印刷一体设计：书脊背面 + 封面正面连续，无编辑器视觉间隙（SPINE_GAP_MM）
+  // 故画布宽度 = 页面宽 + 书脊（不含间隙），mmToPx 基准与之匹配
+  const _spineMm = _isCoverLike ? (page.spineWidth ?? 0) : 0;
+  const mmToPx = canvasW / (albumW + _spineMm);
   // 导出引擎在主线程运行，可直接读取 store 的 pageMargin 传给 getSlotRect
   const exportMargin = useEditorStore.getState().pageMargin;
 
   // ── 1. 页面背景（纯色 / CSS 渐变 / 纹理，与画布 PageBackgroundRect 一致）──
   drawPageBackground(ctx, page.background, canvasW, canvasH);
+  // ── 1.1 背景图片叠加（可选，用户上传）──
+  await drawBackgroundImage(ctx, page, canvasW, canvasH);
 
   // ── 1.5 模板风格空槽位背景（与网格缩略图/模板面板风格一致） ──
-  const cornerScale = canvasW / ((useEditorStore.getState().albumSize?.width || 210) * MM_TO_PX);
+  const cornerScale = canvasW / ((albumW + _spineMm) * MM_TO_PX);
   const rawCorner = page.slotCornerRadius ?? 5;
   const slotCornerRadius: number | [number, number, number, number] = typeof rawCorner === 'number'
     ? rawCorner * cornerScale
@@ -986,30 +1021,84 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
   if (te.bold) fontStyle += 'bold ';
   if (te.italic || !hasText) fontStyle += 'italic ';
   ctx.font = `${fontStyle}${fs}px ${te.fontFamily || 'sans-serif'}`;
-  ctx.fillStyle = hasText ? te.color : '#999';
   ctx.textBaseline = 'top';
+  // 渐变填充（与画布 TextElementNode 一致：线性=左上→右下，径向=中心向外）
+  let fillValue: string | CanvasGradient = hasText ? te.color : '#999';
+  if (hasText && te.gradient && te.gradient.length >= 2) {
+    if (te.gradientType === 'radial') {
+      const cx = tx + tw / 2;
+      const cy = ty + th / 2;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(tw, th) / 2);
+      for (const s of te.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      fillValue = grad;
+    } else {
+      const { startX, startY, endX, endY } = linearGradientEndpoints(tw, th, te.gradientAngle ?? 45);
+      const cxx = tx + tw / 2;
+      const cyy = ty + th / 2;
+      const grad = ctx.createLinearGradient(cxx + startX, cyy + startY, cxx + endX, cyy + endY);
+      for (const s of te.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      fillValue = grad;
+    }
+  }
+  ctx.fillStyle = fillValue;
 
-  // 竖排（春联）模式：rotation === -90 时逐字竖排，从右到左（不应用旋转变换）
-  if (rotation === -90) {
+  // 竖排（春联）模式：isVertical 标志为 true 时逐字竖排，从右到左（旋转角度与竖排解耦，竖排也应用旋转变换）
+  if (te.isVertical) {
+    ctx.save();
+    // 与横排一致：绕文字框中心旋转
+    if (rotation !== 0) {
+      const centerX = tx + tw / 2;
+      const centerY = ty + th / 2;
+      ctx.translate(centerX, centerY);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.translate(-centerX, -centerY);
+    }
     ctx.textAlign = 'left';
     const text = te.text || '';
-    const stepY = fs + 2 * scale;
-    const stepX = fs + 6 * scale;
-    let cx = tx + tw - fs - pad;
-    let cy = ty + pad;
+    const stepY = fs + (te.letterSpacing ?? 0) * scale;
+    const stepX = fs + ((te.lineHeight ?? 1.2) - 1) * fs;
+    const top = ty + pad;
+    const bottom = ty + th - pad;
+    let colX = tx + tw - fs - pad; // 从最右侧开始
+    let cy = top;
+    const nodes: { ch: string; x: number; y: number }[] = [];
     for (const ch of text) {
       if (ch === '\n') {
-        cx -= stepX;
-        cy = ty + pad;
+        colX -= stepX;
+        cy = top;
         continue;
       }
-      if (cy + fs > ty + th - pad) {
-        cx -= stepX;
-        cy = ty + pad;
+      if (cy + fs > bottom) {
+        colX -= stepX;
+        cy = top;
       }
-      ctx.fillText(ch, cx, cy);
+      nodes.push({ ch, x: colX, y: cy });
       cy += stepY;
     }
+    // 对齐：根据 align 水平定位整块列（左/居/右对齐）
+    if (nodes.length > 0) {
+      const xs = nodes.map((n) => n.x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs) + fs;
+      let shift: number;
+      if (te.align === 'left') shift = tx + pad - minX;
+      else if (te.align === 'right') shift = tx + tw - fs - pad - maxX;
+      else shift = tx + tw / 2 - (minX + maxX) / 2; // 居中
+      for (const n of nodes) n.x += shift;
+      // 垂直对齐：竖排整块内容在框内按 verticalAlign（top/center/bottom）定位
+      const ys = nodes.map((n) => n.y);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys) + fs;
+      const contentH = th - pad * 2;
+      const blockH = maxY - minY;
+      const valign = te.verticalAlign ?? 'center';
+      let vshift = 0;
+      if (valign === 'center') vshift = (contentH - blockH) / 2;
+      else if (valign === 'bottom') vshift = contentH - blockH;
+      if (vshift > 0) for (const n of nodes) n.y += vshift;
+    }
+    for (const n of nodes) ctx.fillText(n.ch, n.x, n.y);
+    ctx.restore();
     return;
   }
 
@@ -1029,9 +1118,17 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
 
   // 横排文字（本地坐标系）
   ctx.textAlign = te.align as CanvasTextAlign;
-  const lines = wrapText(ctx, te.text || '', tw - pad * 2);
-  const lineHeight = fs * 1.2;
+  const hLs = (te.letterSpacing ?? 0) * scale;
+  ctx.letterSpacing = `${hLs}px`;
+  // 断行与编辑器 DOM 文字层同源：CJK 逐字可断、Latin 按空格断行，测量计入字距
+  const lines = wrapTextLines(ctx, te.text || '', tw - pad * 2 - hLs, hLs);
+  const lineHeight = fs * (te.lineHeight ?? 1.2);
+  // 垂直对齐：顶/居中/底（与编辑器 TextElementNode 的 verticalAlign 一致，默认居中）
+  const totalH = lines.length * lineHeight;
+  const verticalAlign = te.verticalAlign ?? 'center';
   let y = pad;
+  if (verticalAlign === 'center') y += Math.max(0, (th - pad * 2 - totalH) / 2);
+  else if (verticalAlign === 'bottom') y = Math.max(pad, th - pad - totalH);
   for (const line of lines) {
     let x = pad;
     if (te.align === 'center') x = tw / 2;
@@ -1039,6 +1136,7 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
     ctx.fillText(line, x, y);
     y += lineHeight;
   }
+  ctx.letterSpacing = '0px';
   ctx.restore();
 }
 
@@ -1229,125 +1327,116 @@ function drawSticker(
   ctx.restore();
 }
 
-/** 简单文字换行 */
+/** 绘制圆角矩形路径（每角独立半径，兼容不支持原生 roundRect 的 WebView2）。radii 顺序：左上、右上、右下、左下 */
+function roundRectPerCorner(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  radii: [number, number, number, number],
+): void {
+  const [tl, tr, br, bl] = radii;
+  const maxR = Math.min(w / 2, h / 2);
+  const r = (v: number) => Math.max(0, Math.min(v, maxR));
+  ctx.beginPath();
+  // 左上
+  ctx.moveTo(x + r(tl), y);
+  ctx.lineTo(x + w - r(tr), y);
+  ctx.arcTo(x + w, y, x + w, y + r(tr), r(tr)); // 右上
+  ctx.lineTo(x + w, y + h - r(br));
+  ctx.arcTo(x + w, y + h, x + w - r(br), y + h, r(br)); // 右下
+  ctx.lineTo(x + r(bl), y + h);
+  ctx.arcTo(x, y + h, x, y + h - r(bl), r(bl)); // 左下
+  ctx.lineTo(x, y + r(tl));
+  ctx.arcTo(x, y, x + r(tl), y, r(tl)); // 左上
+  ctx.closePath();
+}
+
 /** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform） */
 function drawShape(ctx: CanvasRenderingContext2D, sh: ShapeElement, mmToPx: number): void {
   const scale = mmToPx / MM_TO_PX;
   const px = sh.x * mmToPx;
   const py = sh.y * mmToPx;
-  const pw = Math.max(sh.width * mmToPx, 10 * scale);
-  const ph = Math.max(sh.height * mmToPx, 10 * scale);
+  // 最小尺寸下限与编辑器 ShapeNode 同源（MIN_SHAPE_SIZE_MM），确保小尺寸形状导出与编辑模式一致
+  const pw = Math.max(sh.width * mmToPx, MIN_SHAPE_SIZE_MM * mmToPx);
+  const ph = Math.max(sh.height * mmToPx, MIN_SHAPE_SIZE_MM * mmToPx);
 
   ctx.save();
   ctx.translate(px, py);
   ctx.rotate((sh.rotation * Math.PI) / 180);
   ctx.globalAlpha = typeof sh.opacity === 'number' ? sh.opacity : 1;
 
-  const lineWidth = Math.max(0.5, (sh.strokeWidth || 0) * scale);
+  const lineWidth = Math.max(MIN_STROKE_WIDTH, (sh.strokeWidth || 0) * scale);
   ctx.lineWidth = lineWidth;
-  if (sh.fill) {
-    ctx.fillStyle = sh.fill;
-  }
-  if (sh.stroke) {
-    ctx.strokeStyle = sh.stroke;
-  }
 
-  const minDim = Math.min(pw, ph);
   const halfW = pw / 2;
   const halfH = ph / 2;
 
+  if (sh.gradient && sh.gradient.length >= 2) {
+    if (sh.gradientType === 'radial') {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.min(pw, ph) / 2);
+      for (const stop of sh.gradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
+      ctx.fillStyle = grad;
+    } else {
+      const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.gradientAngle ?? 45);
+      const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+      for (const stop of sh.gradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
+      ctx.fillStyle = grad;
+    }
+  } else if (sh.fill) {
+    ctx.fillStyle = sh.fill;
+  }
+  if (sh.strokeGradient && sh.strokeGradient.length >= 2) {
+    const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.strokeGradientAngle ?? 45);
+    const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+    for (const stop of sh.strokeGradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
+    ctx.strokeStyle = grad;
+  } else if (sh.stroke) {
+    ctx.strokeStyle = sh.stroke;
+  }
+
   const beginShape = () => {
-    if (sh.fill) ctx.fill();
-    if (sh.stroke && lineWidth > 0) ctx.stroke();
+    if (sh.fill || (sh.gradient && sh.gradient.length >= 2)) ctx.fill();
+    if ((sh.stroke || (sh.strokeGradient && sh.strokeGradient.length >= 2)) && lineWidth > 0) ctx.stroke();
   };
 
   switch (sh.type) {
     case 'circle':
-      ctx.beginPath();
-      ctx.arc(0, 0, minDim / 2, 0, Math.PI * 2);
-      beginShape();
-      break;
     case 'ellipse':
+      // 圆形/椭圆都填满 pw×ph 盒子（与 ShapeGlyph 一致）
       ctx.beginPath();
       ctx.ellipse(0, 0, halfW, halfH, 0, 0, Math.PI * 2);
       beginShape();
       break;
-    case 'triangle': {
+    case 'triangle':
+    case 'diamond':
+    case 'pentagon':
+    case 'hexagon':
+    case 'star':
+    case 'parallelogram':
+    case 'trapezoid':
+    case 'cutCornerRect':
+    case 'cutDiagonalRect': {
+      // 多边形/星形/切角矩形：用共享顶点填满 pw×ph（最外边缘贴合控制盒）
       ctx.beginPath();
-      const r = minDim / 2;
-      ctx.moveTo(0, -r);
-      ctx.lineTo(r, r);
-      ctx.lineTo(-r, r);
+      const pts = getShapePolygonPoints(sh.type, pw, ph, sh.cornerCut);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.closePath();
       beginShape();
-      break;
-    }
-    case 'diamond':
-    case 'square': {
-      // 菱形以对角线为边长；正方形直接矩形
-      if (sh.type === 'diamond') {
-        ctx.beginPath();
-        const r = minDim / 2;
-        ctx.moveTo(0, -r);
-        ctx.lineTo(r, 0);
-        ctx.lineTo(0, r);
-        ctx.lineTo(-r, 0);
-        ctx.closePath();
-        beginShape();
-      } else {
-        ctx.beginPath();
-        ctx.rect(-halfW, -halfW, pw, pw);
-        beginShape();
-      }
       break;
     }
     case 'rectangle':
-    default:
+    case 'roundedRect':
+    case 'singleRoundRect':
+    case 'diagonalRoundRect': {
+      // 矩形类：每角圆角半径由共享 getRectCornerRadii 计算（支持 cornerRadius 调节）
+      const radii = getRectCornerRadii(sh.type, pw, ph, sh.cornerRadius) as [number, number, number, number];
+      roundRectPerCorner(ctx, -halfW, -halfH, pw, ph, radii);
+      beginShape();
+      break;
+    }
+    default: {
       ctx.beginPath();
       ctx.rect(-halfW, -halfH, pw, ph);
-      beginShape();
-      break;
-    case 'pentagon': {
-      ctx.beginPath();
-      const r = minDim / 2;
-      for (let i = 0; i < 5; i++) {
-        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      beginShape();
-      break;
-    }
-    case 'hexagon': {
-      ctx.beginPath();
-      const r = minDim / 2;
-      for (let i = 0; i < 6; i++) {
-        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 6;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      beginShape();
-      break;
-    }
-    case 'star': {
-      ctx.beginPath();
-      const outer = minDim / 2;
-      const inner = minDim / 4;
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? outer : inner;
-        const angle = -Math.PI / 2 + (i * Math.PI) / 5;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
       beginShape();
       break;
     }
@@ -1375,7 +1464,7 @@ function drawShape(ctx: CanvasRenderingContext2D, sh: ShapeElement, mmToPx: numb
       ctx.lineTo(halfW, 0);
       ctx.lineCap = 'round';
       ctx.strokeStyle = sh.stroke || sh.fill || '#6C63FF';
-      ctx.lineWidth = Math.max(1, (sh.strokeWidth || 2) * scale);
+      ctx.lineWidth = Math.max(MIN_STROKE_WIDTH, (sh.strokeWidth || 2) * scale);
       ctx.stroke();
       break;
     }
@@ -1445,6 +1534,13 @@ export interface RenderPageOptions {
   spineWidth?: number;
 }
 
+/** 页面导出的物理宽度（mm）：封面页含设计书脊（书脊背面 + 封面正面，印刷一体，无编辑器视觉间隙），封底无书脊 */
+function pageExportWidthMm(page: AlbumPage | undefined, pageMM: { w: number; h: number }, bleed: number): number {
+  if (!page) return pageMM.w + bleed * 2;
+  const isCoverLike = isCoverPage(page);
+  return pageMM.w + (isCoverLike ? (page.spineWidth ?? 0) : 0) + bleed * 2;
+}
+
 export async function renderPage(
   page: AlbumPage,
   dpi: number,
@@ -1454,10 +1550,17 @@ export async function renderPage(
 ): Promise<string> {
   const pageMM = getPageSizeMM();
   const bleed = opts.bleed ?? 0;
-  const spine = opts.spineWidth ?? 0;
+  const bindingSpine = opts.spineWidth ?? 0;
   const pxPerMM = dpi / 25.4;
+  // 封面页：书脊背面 + 封面正面 印刷一体排布（无编辑器视觉间隙 SPINE_GAP_MM），
+  // 画布逻辑宽度 += 书脊宽；封底无书脊
+  const isCoverLike = isCoverPage(page);
+  const spineMm = isCoverLike ? (page.spineWidth ?? 0) : 0;
+  const designSpine = spineMm;
+  const logicalW = (pageMM.w + designSpine) * MM_TO_PX;
+  const logicalH = pageMM.h * MM_TO_PX;
   // 出血时画布四周扩展出血边
-  const canvasW = Math.round((pageMM.w + bleed * 2) * pxPerMM);
+  const canvasW = Math.round((pageMM.w + designSpine + bleed * 2) * pxPerMM);
   const canvasH = Math.round((pageMM.h + bleed * 2) * pxPerMM);
 
   const canvas = document.createElement('canvas');
@@ -1465,13 +1568,14 @@ export async function renderPage(
   canvas.height = canvasH;
   const ctx = canvas.getContext('2d')!;
 
-  // 先铺满画布底色（含出血区），避免四周露白
+  // 先铺满画布底色（含出血区），书脊背面与封面正面为同一页面整体，避免四周露白
   ctx.fillStyle = page.background || '#FFFFFF';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // 编辑器逻辑坐标 → 导出像素坐标的缩放因子（基于内容区 = 页面尺寸）
-  const logicalW = pageMM.w * MM_TO_PX;
-  const logicalH = pageMM.h * MM_TO_PX;
+  // 封面印刷一体：编辑器封面正面内容整体右移书脊宽（无视觉间隙），坐标已在数据层落位，
+  // 导出无需二次偏移，直接按 书脊背面 + 封面正面 连续渲染。
+
+  // 编辑器逻辑坐标 → 导出像素坐标的缩放因子（基于内容区 = 页面尺寸 + 书脊）
   const scale = canvasW / (logicalW + bleed * 2 * MM_TO_PX);
 
   ctx.scale(scale, scale);
@@ -1480,17 +1584,32 @@ export async function renderPage(
   const bleedPx = bleed * MM_TO_PX;
   ctx.translate(bleedPx, bleedPx);
 
-  // 书脊偏移：封面向右、封底向左偏移半书脊（仅竖版书刊有意义，横版不偏移）
-  const spinePx = spine * MM_TO_PX;
-  if (spine > 0 && pageMM.w < pageMM.h) {
+  // 装订偏移：封面向右、封底向左偏移半书脊（仅竖版书刊有意义，横版不偏移）
+  const bindingSpinePx = bindingSpine * MM_TO_PX;
+  if (bindingSpine > 0 && pageMM.w < pageMM.h) {
     if (isCoverPage(page)) {
-      ctx.translate(spinePx / 2, 0);
+      ctx.translate(bindingSpinePx / 2, 0);
     } else if (isBackCoverPage(page)) {
-      ctx.translate(-spinePx / 2, 0);
+      ctx.translate(-bindingSpinePx / 2, 0);
     }
   }
 
   await drawPage(ctx, page, logicalW, logicalH, photoImages, photoDataMap);
+
+  // 书脊 MemBook logo 水印（封面页书脊背面顶部，半透明）
+  // 坐标须为逻辑像素（mm × MM_TO_PX，与编辑器/缩略图一致），直接用 mm 会导致 logo 极小且错位
+  if (isCoverPage(page) && spineMm > 0) {
+    try {
+      // 书脊背景色 = 用户设置的 spineColor，缺省回退到页面背景色，据此选黑/白 logo
+      const logo = await loadImage(spineLogoSrc(page.spineColor || page.background));
+      const logoWmm = spineMm * 0.6;
+      const logoW = logoWmm * MM_TO_PX;
+      const logoH = logoW * (logo.height / logo.width);
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(logo, ((spineMm - logoWmm) / 2) * MM_TO_PX, spineMm * 0.7 * MM_TO_PX, logoW, logoH);
+      ctx.globalAlpha = 1;
+    } catch { /* logo 水印加载失败忽略 */ }
+  }
 
   try {
     return canvas.toDataURL('image/jpeg', 0.92);
@@ -1515,7 +1634,6 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
   const bleed = options.bleed ?? 0;
   const spine = options.spineWidth ?? 0;
   const pageMM = getPageSizeMM();
-  const pdfW = pageMM.w + bleed * 2;
   const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
 
@@ -1523,6 +1641,14 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
 
   const { pages } = useEditorStore.getState();
   const { photos } = usePhotoStore.getState();
+  // 导出页面物理宽度（封面/封底含设计书脊），用于 PDF 页尺寸与照片缓存上限
+  let maxExportW = pageMM.w + bleed * 2;
+  const pageExportW: number[] = [];
+  for (let i = pageRange.start - 1; i < pageRange.end; i++) {
+    const w = pageExportWidthMm(pages[i], pageMM, bleed);
+    pageExportW.push(w);
+    if (w > maxExportW) maxExportW = w;
+  }
   // 预建 photoId → Photo 的 Map，避免 drawPage 循环内 O(n) 查找
   const photoDataMap = new Map(photos.map(p => [p.id, p]));
   // P1-fix: 导出前预热内容感知缓存（人脸检测/主体焦点），确保导出时应用主体感知裁切
@@ -1535,10 +1661,10 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
   const uniqueExportPhotos = Array.from(new Map(exportPhotos.map(p => [p.id, p])).values());
   await preheatContentAnalysis(uniqueExportPhotos);
   // 滑动窗口加载：仅缓存当前页 ±N 页的照片位图，控制内存峰值
-  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: pdfW, h: pdfH }, dpi));
+  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: maxExportW, h: pdfH }, dpi));
   const pdf = new jsPDF({
-    orientation: pdfW > pdfH ? 'landscape' : 'portrait',
-    unit: 'mm', format: [pdfW, pdfH], compress: true,
+    orientation: pageExportW[0] > pdfH ? 'landscape' : 'portrait',
+    unit: 'mm', format: [pageExportW[0], pdfH], compress: true,
   });
   logger.info('[Export] jsPDF 实例创建完成');
 
@@ -1564,10 +1690,11 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
       const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
 
       // 直接用 data URL 添加到 PDF，避免 jsPDF 处理 HTMLImageElement 时同步阻塞或挂起
+      const effW = pageExportWidthMm(page, pageMM, bleed);
       if (pageAdded) {
-        pdf.addPage([pdfW, pdfH], pdfW > pdfH ? 'landscape' : 'portrait');
+        pdf.addPage([effW, pdfH], effW > pdfH ? 'landscape' : 'portrait');
       }
-      pdf.addImage(jpgURL, 'JPEG', 0, 0, pdfW, pdfH);
+      pdf.addImage(jpgURL, 'JPEG', 0, 0, effW, pdfH);
       pageAdded = true;
 
       onProgress?.(current, total);
@@ -1616,17 +1743,24 @@ export async function generatePdfBlob(
   const bleed = printOpts?.bleed ?? 0;
   const spine = printOpts?.spineWidth ?? 0;
   // 有出血时 PDF 页面向四周扩展出血边（印刷裁切用）
-  const pdfW = pageMM.w + bleed * 2;
   const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
 
   const { pages } = useEditorStore.getState();
   const { photos } = usePhotoStore.getState();
+  // 导出页面物理宽度（封面/封底含设计书脊），用于 PDF 页尺寸与照片缓存上限
+  let maxExportW = pageMM.w + bleed * 2;
+  const pageExportW: number[] = [];
+  for (let i = pageRange.start - 1; i < pageRange.end; i++) {
+    const w = pageExportWidthMm(pages[i], pageMM, bleed);
+    pageExportW.push(w);
+    if (w > maxExportW) maxExportW = w;
+  }
   const photoDataMap = new Map(photos.map(p => [p.id, p]));
-  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: pdfW, h: pdfH }, dpi));
+  const photoCache = new SlidingPhotoCache(calcExportMaxDim({ w: maxExportW, h: pdfH }, dpi));
   const pdf = new jsPDF({
-    orientation: pdfW > pdfH ? 'landscape' : 'portrait',
-    unit: 'mm', format: [pdfW, pdfH], compress: true,
+    orientation: pageExportW[0] > pdfH ? 'landscape' : 'portrait',
+    unit: 'mm', format: [pageExportW[0], pdfH], compress: true,
   });
 
   let current = 0;
@@ -1652,9 +1786,11 @@ export async function generatePdfBlob(
       }
 
       if (pageAdded) {
-        pdf.addPage([pdfW, pdfH], pdfW > pdfH ? 'landscape' : 'portrait');
+        const effW = pageExportWidthMm(page, pageMM, bleed);
+        pdf.addPage([effW, pdfH], effW > pdfH ? 'landscape' : 'portrait');
       }
-      pdf.addImage(jpgURL, 'JPEG', 0, 0, pdfW, pdfH);
+      const effW = pageExportWidthMm(page, pageMM, bleed);
+      pdf.addImage(jpgURL, 'JPEG', 0, 0, effW, pdfH);
       pageAdded = true;
 
       onProgress?.(current, total);

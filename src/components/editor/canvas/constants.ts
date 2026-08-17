@@ -2,11 +2,27 @@
  * Canvas 模块的纯常量与工具函数
  * 从 Canvas.tsx 提取，不含任何组件状态依赖
  */
+import { paintTextureTile, getTextureBaseColor as sharedTextureBaseColor } from '../../../utils/sharedRender';
 
 export const DEFAULT_W = 420;
 export const DEFAULT_H = 560;
 export const MM_TO_PX = 2;
 export const MIN_SLOT_SIZE = 30;
+
+/** 形状最小尺寸（mm）：面板输入 / 画布拖拽缩放下限统一使用，允许用户设置更小的尺寸 */
+export const MIN_SHAPE_SIZE_MM = 2;
+
+/** 描边粗细最小值（px）：允许用户设置更细的描边，0 值由「无描边」选项表达 */
+export const MIN_STROKE_WIDTH = 0.1;
+
+/** 描边粗细最大值（px） */
+export const MAX_STROKE_WIDTH = 40;
+
+/** 封面页默认书脊宽度（mm）：作为页面左侧的物理扩展区，用户可在其上添加文字/形状 */
+export const DEFAULT_SPINE_WIDTH_MM = 18;
+
+/** 书脊背面与封面正面之间的间隙（mm），模拟装订折痕厚度，封面页面呈现为两块 */
+export const SPINE_GAP_MM = 6;
 
 /** 槽位缩放约束：角点自由拉伸、边点单轴、Shift 锁定比例、最小尺寸保护 */
 export function applySlotResizeConstraints(
@@ -109,23 +125,15 @@ export function parseGradientColors(css: string): (string | number)[] {
   return stops;
 }
 
-/** 纹理背景的基础色 */
+/** 纹理背景的基础色（复用 sharedRender 共享实现，与缩略图/导出一致） */
 export function getTextureBaseColor(texture: string): string {
-  const map: Record<string, string> = {
-    'texture-ricepaper': '#F5F0E8',
-    'texture-kraft': '#C4A882',
-    'texture-dots': '#F9FAFB',
-    'texture-grid': '#F9FAFB',
-    'texture-stripes': '#FAFAFA',
-    'texture-linen': '#F0EDE8',
-  };
-  return map[texture] || '#FFFFFF';
+  return sharedTextureBaseColor(texture);
 }
 
 /**
  * 为纹理背景生成 Canvas tile 图案（32×32）
  * 用于 Konva fillPatternImage（画布渲染）和 Canvas createPattern（导出渲染）
- * 使用确定性坐标（非 random），保证 useMemo 缓存稳定
+ * 绘制逻辑复用 sharedRender.paintTextureTile，与缩略图 Worker 端图案一致
  */
 export function createTextureCanvas(texture: string): HTMLCanvasElement | null {
   const size = 32;
@@ -134,117 +142,7 @@ export function createTextureCanvas(texture: string): HTMLCanvasElement | null {
   c.height = size;
   const ctx = c.getContext('2d');
   if (!ctx) return null;
-
-  switch (texture) {
-    case 'texture-ricepaper': {
-      // 宣纸：米色底 + 随机分布的小颗粒
-      ctx.fillStyle = '#F5F0E8';
-      ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = '#E8E0D0';
-      const dots: [number, number][] = [[4,6],[12,3],[20,8],[28,5],[6,14],[14,18],[22,12],[30,16],[8,24],[16,28],[24,22],[2,30],[18,24],[26,30],[10,10],[24,4]];
-      for (const [x, y] of dots) {
-        ctx.beginPath();
-        ctx.arc(x, y, 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-    }
-    case 'texture-kraft': {
-      // 牛皮纸：棕色底 + 纤维线条 + 深色斑点
-      ctx.fillStyle = '#C4A882';
-      ctx.fillRect(0, 0, size, size);
-      ctx.strokeStyle = 'rgba(120, 90, 50, 0.15)';
-      ctx.lineWidth = 0.5;
-      const lines: [number, number, number, number][] = [[2,0,6,32],[10,0,14,32],[18,0,22,32],[26,0,30,32]];
-      for (const [x1, y1, x2, y2] of lines) {
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-      ctx.fillStyle = 'rgba(100, 70, 30, 0.08)';
-      const spots: [number, number][] = [[5,5],[15,12],[25,8],[8,20],[20,25],[28,18]];
-      for (const [x, y] of spots) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-    }
-    case 'texture-dots': {
-      // 波点：浅灰底 + 规则圆点
-      ctx.fillStyle = '#F9FAFB';
-      ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = '#D1D5DB';
-      const step = 12;
-      for (let x = step / 2; x < size; x += step) {
-        for (let y = step / 2; y < size; y += step) {
-          ctx.beginPath();
-          ctx.arc(x, y, 1, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      break;
-    }
-    case 'texture-grid': {
-      // 网格：浅灰底 + 网格线
-      ctx.fillStyle = '#F9FAFB';
-      ctx.fillRect(0, 0, size, size);
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.lineWidth = 1;
-      const step = 16;
-      for (let x = 0; x <= size; x += step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, size);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= size; y += step) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(size, y);
-        ctx.stroke();
-      }
-      break;
-    }
-    case 'texture-stripes': {
-      // 条纹：浅灰底 + 45度对角条纹
-      ctx.fillStyle = '#FAFAFA';
-      ctx.fillRect(0, 0, size, size);
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.lineWidth = 1;
-      for (let i = -size; i < size * 2; i += 5) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i + size, size);
-        ctx.stroke();
-      }
-      break;
-    }
-    case 'texture-linen': {
-      // 亚麻：米色底 + 细密十字纹理
-      ctx.fillStyle = '#F0EDE8';
-      ctx.fillRect(0, 0, size, size);
-      ctx.strokeStyle = 'rgba(0,0,0,0.03)';
-      ctx.lineWidth = 1;
-      const step = 4;
-      for (let x = 0; x <= size; x += step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, size);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= size; y += step) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(size, y);
-        ctx.stroke();
-      }
-      break;
-    }
-    default:
-      return null;
-  }
+  paintTextureTile(ctx, texture, size);
   return c;
 }
 

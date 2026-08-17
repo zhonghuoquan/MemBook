@@ -140,7 +140,7 @@ export function AppHeader({ children, className = '', height = 'toolbar' }: AppH
       data-tauri-drag-region
       data-toolbar={height === 'toolbar' ? '' : undefined}
       onDoubleClick={handleDoubleClick}
-      className={`${heightClass} bg-[image:var(--gradient-header)] flex items-center px-4 gap-1 shrink-0 z-[var(--z-toolbar)] select-none ${className}`}
+      className={`${heightClass} bg-[image:var(--gradient-header)] relative flex items-center px-4 gap-1 shrink-0 z-[var(--z-toolbar)] select-none ${className}`}
       // macOS: 标题栏左侧留出空间给交通灯按钮（红黄绿）；最大化/全屏时平滑过渡到 1rem
       style={macStyle}
     >

@@ -1,17 +1,13 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { THEME_COLORS } from '../../../constants/colorPalette';
 
 /**
- * 统一颜色选择器组件
- * 支持固定色板 + 最近使用颜色 + 取色器
+ * 画笔颜色选择器组件
+ * 支持莫兰迪色板（与文字/形状/背景统一）+ 最近使用颜色 + 取色器
  */
 
-const COLOR_PALETTE = [
-  '#1A1A1A', '#4B5563', '#9CA3AF', '#FFFFFF',
-  '#EF4444', '#F97316', '#F59E0B', '#EAB308',
-  '#22C55E', '#14B8A6', '#3B82F6', '#6366F1',
-  '#8B5CF6', '#EC4899', '#F43F5E', '#6C63FF',
-];
+const COLOR_PALETTE = THEME_COLORS;
 
 interface ColorPickerProps {
   selectedColor: string;

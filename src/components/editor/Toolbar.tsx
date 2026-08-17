@@ -7,8 +7,10 @@ import { usePhotoStore } from '../../store';
 import { exportBackupZip } from '../../utils/backup';
 import { ExportDialog } from './ExportDialog';
 import { PageSettings } from './PageSettings';
+import { CoverSettings } from './CoverSettings';
 import { WatermarkSettings } from './WatermarkSettings';
 import { PrintDialog } from './PrintDialog';
+import { BookPreviewOverlay } from './BookPreviewOverlay';
 import { Modal } from '../common/Modal';
 import { useState, useRef, useEffect } from 'react';
 import { useLicenseStore } from '../../license';
@@ -28,9 +30,11 @@ export function Toolbar({ onBack }: ToolbarProps) {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const checkFeature = useLicenseStore((s) => s.checkFeature);
   const [isPageSettingsOpen, setIsPageSettingsOpen] = useState(false);
+  const [isCoverSettingsOpen, setIsCoverSettingsOpen] = useState(false);
   const [isWatermarkSettingsOpen, setIsWatermarkSettingsOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [backupConfirmOpen, setBackupConfirmOpen] = useState(false);
+  const [isBookPreviewOpen, setIsBookPreviewOpen] = useState(false);
 
   const title = projectName || t('editor.defaultProjectName');
 
@@ -155,6 +159,9 @@ export function Toolbar({ onBack }: ToolbarProps) {
           <span className="text-[var(--text-body)] font-[700] text-[var(--color-primary-600)]">MemBook</span>
         </button>
 
+      {/* 预览模式：隐藏文件/页面/撤销/重做，任务栏保持编辑器样式 */}
+      {!isBookPreviewOpen && (
+      <>
       <div className="w-px h-4 bg-[var(--color-border-light)]/60 shrink-0" />
 
       <div ref={menuRef} className="flex items-center gap-1" data-no-drag>
@@ -215,6 +222,16 @@ export function Toolbar({ onBack }: ToolbarProps) {
                 </svg>
                 {t('editor.menu.pageSettings')}
               </button>
+              <button
+                className="flex items-center gap-2.5 w-full px-3 py-2 text-[var(--text-body-sm)] text-[var(--color-gray-700)] border-none bg-transparent cursor-pointer hover:bg-[var(--color-primary-50)] transition-colors"
+                onClick={() => { setPageMenuOpen(false); setIsCoverSettingsOpen(true); }}
+              >
+                <svg className="w-3.5 h-3.5 shrink-0 text-[var(--color-gray-500)]" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <path d="M2 6h12" />
+                </svg>
+                {t('editor.menu.coverSettings')}
+              </button>
               <div className="h-px bg-[var(--color-border-light)] my-1" />
               <button
                 className="flex items-center gap-2.5 w-full px-3 py-2 text-[var(--text-body-sm)] text-[var(--color-gray-700)] border-none bg-transparent cursor-pointer hover:bg-[var(--color-primary-50)] transition-colors"
@@ -240,14 +257,16 @@ export function Toolbar({ onBack }: ToolbarProps) {
       <button data-no-drag className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-gray-500)] cursor-pointer hover:bg-white/50 hover:text-[var(--color-gray-700)] transition-colors" title={t('editor.tooltip.redo')} onClick={handleRedo}>
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M11 5l3 3-3 3"/><path d="M14 8H6a4 4 0 0 0 0 8"/></svg>
       </button>
+      </>
+      )}
 
       <div className="flex-1" />
 
-      {/* 标题 */}
-      <div className="flex justify-center min-w-0 px-2" data-no-drag>
+      {/* 标题：绝对居中于整个任务栏（不受左侧功能区显隐影响） */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex justify-center min-w-0" data-no-drag>
         <input id="project-title-input"
           data-no-drag
-          className="bg-transparent border-none text-[var(--text-h3)] font-[700] text-[var(--color-gray-800)] text-center outline-none px-3 py-1 max-w-[380px] rounded-[var(--radius-md)] focus:bg-white/40 transition-all truncate"
+          className="bg-transparent border-none text-[var(--text-h3)] font-[700] text-[var(--color-gray-800)] text-center outline-none px-3 py-1 max-w-[320px] rounded-[var(--radius-md)] focus:bg-white/40 transition-all truncate"
           value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} maxLength={40}
           onBlur={handleTitleBlur} onKeyDown={handleTitleKeyDown} />
       </div>
@@ -256,20 +275,43 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
       {/* 保存 / 导出 */}
       <div className="flex items-center gap-2 mr-2" data-no-drag>
-        <Button variant="secondary" size="sm" onClick={handleSave} className="!rounded-[var(--radius-lg)] !bg-white/50 hover:!bg-white/80 !border-none !font-[600]">
-          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5l-3-3z"/><path d="M11 2v6H5V2"/></svg>{t('editor.saveBtn')}
+        {/* 预览 ↔ 退出预览（同一按钮切换态） */}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setIsBookPreviewOpen((o) => !o)}
+          className="!rounded-[var(--radius-lg)] !bg-white/50 hover:!bg-white/80 !border-none !font-[600]"
+          title={isBookPreviewOpen ? t('editor.exitBookPreviewBtn') : t('editor.bookPreviewBtn')}
+        >
+          {isBookPreviewOpen ? (
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4l8 8"/><path d="M12 4l-8 8"/></svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H2z"/><path d="M14 3H9a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5z"/></svg>
+          )}
+          {isBookPreviewOpen ? t('editor.exitBookPreviewBtn') : t('editor.bookPreviewBtn')}
         </Button>
-        <Button variant="primary" size="sm" data-onboarding="export-btn" onClick={() => checkFeature('exportFile', t('editor.guard.export')) && setIsExportDialogOpen(true)} className="!rounded-[var(--radius-lg)] !bg-[image:var(--gradient-brand)] !border-none !font-[600]">
-          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2v10"/><path d="M4 8l4 4 4-4"/><path d="M2 14h12"/></svg>{t('editor.exportBtn')}
-        </Button>
+        {/* 预览模式下隐藏保存/导出（预览只读，不提供修改入口） */}
+        {!isBookPreviewOpen && (
+          <>
+            <Button variant="secondary" size="sm" onClick={handleSave} className="!rounded-[var(--radius-lg)] !bg-white/50 hover:!bg-white/80 !border-none !font-[600]">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5l-3-3z"/><path d="M11 2v6H5V2"/></svg>{t('editor.saveBtn')}
+            </Button>
+            <Button variant="primary" size="sm" data-onboarding="export-btn" onClick={() => checkFeature('exportFile', t('editor.guard.export')) && setIsExportDialogOpen(true)} className="!rounded-[var(--radius-lg)] !bg-[image:var(--gradient-brand)] !border-none !font-[600]">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2v10"/><path d="M4 8l4 4 4-4"/><path d="M2 14h12"/></svg>{t('editor.exportBtn')}
+            </Button>
+          </>
+        )}
       </div>
 
       </AppHeader>
 
       <ExportDialog isOpen={isExportDialogOpen} onClose={() => setIsExportDialogOpen(false)} />
       <PageSettings open={isPageSettingsOpen} onClose={() => setIsPageSettingsOpen(false)} />
+      <CoverSettings open={isCoverSettingsOpen} onClose={() => setIsCoverSettingsOpen(false)} />
       <WatermarkSettings open={isWatermarkSettingsOpen} onClose={() => setIsWatermarkSettingsOpen(false)} />
       <PrintDialog isOpen={isPrintDialogOpen} onClose={() => setIsPrintDialogOpen(false)} />
+
+      <BookPreviewOverlay open={isBookPreviewOpen} onClose={() => setIsBookPreviewOpen(false)} />
 
       {/* 备份当前项目确认弹窗 */}
       <Modal

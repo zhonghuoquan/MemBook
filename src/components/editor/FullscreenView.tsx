@@ -1,16 +1,23 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useEditorStore, usePhotoStore } from '../../store';
-import { renderPageThumbnail, preloadPagePhotos, preloadStickers, invalidateFullscreenThumbnail, releasePreloadedImages, releaseStickerImages, getCachedThumbnailUrl } from '../../utils/gridThumbnailRenderer';
+import { renderPageThumbnail, preloadPagePhotos, preloadStickers, invalidateFullscreenThumbnail, releasePreloadedImages, releaseStickerImages, getCachedThumbnailUrl, loadBackgroundBitmap } from '../../utils/gridThumbnailRenderer';
 import { useWheel } from '../../hooks/useWheel';
 import { logger } from '../../utils/logger';
 import { safeUnlisten } from '../../utils/tauri';
 import { useTranslation } from 'react-i18next';
+import type { AlbumPage, Photo } from '../../types';
 
 interface FullscreenViewProps {
   open: boolean;
   onClose: () => void;
   initialPageIndex?: number;
+  /** 可选：外部传入要展示的页面（主页相册卡片入口）。不传时回退到编辑器 store */
+  pages?: AlbumPage[];
+  /** 可选：相册尺寸（mm）。不传时回退到编辑器 store */
+  albumSize?: { width: number; height: number } | null;
+  /** 可选：照片列表。不传时回退到全局照片 store */
+  photos?: Photo[];
 }
 
 const MIN_ZOOM = 100;
@@ -21,11 +28,15 @@ const MAX_RENDER_WIDTH = 2400; // 限制最大渲染宽度，避免内存爆炸
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-export function FullscreenView({ open, onClose, initialPageIndex = 0 }: FullscreenViewProps) {
+export function FullscreenView({ open, onClose, initialPageIndex = 0, pages: pagesProp, albumSize: albumSizeProp, photos: photosProp }: FullscreenViewProps) {
   const { t } = useTranslation();
-  const pages = useEditorStore((s) => s.pages);
-  const albumSize = useEditorStore((s) => s.albumSize);
-  const photos = usePhotoStore((s) => s.photos);
+  const storePages = useEditorStore((s) => s.pages);
+  const storeAlbumSize = useEditorStore((s) => s.albumSize);
+  const storePhotos = usePhotoStore((s) => s.photos);
+  // 外部传入优先（主页卡片入口），否则回退编辑器 store（编辑器内入口）
+  const pages = pagesProp ?? storePages;
+  const albumSize = albumSizeProp !== undefined ? albumSizeProp : storeAlbumSize;
+  const photos = photosProp ?? storePhotos;
 
   const [pageIndex, setPageIndex] = useState(initialPageIndex);
   const [zoom, setZoom] = useState(MIN_ZOOM);
@@ -79,75 +90,88 @@ export function FullscreenView({ open, onClose, initialPageIndex = 0 }: Fullscre
   }, [open]);
 
   // 进入/退出全屏：Tauri 绕过 JS 的 setSize/setPosition，直接调用 Rust 命令通过 Windows API
-  // 的 SetWindowPos 强制窗口铺满当前显示器并置顶，覆盖任务栏。浏览器回退到 DOM 全屏。
+  // 的 SetWindowPos 强制窗口铺满当前显示器并置顶（TOPMOST），覆盖任务栏。浏览器回退到 DOM 全屏。
   // 注意：onClose 通过 ref 访问，避免 onClose 引用不稳定导致 effect 重复执行覆盖状态。
+  //
+  // 修复（2026-08-16）：主页相册卡片入口在关闭全屏时是直接卸载本组件（fullscreenProject 置 null），
+  // 而非把 open 置 false。旧实现只在 open===false 分支执行 restore_window（取消 TOPMOST），
+  // 组件卸载时 cleanup 只设 cancelled=true 从不恢复，导致窗口永久置顶、遮挡其他应用。
+  // 现抽取 restoreFromFullscreen 为共享函数，并在 cleanup 中调用：无论 open 切换还是组件卸载，
+  // 只要处于全屏置顶状态就必然恢复窗口（取消 TOPMOST 并还原尺寸/位置）。
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-    if (!open) {
-      manualFullscreenRef.current = false;
-      if (isTauri) {
-        (async () => {
-          if (cancelled) return;
-          const { getCurrentWindow, currentMonitor } = await import('@tauri-apps/api/window');
-          const win = getCurrentWindow();
-          const mon = await currentMonitor().catch(() => null);
-          const sz = await win.innerSize().catch(() => null);
-
-          // 如果进入全屏前窗口是最小化状态，先恢复到正常状态才能设置尺寸/位置
-          if (wasMinimizedRef.current) {
-            await win.unminimize().catch(() => { /* ignore */ });
-            await sleep(120);
-          }
-
-          // 恢复全屏前的尺寸与位置（这些值是在取消最大化/最小化之后、进入全屏之前保存的“还原态”尺寸）
-          let x = savedPositionRef.current?.x ?? 0;
-          let y = savedPositionRef.current?.y ?? 0;
-          let width = savedBoundsRef.current?.width ?? 1440;
-          let height = savedBoundsRef.current?.height ?? 900;
-
-          // 兜底：如果保存值丢失且当前仍是全屏尺寸，按显示器一定比例计算一个合理还原尺寸
-          if (mon && sz && (!savedBoundsRef.current || !savedPositionRef.current)) {
-            if (sz.width >= mon.size.width - 10 && sz.height >= mon.size.height - 10) {
-              x = mon.position.x + Math.round(mon.size.width * 0.1);
-              y = mon.position.y + Math.round(mon.size.height * 0.1);
-              width = Math.round(mon.size.width * 0.8);
-              height = Math.round(mon.size.height * 0.8);
-            } else {
-              x = (await win.innerPosition().catch(() => null))?.x ?? x;
-              y = (await win.innerPosition().catch(() => null))?.y ?? y;
-              width = sz.width;
-              height = sz.height;
-            }
-          }
-
-          // 调用 Rust 命令移除 TOPMOST 并还原尺寸/位置
-          await invoke('restore_window', {
-            x,
-            y,
-            width,
-            height,
-            maximized: false,
-          }).catch((e) => logger.error('[Fullscreen] restore failed', e));
-          await sleep(80);
-
-          // 根据进入全屏前的状态恢复最大化或最小化
-          if (wasMaximizedRef.current) {
-            await win.maximize().catch((e) => logger.error('[Fullscreen] maximize failed', e));
-          } else if (wasMinimizedRef.current) {
-            await win.minimize().catch((e) => logger.error('[Fullscreen] minimize failed', e));
-          }
-
-          wasMaximizedRef.current = false;
-          wasMinimizedRef.current = false;
-          savedBoundsRef.current = null;
-          savedPositionRef.current = null;
-        })().catch(() => { /* ignore */ });
-      } else if (document.fullscreenElement) {
-        document.exitFullscreen?.().catch(() => { /* ignore */ });
+    // 从全屏恢复窗口：取消 TOPMOST 并还原尺寸/位置，按进入前的状态恢复最大化/最小化。
+    // 同时被「open 变 false 的分支」与「effect cleanup（含组件卸载）」调用，幂等。
+    const restoreFromFullscreen = async () => {
+      if (!isTauri) {
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => { /* ignore */ });
+        }
+        return;
       }
+      const { getCurrentWindow, currentMonitor } = await import('@tauri-apps/api/window');
+      const win = getCurrentWindow();
+      const mon = await currentMonitor().catch(() => null);
+      const sz = await win.innerSize().catch(() => null);
+
+      // 如果进入全屏前窗口是最小化状态，先恢复到正常状态才能设置尺寸/位置
+      if (wasMinimizedRef.current) {
+        await win.unminimize().catch(() => { /* ignore */ });
+        await sleep(120);
+      }
+
+      // 恢复全屏前的尺寸与位置（这些值是在取消最大化/最小化之后、进入全屏之前保存的“还原态”尺寸）
+      let x = savedPositionRef.current?.x ?? 0;
+      let y = savedPositionRef.current?.y ?? 0;
+      let width = savedBoundsRef.current?.width ?? 1440;
+      let height = savedBoundsRef.current?.height ?? 900;
+
+      // 兜底：如果保存值丢失且当前仍是全屏尺寸，按显示器一定比例计算一个合理还原尺寸
+      if (mon && sz && (!savedBoundsRef.current || !savedPositionRef.current)) {
+        if (sz.width >= mon.size.width - 10 && sz.height >= mon.size.height - 10) {
+          x = mon.position.x + Math.round(mon.size.width * 0.1);
+          y = mon.position.y + Math.round(mon.size.height * 0.1);
+          width = Math.round(mon.size.width * 0.8);
+          height = Math.round(mon.size.height * 0.8);
+        } else {
+          x = (await win.innerPosition().catch(() => null))?.x ?? x;
+          y = (await win.innerPosition().catch(() => null))?.y ?? y;
+          width = sz.width;
+          height = sz.height;
+        }
+      }
+
+      // 调用 Rust 命令移除 TOPMOST 并还原尺寸/位置
+      await invoke('restore_window', {
+        x,
+        y,
+        width,
+        height,
+        maximized: false,
+      }).catch((e) => logger.error('[Fullscreen] restore failed', e));
+      await sleep(80);
+
+      // 根据进入全屏前的状态恢复最大化或最小化
+      if (wasMaximizedRef.current) {
+        await win.maximize().catch((e) => logger.error('[Fullscreen] maximize failed', e));
+      } else if (wasMinimizedRef.current) {
+        await win.minimize().catch((e) => logger.error('[Fullscreen] minimize failed', e));
+      }
+
+      wasMaximizedRef.current = false;
+      wasMinimizedRef.current = false;
+      savedBoundsRef.current = null;
+      savedPositionRef.current = null;
+    };
+
+    if (!open) {
+      // 恢复动作统一由 effect cleanup 负责（open 切换与组件卸载都会触发 cleanup），
+      // 这里仅重置状态标记，避免与 cleanup 重复恢复导致 savedBounds/savedPosition
+      // 已被重置为 null 后走兜底逻辑把窗口错误还原成固定比例尺寸。
+      manualFullscreenRef.current = false;
       return;
     }
 
@@ -190,6 +214,9 @@ export function FullscreenView({ open, onClose, initialPageIndex = 0 }: Fullscre
         // 通过 Rust 命令调用 Windows SetWindowPos 直接铺满显示器
         const monitor = await currentMonitor().catch(() => null);
         if (monitor) {
+          // 竞态守卫：若进入全屏过程中组件已被卸载（cleanup 置 cancelled），
+          // 立即中止，避免在 cleanup 恢复窗口之后再调用 force_fullscreen 重新置顶
+          if (cancelled) return;
           const { x, y } = monitor.position;
           logger.log('[Fullscreen] monitor', { x, y, w: monitor.size.width, h: monitor.size.height, scale: monitor.scaleFactor });
           await invoke('force_fullscreen', {
@@ -198,11 +225,13 @@ export function FullscreenView({ open, onClose, initialPageIndex = 0 }: Fullscre
             width: monitor.size.width,
             height: monitor.size.height,
           }).catch((e) => logger.error('[Fullscreen] force_fullscreen failed', e));
+          if (cancelled) return;
           await sleep(200);
           // 二次校验：若尺寸仍偏离显示器超过 10px，再次调用
           const size = await win.innerSize().catch(() => null);
           logger.log('[Fullscreen] after resize', size?.width, size?.height);
           if (size && (Math.abs(size.width - monitor.size.width) > 10 || Math.abs(size.height - monitor.size.height) > 10)) {
+            if (cancelled) return;
             await invoke('force_fullscreen', {
               x,
               y,
@@ -243,6 +272,13 @@ export function FullscreenView({ open, onClose, initialPageIndex = 0 }: Fullscre
       safeUnlisten(unlisten);
       unlisten = undefined;
       document.removeEventListener('fullscreenchange', onFsChange);
+      // 关键修复：组件被直接卸载（主页入口关闭全屏时卸载 FullscreenView）时，
+      // 若窗口仍处于全屏置顶（TOPMOST）状态，必须在 cleanup 中恢复窗口，
+      // 否则窗口会永久置顶遮挡其他应用。此为幂等调用。
+      if (manualFullscreenRef.current) {
+        manualFullscreenRef.current = false;
+        restoreFromFullscreen().catch(() => { /* ignore */ });
+      }
     };
   }, [open]);
 
@@ -269,21 +305,24 @@ export function FullscreenView({ open, onClose, initialPageIndex = 0 }: Fullscre
 
         // 缓存未命中：清除旧缓存（可能是不完整的残缺图），重新渲染
         invalidateFullscreenThumbnail(page.id);
-        // 照片与贴纸并行预加载，缩短用户等待
-        const [imgs, stickers] = await Promise.all([
+        // 照片、贴纸与背景图片并行预加载，缩短用户等待
+        const [imgs, stickers, bgImg] = await Promise.all([
           preloadPagePhotos(page, photos),
           preloadStickers(page),
+          loadBackgroundBitmap(page.backgroundImage),
         ]);
         if (cancelled || rid !== renderRef.current) {
           // 已被新渲染取代：立即释放位图
           releasePreloadedImages(imgs);
           releaseStickerImages(stickers);
+          if (bgImg instanceof ImageBitmap) try { bgImg.close(); } catch { /* ignore */ }
           return;
         }
-        const url = renderPageThumbnail(page, photos, renderScale, imgs, options, stickers);
+        const url = renderPageThumbnail(page, photos, renderScale, imgs, options, stickers, bgImg ?? undefined);
         // P1-3：dataURL 已生成，原始位图立即释放降低峰值内存
         releasePreloadedImages(imgs);
         releaseStickerImages(stickers);
+        if (bgImg instanceof ImageBitmap) try { bgImg.close(); } catch { /* ignore */ }
         if (!cancelled && rid === renderRef.current) {
           setThumbnailUrl(url);
         }

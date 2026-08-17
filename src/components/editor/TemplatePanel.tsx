@@ -178,11 +178,6 @@ export function TemplatePanel() {
 
   return (
     <aside className="flex-1 bg-[var(--color-surface)] flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-light)]">
-        <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">{t('editor.templatePanel.title')}</span>
-      </div>
-
       {/* Template Grid */}
       <div ref={sb.ref} className={`flex-1 overflow-y-auto ps-scroll pl-3 pr-1 py-3 space-y-5 ${sb.className}`} {...sb.handlers}>
         {/* Category Filter — 分类筛选（含自定义），与主页 TemplateGallery 一致 */}
@@ -294,7 +289,7 @@ export function TemplatePanel() {
 /* ── Justified 布局常量（与照片面板 TARGET_ROW_HEIGHT / ITEM_GAP 保持一致）── */
 const TARGET_ROW_H = 100;
 const GAP = 8;
-const ITEM_ASPECT = 3 / 4; // 模板预览 3:4 宽高比
+const ITEM_ASPECT = 1 / 1; // 模板预览正方形展示（1:1）
 const MAX_PER_ROW = 5;
 
 function TemplateGroup({

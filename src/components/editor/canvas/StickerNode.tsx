@@ -389,12 +389,8 @@ function StickerNodeImpl({
                 const onUp = () => {
                   stage.off('mousemove.rotate mouseup.rotate');
                   document.body.style.cursor = '';
-                  if (!didMove) {
-                    // 单击：旋转 90°（参考照片 RotationIcon 行为）
-                    onUpdate({ rotation: (sticker.rotation + 90) % 360 }, true);
-                  } else {
-                    onUpdate({}, true);
-                  }
+                  // 单击不再 +90°（避免误触角度跳变）；仅实际拖动旋转时记录历史
+                  if (didMove) onUpdate({}, true);
                 };
                 stage.on('mousemove.rotate', onMove);
                 stage.on('mouseup.rotate', onUp);

@@ -5,6 +5,7 @@ import { LeftPanel } from '../editor/LeftPanel';
 import { Canvas } from '../editor/Canvas';
 import { EditorEmptyState } from '../editor/EditorEmptyState';
 import { EditFlyout } from '../editor/EditFlyout';
+import { ObjectPropertiesPanel } from '../editor/ObjectPropertiesPanel';
 import { PageToolbar } from '../editor/PageToolbar';
 import { PageDisplayModeToggle } from '../editor/PageDisplayModeToggle';
 import { BottomNav } from '../editor/BottomNav';
@@ -17,6 +18,7 @@ import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import { usePhotoImport } from '../../hooks/usePhotoImport';
 import { useLocationResolver } from '../../hooks/useLocationResolver';
 import { getDemoPhotos, getDemoProject } from '../../utils/demoData';
+import coverLandscape from '../../assets/cover-landscape.jpg';
 import { loadProject, loadPhotos, createAndSaveProject, saveProject, savePhotos, scheduleAutoSave, setAutoSaveProvider, setAutoSaveStatusHandler, getCurrentProjectId } from '../../db';
 import { restoreDirectoryHandle, makeDirectPhotoUrl, acquirePhotoUrl } from '../../engine/storage-engine';
 import { photoService } from '../../services/photoService';
@@ -271,6 +273,8 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
               await Promise.all(
                 savedPhotos.map(async (p) => {
                   p.albumId = savedId;
+                  // 封面预设照片：src 为打包静态资源，已持久化；旧数据可能 src 为空，补齐资源路径
+                  if (p.isCoverPreset) { if (!p.src) p.src = coverLandscape; restoredCount++; return; }
                   if (p.storageMode === 'direct') {
                     // P0-fix: 优先用 previewBlobId（1200px preview blob），避免读取原文件。
                     // P0-fix-2: 用 acquirePhotoUrl（refCount=1）pin 住 URL，防止 LRU 淘汰后被 revoke。
@@ -413,10 +417,14 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
     onBack?.();
   }, [onBack, setPages, setPhotos]);
 
-  // 点击 logo → 弹出保存确认弹窗
+  // 点击 logo 返回主页：无任何修改（无可撤销编辑步骤）时直接静默返回，不弹保存确认
   const handleBack = useCallback(() => {
+    if (!useHistoryStore.getState().canUndo()) {
+      executeSaveAndBack();
+      return;
+    }
     setBackConfirmOpen(true);
-  }, []);
+  }, [executeSaveAndBack]);
 
   // 网格视图：独立渲染，不显示编辑器 UI
   if (viewMode === 'grid') {
@@ -475,6 +483,7 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
             <PageToolbar />
             <PageDisplayModeToggle />
             <EditFlyout />
+            <ObjectPropertiesPanel />
           </div>
           <BottomNav />
         </div>

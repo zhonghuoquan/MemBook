@@ -191,8 +191,8 @@ export function GridView({ onBack }: GridViewProps) {
         return;
       }
 
-      // Delete 删除选中页面
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // Delete 删除选中页面（仅 Delete，Backspace 不触发删除）
+      if (e.key === 'Delete' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
         handleDeleteSelected();
       }
@@ -598,7 +598,7 @@ export function GridView({ onBack }: GridViewProps) {
                 <div className="flex gap-2">
                   <button
                     className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
-                    onClick={() => { useEditorStore.getState().applyCoverTemplate('cover-1'); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
+                    onClick={async () => { await useEditorStore.getState().applyCoverTemplate('cover-1'); addToast({ type: 'success', message: t('editor.gridView.coverAdded') }); }}
                   >
                     📕 {t('editor.gridView.addCover')}
                   </button>
@@ -610,7 +610,7 @@ export function GridView({ onBack }: GridViewProps) {
                   </button>
                   <button
                     className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--color-primary-50)] text-[var(--color-brand)] hover:bg-[var(--color-primary-100)] transition-colors cursor-pointer"
-                    onClick={() => { useEditorStore.getState().applyBackCoverTemplate('backcover-1'); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
+                    onClick={async () => { await useEditorStore.getState().applyBackCoverTemplate('backcover-1'); addToast({ type: 'success', message: t('editor.gridView.backCoverAdded') }); }}
                   >
                     📗 {t('editor.gridView.addBackCover')}
                   </button>

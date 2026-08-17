@@ -3,8 +3,9 @@
  * 基于 Dexie.js 实现项目保存/加载/列表
  */
 import Dexie, { type Table } from 'dexie';
-import type { AlbumProject, Photo, CustomTemplate, SlotLayout, PageMargin } from '../types';
-import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../types';
+import type { AlbumProject, AlbumPage, Photo, CustomTemplate, SlotLayout, PageMargin } from '../types';
+import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, isCoverPage } from '../types';
+import { SPINE_GAP_MM, MM_TO_PX } from '../components/editor/canvas/constants';
 import { logger } from '../utils/logger';
 import { isTauri } from '../utils/tauri';
 import { STORAGE_KEYS } from '../config/appConfig';
@@ -272,6 +273,54 @@ export async function listProjects(): Promise<AlbumProject[]> {
   return db.projects.orderBy('updatedAt').reverse().toArray();
 }
 
+/** 封面间距迁移标记（localStorage），一次性执行后不再重复 */
+const COVER_GAP_MIGRATED_KEY = 'membook_cover_spine_gap_migrated';
+/**
+ * 一次性迁移：旧版封面页的书脊与封面正面之间含 SPINE_GAP_MM 视觉间隙（内容整体右移 书脊+间隙 ），
+ * 新版改为印刷一体连续（内容仅右移书脊宽）。对已存在的封面页把封面正面内容左移间隙量，保证与导出一致。
+ */
+export async function migrateCoverSpineGapOnce(): Promise<void> {
+  try {
+    const win = typeof window !== 'undefined' ? window : null;
+    if (win && win.localStorage.getItem(COVER_GAP_MIGRATED_KEY)) return;
+    const db = getDB();
+    const projects = await db.projects.toArray();
+    let migratedAny = false;
+    for (const proj of projects) {
+      let changed = false;
+      const pages = (proj.pages || []).map((p): AlbumPage => {
+        if (!isCoverPage(p) || !(p.spineWidth ?? 0)) return p;
+        const spineWidth = p.spineWidth ?? 0;
+        const gapPx = SPINE_GAP_MM * MM_TO_PX;
+        const np: AlbumPage = {
+          ...p,
+          textElements: (p.textElements || []).map((el) => (el.x >= spineWidth ? { ...el, x: el.x - SPINE_GAP_MM } : el)),
+          shapeElements: (p.shapeElements || []).map((sh) => (sh.x >= spineWidth ? { ...sh, x: sh.x - SPINE_GAP_MM } : sh)),
+          stickerElements: (p.stickerElements || []).map((st) => (st.x >= spineWidth ? { ...st, x: st.x - SPINE_GAP_MM } : st)),
+          brushStrokes: (p.brushStrokes || []).map((s) => ({
+            ...s,
+            points: s.points.map((v, i) => (i % 2 === 0 ? v - SPINE_GAP_MM : v)),
+          })),
+          slotOverrides: p.slotOverrides
+            ? (Object.fromEntries(
+                Object.entries(p.slotOverrides).map(([id, o]) => [id, { ...o, x: o.x - gapPx }]),
+              ) as AlbumPage['slotOverrides'])
+            : undefined,
+        };
+        changed = true;
+        return np;
+      });
+      if (changed) {
+        await db.projects.update(proj.id, { pages, updatedAt: proj.updatedAt });
+        migratedAny = true;
+      }
+    }
+    if (migratedAny && win) win.localStorage.setItem(COVER_GAP_MIGRATED_KEY, '1');
+  } catch (err) {
+    logger.warn('[migrate] 封面间距迁移失败', err);
+  }
+}
+
 export async function saveCurrentProject(data: {
   pages: AlbumProject['pages'];
   albumSize: AlbumProject['size'];
@@ -381,6 +430,8 @@ export async function createCustomTemplate(
 
 /** 清理照片对象中不能持久化的 blob URL */
 function cleanPhotoForStorage(p: Photo): Photo {
+  // 封面预设照片：src 为打包静态资源（coverLandscape），直接持久化保留，重新进入时无需 blob 恢复
+  if (p.isCoverPreset) return p;
   if (p.storageMode === 'direct' && p.relativePath) {
     return { ...p, src: p.relativePath };
   }

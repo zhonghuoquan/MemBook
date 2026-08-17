@@ -17,6 +17,7 @@ import {
 import {
   type AlbumPage,
   type Photo,
+  isCoverPage,
 } from '../types';
 import { SLOT_PALETTE_VERSION } from '../constants/templatePalette';
 import { loadImage, readFileAsBlobUrl } from './tauri';
@@ -28,10 +29,45 @@ import type { ThumbnailWorkerRequest, ThumbnailWorkerResponse } from './thumbnai
 import { getThumbnail, saveThumbnail, clearAllThumbnails } from '../db';
 import { preloadStickerSrc } from '../hooks/useStickerSrc';
 import { getCachedContentInfo, type PhotoContentInfo } from '../engine/content-aware';
+import logoLight from '../assets/logo-light.png';
 
 /* ── 常量 ── */
 /** 缩略图基准宽度（1.0x 缩放时的逻辑像素宽） */
 const BASE_THUMB_W = 200;
+
+/** 书脊 MemBook logo 水印（亮色版，与导出一致）。模块加载即预载，缩略图渲染时若已就绪则绘制。 */
+const spineLogoElement = new window.Image();
+spineLogoElement.src = logoLight;
+
+/** 书脊 logo 是否已就绪可绘制（主线程路径用 HTMLImageElement） */
+function getReadySpineLogo(): HTMLImageElement | undefined {
+  return spineLogoElement.complete && spineLogoElement.naturalWidth > 0 ? spineLogoElement : undefined;
+}
+
+/** 生成书脊 logo 的 ImageBitmap（供 Worker 转移）。每次调用新建一份，避免同一 bitmap 重复 transfer 报错。 */
+async function getSpineLogoBitmap(): Promise<ImageBitmap | null> {
+  try {
+    const img = getReadySpineLogo() ?? await loadImage(logoLight);
+    return await createImageBitmap(img);
+  } catch {
+    return null;
+  }
+}
+
+/** 加载背景图片为 ImageBitmap（优先，可 transfer 给 Worker）；失败回退 HTMLImageElement */
+export async function loadBackgroundBitmap(src?: string): Promise<ImageBitmap | HTMLImageElement | null> {
+  if (!src) return null;
+  try {
+    const blob = await (await fetch(src)).blob();
+    return await createImageBitmap(blob);
+  } catch {
+    try {
+      return await loadImage(src);
+    } catch {
+      return null;
+    }
+  }
+}
 
 /**
  * 缩略图渲染版本号。包含在 IDB 持久化缓存 key 中，
@@ -39,7 +75,7 @@ const BASE_THUMB_W = 200;
  * 使所有旧版本 IDB 缓存条目因 key 不匹配而自然失效（不会被命中），
  * 避免残缺/过期的 dataURL 持续显示。
  */
-const RENDER_VERSION = 6;
+const RENDER_VERSION = 10;
 
 /* ── 缓存 ──
  * P0-3 优化：从无界 Map 改为 LRU 缓存，容量 80 页。
@@ -127,6 +163,9 @@ function computeContentHash(page: AlbumPage, photos: Photo[], margin?: { left: n
 
   const content = JSON.stringify({
     b: page.background,
+    // 背景图片与填充方式影响缩略图渲染，必须包含在哈希中，变化时缓存自动失效
+    bi: page.backgroundImage ?? null,
+    bif: page.backgroundImageFit ?? null,
     sc: page.slotCornerRadius,
     t: page.templateId,
     // pageMargin 影响槽位渲染位置，必须包含在哈希中，边距变化时缓存自动失效
@@ -161,6 +200,14 @@ function computeContentHash(page: AlbumPage, photos: Photo[], margin?: { left: n
     st: page.stickerElements?.map((st) => [
       st.id, st.x, st.y, st.width, st.height, st.stickerId,
       st.rotation, st.flipH, st.flipV, st.zIndex,
+    ]) ?? null,
+    // P-fix: 缩略图缓存哈希必须包含形状，否则添加/修改形状后命中旧缓存，缩略图/网格/全屏不实时同步
+    sh: page.shapeElements?.map((sh) => [
+      sh.id, sh.type, sh.x, sh.y, sh.width, sh.height,
+      sh.fill, sh.stroke, sh.strokeWidth, sh.rotation ?? 0, sh.opacity ?? 1, sh.zIndex,
+      sh.cornerRadius ?? 0, sh.cornerCut ?? 0,
+      sh.gradient ? JSON.stringify(sh.gradient) : null, sh.gradientAngle ?? null,
+      sh.strokeGradient ? JSON.stringify(sh.strokeGradient) : null,
     ]) ?? null,
     pd: photoDims,
   });
@@ -256,6 +303,7 @@ export function renderPageThumbnail(
   photoImages?: Map<string, HTMLImageElement | ImageBitmap>,
   options?: RenderOptions,
   stickerImages?: Map<string, HTMLImageElement | ImageBitmap>,
+  backgroundImageBitmap?: HTMLImageElement | ImageBitmap,
 ): string | null {
   const baseWidth = options?.baseWidth ?? BASE_THUMB_W;
   const cacheSuffix = options?.cacheSuffix ?? '';
@@ -289,7 +337,7 @@ export function renderPageThumbnail(
 
   // P1-5：纯绘制核心复用 thumbnailCore.drawPageToCanvas（主线程与 Worker 共用）
   // 主线程传入 margin（pm 已在上方声明用于 content hash），避免 Worker 内无法读取 store 导致 fallback 无边距缩放
-  const drawnPhotoCount = drawPageToCanvas(ctx, page, photos, logicalW, logicalH, photoImages, stickerImages, pm);
+  const drawnPhotoCount = drawPageToCanvas(ctx, page, photos, logicalW, logicalH, photoImages, stickerImages, pm, undefined, backgroundImageBitmap);
 
   // P0-fix: 校验是否完整渲染——若部分照片加载失败（photoImages 缺失），
   //   drawPageToCanvas 会跳过该照片只画背景+槽位，生成"空白但有底色"的残缺 dataURL。
@@ -483,12 +531,17 @@ export async function renderPageThumbnailInWorker(
     }
   }
 
+  // 背景图片位图（可选）：加载为 ImageBitmap 以便 transfer；HTMLImageElement 则无法走 Worker
+  const backgroundImg = await loadBackgroundBitmap(page.backgroundImage);
+  const backgroundAllBitmap = backgroundImg === null || backgroundImg instanceof ImageBitmap;
+
   const worker = getThumbnailWorker();
-  if (!worker || !allBitmaps || !stickerAllBitmaps) {
+  if (!worker || !allBitmaps || !stickerAllBitmaps || !backgroundAllBitmap) {
     // 回退主线程同步渲染，渲染后释放位图
-    const url = renderPageThumbnail(page, photos, scale, photoImages, options, stickerImages);
+    const url = renderPageThumbnail(page, photos, scale, photoImages, options, stickerImages, backgroundImg ?? undefined);
     releasePreloadedImages(photoImages);
     if (stickerImages) releaseStickerImages(stickerImages);
+    if (backgroundImg instanceof ImageBitmap) try { backgroundImg.close(); } catch { /* ignore */ }
     // P2-1: 持久化到 IDB（fire-and-forget）
     if (url) void saveThumbnail(dbKey, page.id, url);
     return url;
@@ -518,6 +571,8 @@ export async function renderPageThumbnailInWorker(
   const jobId = `${cacheKey}#${++workerJobSeq}`;
   // P0-fix: 计算期望绘制照片数，用于 Worker 返回后校验是否完整渲染
   const expectedPhotoCount = page.placements.filter((pl) => pl.photoId).length;
+  // 书脊 logo 水印位图（仅封面页使用；失败返回 null，Worker 端跳过绘制）
+  const logoBitmap = isCoverPage(page) ? await getSpineLogoBitmap() : null;
   return new Promise<string | null>((resolve) => {
     // 超时保护：Worker 崩溃或消息处理异常时 10s 超时，回退主线程渲染
     const timeoutId = setTimeout(() => {
@@ -552,6 +607,8 @@ export async function renderPageThumbnailInWorker(
       baseWidth,
       bitmaps,
       stickerBitmaps,
+      logoBitmap: logoBitmap ?? undefined,
+      backgroundImageBitmap: backgroundImg instanceof ImageBitmap ? backgroundImg : undefined,
       // Worker 无法读取主线程 store，显式传入 pageMargin 用于边距感知渲染
       margin: useEditorStore.getState().pageMargin,
       // P1-fix: 传入内容感知信息映射，让 Worker 渲染也能应用主体感知裁切
@@ -564,6 +621,8 @@ export async function renderPageThumbnailInWorker(
     };
     // 转移 ImageBitmap 所有权：主线程侧 bitmap 被 detach，Worker 端绘制后 close
     const transferList = bitmaps.map((b) => b[1]).concat(stickerBitmaps.map((b) => b[1]));
+    if (logoBitmap) transferList.push(logoBitmap);
+    if (backgroundImg instanceof ImageBitmap) transferList.push(backgroundImg);
     worker.postMessage(req, transferList);
   });
 }

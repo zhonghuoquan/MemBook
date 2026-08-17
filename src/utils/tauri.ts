@@ -118,6 +118,36 @@ export async function readFileAsBlobUrl(path: string): Promise<string | null> {
   }
 }
 
+/** 将 Blob 转 dataURL（FileReader） */
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error || new Error('FileReader 失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** 读取本地图片文件转为 dataURL（用于背景图片等需随相册持久化的资源；浏览器端直接用 File 转） */
+export async function readFileToDataUrl(path: string): Promise<string | null> {
+  try {
+    if (!isTauri()) return null;
+    const { readFile } = await import('@tauri-apps/plugin-fs');
+    const bytes = await readFile(path);
+    const ext = path.split('.').pop()?.toLowerCase();
+    const mime = ext === 'png' ? 'image/png'
+      : ext === 'webp' ? 'image/webp'
+      : ext === 'gif' ? 'image/gif'
+      : ext === 'bmp' ? 'image/bmp'
+      : 'image/jpeg';
+    const blob = new Blob([bytes], { type: mime });
+    return await blobToDataUrl(blob);
+  } catch (err) {
+    logger.warn(`[tauri] 读取文件为 dataURL 失败: ${path}`, err);
+    return null;
+  }
+}
+
 /** 保存文件：Tauri 环境用 fs 插件写入，浏览器用 a.download 下载 */
 export interface SaveFileResult {
   /** 最终保存路径（Tauri 模式下） */

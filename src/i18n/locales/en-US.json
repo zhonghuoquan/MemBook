@@ -194,6 +194,7 @@
       "sortCreatedAt": "Created Time",
       "sortName": "Name",
       "sortNameAZ": "Name A-Z",
+      "fullscreenView": "Realistic preview",
       "select": "Select",
       "createAlbum": "Create Album",
       "noMatch": "No matching albums found",
@@ -284,7 +285,7 @@
       "backCoverBadge": "📗 Back cover",
       "use": "Use",
       "defaultAlbumName": "My Album",
-      "hint": "Click \"Use\" to create an album with this cover and open the editor. The cover layout auto-fits the page size. You can then freely change photos, double-click text to edit, or use the Tools panel to add shapes and adjust fonts and colors."
+      "hint": "Click \"Use\" to create an album with this cover and open the editor. Every cover comes with a matching back cover that is applied automatically, so cover and back cover stay one integrated design. You can then freely change photos, double-click text to edit, or use the Tools panel to add shapes and adjust fonts and colors."
     },
     "emptyState": {
       "title": "No albums yet",
@@ -1033,6 +1034,11 @@
     }
   },
   "editor": {
+    "objectPanel": {
+      "title": "Properties",
+      "collapse": "Collapse panel",
+      "expand": "Expand panel"
+    },
     "displayMode": {
       "full": "Full",
       "page": "Page",
@@ -1058,9 +1064,13 @@
       "switched": "Cover layout switched",
       "coverAdded": "Cover page added",
       "backCoverAdded": "Back cover page added",
+      "switchTitle": "Use this cover",
+      "previewTitle": "Cover Preview",
+      "previewCover": "Cover page",
+      "previewBack": "Back cover page",
       "onCoverPageHint": "Current page is a cover/back cover: click a template above to switch its layout (keeps photos and text).",
       "onNormalPageHint": "Current page is a normal page: clicking a cover template inserts a new cover/back cover page.",
-      "hint": "Cover layouts auto-fit the page size. After applying, double-click text on the canvas to edit, or use the Tools panel."
+      "hint": "Every cover comes with a matching back cover that is applied automatically — cover and back cover stay one integrated design. After applying, double-click text on the canvas to edit, or use the Tools panel."
     },
     "toolbar": {
       "photos": "Photos",
@@ -1191,10 +1201,14 @@
       "brushHint": "Select \"Brush\" to draw on the page, or \"Eraser\" to erase strokes",
       "textSection": "Text",
       "textStickySection": "Text / Sticky Notes",
+      "elementsSection": "Add Elements",
+      "elementsHint": "After adding, select on canvas to edit properties in the right panel",
       "stickySection": "Sticky Notes",
       "addText": "Add Text",
       "quickStyles": "Quick Styles",
       "textProperties": "Text Properties",
+      "textTabBasic": "Basic",
+      "textTabColor": "Color",
       "fontFamily": "Font",
       "fontSize": "Size",
       "bold": "Bold",
@@ -1204,9 +1218,15 @@
       "alignLeft": "Left",
       "alignCenter": "Center",
       "alignRight": "Right",
+      "verticalAlign": "Vertical Align",
+      "alignTop": "Align Top",
+      "alignMiddle": "Align Middle",
+      "alignBottom": "Align Bottom",
       "textDirection": "Direction",
       "horizontal": "Horizontal",
       "vertical": "Vertical",
+      "lineSpacing": "Line Spacing",
+      "letterSpacing": "Letter Spacing",
       "addSticky": "Add Sticky Note",
       "defaultSize": "Default Size",
       "sizeSmall": "Small",
@@ -1226,6 +1246,10 @@
       "shapeSection": "Shapes",
       "addShape": "Pick a shape",
       "shapeProperties": "Shape properties",
+      "shapeTabBasic": "Basic",
+      "shapeTabFill": "Fill",
+      "shapeTabStroke": "Stroke",
+      "shapeNoStroke": "No stroke",
       "shapeWidth": "Width",
       "shapeHeight": "Height",
       "shapeFill": "Fill",
@@ -1235,8 +1259,26 @@
       "shapeRotation": "Rotation",
       "deleteShape": "Delete shape",
       "shapeHint": "Pick a shape above, then press and drag on the canvas to draw it",
+      "shapeGradient": "Gradient fill",
+      "shapeGradientLinear": "Linear",
+      "shapeGradientRadial": "Radial",
+      "gradientStops": "Gradient Stops",
+      "gradientStart": "Start",
+      "gradientEnd": "End",
+      "gradientStopOpacity": "Opacity",
+      "gradientPosition": "Position",
+      "gradientNoFill": "No Fill",
+      "gradientAngle": "Angle",
       "shape_rectangle": "Rectangle",
-      "shape_square": "Square",
+      "shape_roundedRect": "Rounded Rectangle",
+      "shape_singleRoundRect": "Single-Corner Rounded Rectangle",
+      "shape_diagonalRoundRect": "Diagonal Rounded Rectangle",
+      "shape_parallelogram": "Parallelogram",
+      "shape_trapezoid": "Trapezoid",
+      "shape_cutCornerRect": "Cut Corner Rectangle",
+      "shape_cutDiagonalRect": "Cut Diagonal Rectangle",
+      "shapeCornerRadius": "Corner Rounding",
+      "shapeCornerCut": "Corner Cut",
       "shape_circle": "Circle",
       "shape_ellipse": "Ellipse",
       "shape_triangle": "Triangle",
@@ -1248,13 +1290,27 @@
       "shape_line": "Line",
       "backgroundSection": "Background",
       "background": {
-        "tabSolid": "Solid",
-        "tabGradient": "Gradient",
+        "tabColor": "Color",
         "tabTexture": "Texture",
+        "tabImage": "Image",
         "customPicker": "Custom Picker",
         "eyeDropper": "Screen Picker",
         "eyeDropperUnsupported": "Screen picker not supported, fell back to color picker",
-        "applyToAll": "Apply to all pages"
+        "applyToAll": "Apply to all pages",
+        "applyScope": "Apply To",
+        "scopeCurrent": "Current",
+        "scopeNormal": "Content",
+        "scopeCover": "Cover",
+        "scopeBack": "Back",
+        "scopeAll": "All",
+        "uploadImage": "Upload background image",
+        "uploading": "Uploading…",
+        "pickImage": "Select background image",
+        "imageFilter": "Image files",
+        "preview": "Background image preview",
+        "fitCover": "Cover",
+        "fitContain": "Fit",
+        "removeImage": "Remove background image"
       }
     },
     "dragDrop": {
@@ -1405,6 +1461,7 @@
       "backup": "Backup Data",
       "page": "Page",
       "pageSettings": "Page Settings",
+      "coverSettings": "Cover Settings",
       "timeWatermark": "Time Watermark"
     },
     "guard": {
@@ -1417,6 +1474,26 @@
     },
     "saveBtn": "Save",
     "exportBtn": "Export",
+    "bookPreviewBtn": "Preview",
+    "exitBookPreviewBtn": "Exit Preview",
+    "bookPreview": {
+      "title": "Realistic Preview",
+      "rendering": "Generating flip preview…",
+      "page": "Page {{current}} / {{total}}",
+      "prev": "Previous",
+      "next": "Next",
+      "empty": "No pages to preview",
+      "coverStage": "Cover",
+      "coverHint": "Click the cover to open the album",
+      "coverAlt": "Album cover",
+      "openCover": "Open album",
+      "backStage": "Back cover",
+      "backHint": "You reached the last page — here is the back cover",
+      "backAlt": "Album back cover",
+      "backToFlip": "Back to pages",
+      "goCover": "Cover",
+      "goBack": "Back"
+    },
     "backup": {
       "title": "Backup Current Album",
       "confirm": "Confirm Backup",
@@ -1902,6 +1979,8 @@
       "slotGap": "Slot Gap",
       "slotRadius": "Slot Corner Radius",
       "coverSlotRadius": "Cover Photo Corner Radius",
+      "spine": "Spine",
+      "spineColor": "Spine Color",
       "uniform": "Uniform",
       "perCorner": "Per Corner",
       "cornerTL": "TL",
@@ -1911,6 +1990,19 @@
       "applyToAll": "Apply to All Pages",
       "marginGuide": "Show Margin Guides",
       "guides": "Show Alignment Guides",
+      "resetDefault": "Reset to Default"
+    },
+    "coverSettings": {
+      "title": "Cover Settings",
+      "coverSlotRadius": "Cover Photo Corner Radius",
+      "spine": "Spine",
+      "spineColor": "Spine Color",
+      "uniform": "Uniform",
+      "perCorner": "Per Corner",
+      "cornerTL": "TL",
+      "cornerTR": "TR",
+      "cornerBR": "BR",
+      "cornerBL": "BL",
       "resetDefault": "Reset to Default"
     },
     "emptyState": {
@@ -1927,7 +2019,7 @@
       "marginHint": "Blank pages will automatically apply current margin and corner radius settings"
     },
     "textElement": {
-      "placeholder": "Click to enter text"
+      "placeholder": "Double-click to enter text"
     },
     "stickyNote": {
       "placeholder": "Double-click to edit"
@@ -1994,7 +2086,13 @@
     },
     "colorPalette": {
       "tabSolid": "Theme",
-      "tabGradient": "Gradient"
+      "tabGradient": "Gradient",
+      "standardColors": "Standard",
+      "colorWheel": "Palette",
+      "noGradient": "No Gradient",
+      "customColor": "Custom Color",
+      "tripleGradient": "3-Color Gradient",
+      "quadGradient": "4-Color Gradient"
     }
   },
   "about": {

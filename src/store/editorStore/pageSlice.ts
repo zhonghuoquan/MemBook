@@ -1,11 +1,41 @@
-import type { AlbumPage, SlotLayout, PresetTextElement, PresetShapeElement, PageTextElement, ShapeElement } from '../../types';
-import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById } from '../../types';
+import type { AlbumPage, SlotLayout, PresetTextElement, PresetShapeElement, PageTextElement, ShapeElement, BackgroundApply } from '../../types';
+import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById, isCoverPage, isBackCoverPage, isCoverOrBackCoverPage } from '../../types';
 import { pageLayoutService } from '../../services/pageLayoutService';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
 import { findCoverTemplateById } from '../../types/cover-templates';
+import { DEFAULT_SPINE_WIDTH_MM } from '../../components/editor/canvas/constants';
+import { fitTextSize } from '../../components/editor/canvas/TextDomNode';
+import { coverElementSize, coverAnchorPosition, isMaskShape } from '../../utils/coverScale';
+import { createDefaultCoverPhotos } from '../../utils/coverPresetPhoto';
 import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
+
+/** 封面模板文字字体基准尺寸（mm）：模板 fontSize 按默认竖版相册 210×280 设计。
+ * 适配其他尺寸（方形/横版/迷你/冲印）时，综合宽高比取最小值缩放（clamp [0.5,1.6]），
+ * 保证文字在任一维度都不溢出、比例协调——仅按宽度缩放会在横版/方形页面上字幕过大。 */
+const REFERENCE_COVER_WIDTH_MM = 210;
+const REFERENCE_COVER_HEIGHT_MM = 280;
+
+/** 封面/封底元素适配字号缩放：取宽高比较小者，避免某一维度溢出；clamp 防止过小不可读/过大溢出 */
+function coverFontScale(pageMm: { width: number; height: number }): number {
+  const s = Math.min(pageMm.width / REFERENCE_COVER_WIDTH_MM, pageMm.height / REFERENCE_COVER_HEIGHT_MM);
+  return Math.max(0.5, Math.min(1.6, s));
+}
+
+/** 封面/封底模板图层 zIndex 层级（统一语义，避免魔法数字导致图层错乱）：
+ * 装饰形状(30) < 槽位照片(60) < 渐变蒙版(70) < 书脊元素(100) < 模板文字(100) < 用户后加元素(动态 getGlobalMaxZ)
+ * - 装饰形状（圆点/叶片/太阳/彩球等）置于照片之下，避免遮挡照片主视觉；
+ * - 槽位照片置顶于装饰形状之上，保证照片完整显示不被形状遮挡；
+ * - 渐变蒙版(mask)仍置于照片之上做压暗，保证其上文字清晰可读；
+ * - 书脊与封面文字分处不同区域、同层不重叠。 */
+const COVER_Z = {
+  decoration: 30,
+  photo: 60,
+  mask: 70,
+  spine: 100,
+  text: 100,
+} as const;
 
 /**
  * 将模板的预设文字元素（百分比坐标）转换为页面的 textElements（mm 坐标）。
@@ -16,28 +46,56 @@ function presetTextToPageElements(
   pageMm: { width: number; height: number },
   albumName: string,
   dateRange: string | undefined,
+  spineOffsetX = 0,
 ): PageTextElement[] {
   if (!presets || presets.length === 0) return [];
-  const scaleX = (v: number) => (v / 100) * pageMm.width;
+  // 封面/封底页：书脊为页面左侧物理扩展，正文元素整体右移 spineOffsetX（mm）
+  // 位置 x 含书脊偏移；尺寸 width/height 不含偏移（否则会放大并导致居中元素偏移）
+  const posX = (v: number) => spineOffsetX + (v / 100) * pageMm.width;
+  const scale = (v: number) => (v / 100) * pageMm.width;
   const scaleY = (v: number) => (v / 100) * pageMm.height;
+  // 文字随封面尺寸等比缩放：综合宽高比取小值 + clamp，保证不同尺寸（竖版/横版/方形/迷你）比例协调且不溢出
+  const fontScale = coverFontScale(pageMm);
   return presets.map((p) => {
     let text = p.text;
     if (p.placeholder === 'albumName') text = albumName || text;
     else if (p.placeholder === 'date') text = dateRange || text;
-    return {
+    const fontSize = p.fontSize * fontScale;
+    const base: PageTextElement = {
       id: `cover-text-${p.id}-${Date.now().toString(36)}`,
-      x: scaleX(p.x), y: scaleY(p.y),
-      width: scaleX(p.width), height: scaleY(p.height),
+      x: posX(p.x), y: scaleY(p.y),
+      width: scale(p.width), height: scaleY(p.height),
       text,
-      fontSize: p.fontSize,
+      fontSize,
       fontFamily: p.fontFamily,
       color: p.color,
       align: p.align,
+      // 封面文字垂直对齐：模板可指定，缺省居中（与普通文字工具一致，编辑浮层按 verticalAlign 对齐）
+      verticalAlign: p.verticalAlign ?? 'center',
+      // 封面模板字间距/行间距：透传模板预设值，缺省用默认（0 / 1.2），与渲染层保持所见即所得
+      letterSpacing: p.letterSpacing,
+      lineHeight: p.lineHeight,
       bold: p.bold,
       italic: p.italic,
       rotation: p.rotation,
-      zIndex: 100,
+      gradient: p.gradient,
+      gradientAngle: p.gradientAngle,
+      zIndex: COVER_Z.text,
     };
+    // 文本框按文字自适应：模板预设 height 是偏小占位值，实际渲染文字更高会被 overflow:hidden 裁剪。
+    // 应用时用 fitTextSize（与渲染层同源公式）把尺寸撑到完整容纳文字——
+    // 横排宽度固定、高度按换行增长；竖排宽度按列数增长。仅文字非空时计算，空文字保持占位尺寸。
+    if (text) {
+      const fitted = fitTextSize({
+        text, fontSize, fontFamily: p.fontFamily,
+        bold: p.bold, italic: p.italic, isVertical: false,
+        width: base.width, height: base.height,
+        lineHeight: p.lineHeight, letterSpacing: p.letterSpacing,
+      });
+      base.width = fitted.width;
+      base.height = fitted.height;
+    }
+    return base;
   });
 }
 
@@ -48,35 +106,118 @@ function presetTextToPageElements(
 function presetShapeToPageElements(
   presets: PresetShapeElement[] | undefined,
   pageMm: { width: number; height: number },
+  spineOffsetX = 0,
 ): ShapeElement[] {
   if (!presets || presets.length === 0) return [];
-  const scaleX = (v: number) => (v / 100) * pageMm.width;
-  const scaleY = (v: number) => (v / 100) * pageMm.height;
-  return presets.map((p) => ({
-    id: `cover-shape-${p.id}-${Date.now().toString(36)}`,
-    x: scaleX(p.x) + scaleX(p.width) / 2,  // 中心点
-    y: scaleY(p.y) + scaleY(p.height) / 2,
-    width: scaleX(p.width),
-    height: scaleY(p.height),
-    type: p.type,
-    fill: p.fill,
-    stroke: p.stroke,
-    strokeWidth: p.strokeWidth,
-    opacity: p.opacity,
-    rotation: p.rotation,
-    zIndex: 50,
-  }));
+  // 封面/封底页：书脊为页面左侧物理扩展，正文元素整体右移 spineOffsetX（mm）
+  // 位置 x 含书脊偏移；尺寸 width/height 不含偏移（否则会放大并导致居中元素偏移）
+  // 形状尺寸统一走 coverElementSize：蒙版(mask)按轴拉伸覆盖区域，装饰形状等比保持宽高比
+  const kx = pageMm.width / 100;
+  const ky = pageMm.height / 100;
+  return presets.map((p) => {
+    const { width: w, height: h } = coverElementSize(isMaskShape(p.id), p.width, p.height, kx, ky);
+    // 锚点感知定位：贴边/居中形状在异宽高比页面上保持视觉关系一致（避免居中偏移、靠边离边）
+    const { x, y } = coverAnchorPosition(p, pageMm.width, pageMm.height, w, h);
+    return {
+      id: `cover-shape-${p.id}-${Date.now().toString(36)}`,
+      x: spineOffsetX + x + w / 2,  // 中心点（x 已为 mm 页面坐标，叠加书脊偏移）
+      y: y + h / 2,
+      width: w,
+      height: h,
+      type: p.type,
+      fill: p.fill,
+      stroke: p.stroke,
+      strokeWidth: p.strokeWidth,
+      opacity: p.opacity,
+      rotation: p.rotation,
+      gradient: p.gradient,
+      gradientAngle: p.gradientAngle,
+      strokeGradient: p.strokeGradient,
+      strokeGradientAngle: p.strokeGradientAngle,
+      cornerRadius: p.cornerRadius,
+      cornerCut: p.cornerCut,
+      // 蒙版（id 含 mask）在照片之上做压暗保证文字可读；装饰形状在照片之下避免遮挡照片
+      zIndex: isMaskShape(p.id) ? COVER_Z.mask : COVER_Z.decoration,
+    };
+  });
 }
 
-/** 从相册照片中提取日期年份区间（如 2023-2024） */
+/** 从相册照片中提取日期年份区间（如 2023-2024）；照片无日期时以当前年份为默认（2026） */
 function deriveDateRange(photos: { date?: string }[]): string | undefined {
   const years = photos
     .map((p) => (p.date ? new Date(p.date).getFullYear() : NaN))
     .filter((y) => !Number.isNaN(y));
-  if (years.length === 0) return undefined;
+  if (years.length === 0) return String(new Date().getFullYear());
   const min = Math.min(...years);
   const max = Math.max(...years);
   return min === max ? String(min) : `${min}–${max}`;
+}
+
+/**
+ * 生成书脊默认内容元素（竖排文本，逐字正立自上而下）：MemBook 水印 + 相册名 + 日期。
+ * 书脊背面区域为封面页左侧 0..spineWidth(mm)，元素水平居中于书脊。
+ * 均为独立可编辑文本元素，用户可在画布上继续编辑。
+ */
+function buildSpineElements(
+  albumName: string,
+  dateRange: string | undefined,
+  spineWidth: number,
+  pageHeight: number,
+): PageTextElement[] {
+  const centerX = spineWidth / 2;
+  // 竖排文本：盒宽与普通竖排文字一致（单列宽度 = 字号+6，与 fitTextSize 一致），贴合文字列；
+  // 高度按内容（每字 字号+2 + 上下内边距）自适应。保证控制器(选框)与编辑输入框尺寸一致、不超出书脊。
+  const mk = (id: string, centerY: number, text: string, fontSize: number, h: number): PageTextElement => {
+    const boxW = Math.min(fontSize + 6, spineWidth);
+    return {
+      id: `spine-text-${id}-${Date.now().toString(36)}`,
+      x: centerX - boxW / 2,
+      y: centerY - h / 2,
+      width: boxW,
+      height: h,
+      text,
+      fontSize,
+      fontFamily: "'Helvetica Neue', Arial, sans-serif",
+      color: 'rgba(60,60,70,0.9)',
+      align: 'center',
+      bold: false,
+      italic: false,
+      // 书脊文字：isVertical 已逐字正立竖排（自上而下），不另旋转；若再加 -90 会把正立字旋转成横躺导致角度错误
+      rotation: 0,
+      isVertical: true,
+      zIndex: COVER_Z.spine,
+    };
+  };
+
+  const els: PageTextElement[] = [];
+  // 顶部 MemBook logo 水印的顶边距（mm）：与画布渲染一致（logo 顶部 y = spineWidth*0.7）
+  // 底部日期以此为基准，使其底边距与顶部 logo 顶边距高度一致，上下对称。
+  const logoTopOffset = spineWidth * 0.7;
+  // 相册名：放在画册纵向中线上（页高 50%），高度按内容增长，至少容纳 50mm
+  const nameFs = 9;
+  const nameH = Math.max(50, albumName.length * (nameFs + 2) + 8);
+  els.push(mk('name', pageHeight * 0.5, albumName, nameFs, nameH));
+  // 日期：放到底部书脊，底边距与顶部 logo 顶边距一致（页高 - logoTopOffset - 盒高/2）
+  if (dateRange) {
+    const dateFs = 8;
+    const dateH = Math.max(20, dateRange.length * (dateFs + 2) + 8);
+    const dateCenterY = pageHeight - logoTopOffset - dateH / 2;
+    els.push(mk('date', dateCenterY, dateRange, dateFs, dateH));
+  }
+  return els;
+}
+
+/**
+ * 确保相册照片足够填满模板所有照片位：不足时用封面预设照片补齐并加入 photoStore。
+ * 返回足以覆盖槽位的照片数组（相册照片优先，预设照片补足）。
+ */
+async function ensureCoverSlotPhotos(slotCount: number): Promise<import('../../types').Photo[]> {
+  const photoStore = usePhotoStore.getState();
+  const photos = photoStore.photos;
+  if (photos.length >= slotCount) return photos;
+  const defaults = await createDefaultCoverPhotos(slotCount - photos.length);
+  if (defaults.length) photoStore.addPhotos(defaults);
+  return [...photos, ...defaults];
 }
 
 /* ── 页面增删改查 slice ── */
@@ -291,19 +432,31 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
     }
     pushSnapshot(get);
   },
-  updatePageBackground: (index, color) => {
+  /** 背景应用描述：可同时设置底色（纯色/渐变/纹理）与背景图片 */
+  updatePageBackground: (index, apply: BackgroundApply) => {
     set((s) => {
       const newPages = [...s.pages];
       if (newPages[index]) {
-        newPages[index] = { ...newPages[index], background: color };
+        newPages[index] = { ...newPages[index], ...apply };
       }
       return { pages: newPages };
     });
     pushSnapshot(get);
   },
-  applyBackgroundToAllPages: (color) => {
+  applyBackgroundByScope: (scope, apply: BackgroundApply) => {
+    const currentIndex = get().currentPageIndex;
+    const matches = (p: AlbumPage, i: number): boolean => {
+      switch (scope) {
+        case 'current': return i === currentIndex;
+        case 'normal': return !isCoverOrBackCoverPage(p);
+        case 'cover': return isCoverPage(p);
+        case 'back': return isBackCoverPage(p);
+        case 'all': return true;
+        default: return false;
+      }
+    };
     set((s) => {
-      const newPages = s.pages.map((p) => ({ ...p, background: color }));
+      const newPages = s.pages.map((p, i) => (matches(p, i) ? { ...p, ...apply } : p));
       return { pages: newPages };
     });
     pushSnapshot(get);
@@ -349,18 +502,28 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
    * - 当前无封面：创建新封面页插入首部，照片从相册池按序填入槽位
    * - 当前已有封面：切换模板，保留已填照片（按序迁移到新槽位），重新落位预设文字/形状
    */
-  applyCoverTemplate: (templateId) => {
+  applyCoverTemplate: async (templateId) => {
     const template = findCoverTemplateById(templateId);
     if (!template) return;
     const size = get().albumSize;
     const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
     const albumName = get().projectName || '我的相册';
-    const photos = usePhotoStore.getState().photos;
+    // 确保照片槽位全部有图：相册照片不足时用预设照片补齐
+    const photos = await ensureCoverSlotPhotos(template.slots.length);
     const dateRange = deriveDateRange(photos);
 
-    // 预设元素落位（百分比→mm）
-    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange);
-    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm);
+    // 书脊为封面页左侧物理扩展：默认宽度 + 模板默认书脊色
+    const spineWidth = DEFAULT_SPINE_WIDTH_MM;
+    const spineColor = template.spineColor;
+    // 封面正面内容整体右移书脊宽度（印刷一体：书脊背面与封面正面连续，无视觉间隙），书脊背面在左侧
+    const contentOffset = spineWidth;
+
+    // 预设元素落位（百分比→mm，正文整体右移 contentOffset）
+    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange, contentOffset);
+    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm, contentOffset);
+
+    // 书脊默认内容：MemBook 水印 + 相册名 + 日期（竖排，位于书脊背面 0..spineWidth 区域）
+    const spineElements = buildSpineElements(albumName, dateRange, spineWidth, pageMm.height);
 
     // 照片槽位 placements：从相册照片按序填入
     const photoIds = photos.slice(0, template.slots.length).map((p) => p.id);
@@ -375,8 +538,12 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       pageKind: 'cover',
       placements,
       background: template.presetBackground ?? '#FFFFFF',
-      slotCornerRadius: 4,
-      textElements,
+      spineWidth,
+      spineColor,
+      slotCornerRadius: template.slotCornerRadius ?? 4,
+      // 照片槽位置顶于装饰形状之上（COVER_Z.photo > decoration），避免被形状遮挡
+      slotZIndices: Object.fromEntries(template.slots.map((s) => [s.id, COVER_Z.photo])),
+      textElements: [...spineElements, ...textElements],
       shapeElements,
     };
 
@@ -385,16 +552,31 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       const newPages = [...s.pages];
       let coverIdx: number;
       if (hasCover) {
-        // 切换封面模板：保留当前已填照片（按序迁移到新槽位）
+        // 切换封面模板：保留已填照片 + 用户编辑的文字/形状
         const oldCover = newPages.find((p) => p.pageKind === 'cover')!;
         const oldPhotoIds = oldCover.placements
           .filter((pl) => pl.photoId)
           .map((pl) => pl.photoId!) as string[];
-        // 用旧照片填新槽位（不足则留空）
+        // 切换模板：优先保留旧封面照片，不足的槽位用 photos（ensureCoverSlotPhotos 已确保含预设照片）补齐，
+        // 保证只要模板有照片位，所有槽位都有图（如单图→多图拼排不会出现空槽位）
+        const usedIds = new Set(oldPhotoIds);
+        const extraPhotoIds = photos.filter((p) => !usedIds.has(p.id)).map((p) => p.id);
+        const newPhotoIds = [...oldPhotoIds, ...extraPhotoIds];
         newPage.placements = template.slots.map((slot, i) => ({
           slotId: slot.id,
-          photoId: oldPhotoIds[i] ?? null,
+          photoId: newPhotoIds[i] ?? null,
         }));
+        // 保留旧封面用户编辑的文字（排除书脊自动生成元素 + 模板预设文字）
+        const oldTextElements = (oldCover.textElements || []).filter(
+          (el) => !el.id.startsWith('spine-text-') && !el.id.startsWith('cover-text-'),
+        );
+        // 保留旧封面用户添加的形状（排除模板预设形状）
+        const oldShapeElements = (oldCover.shapeElements || []).filter(
+          (el) => !el.id.startsWith('cover-shape-'),
+        );
+        // 合并：书脊 + 新模板预设文字 + 旧封面用户文字 + 新模板预设形状 + 旧封面用户形状
+        newPage.textElements = [...spineElements, ...textElements, ...oldTextElements];
+        newPage.shapeElements = [...shapeElements, ...oldShapeElements];
         coverIdx = newPages.findIndex((p) => p.pageKind === 'cover');
         newPages[coverIdx] = newPage;
       } else {
@@ -415,23 +597,31 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       });
     }
     pushSnapshot(get);
+
+    // 整体成套设计：应用封面时自动同步应用配套封底（template.backCover），不拆分开。
+    // 每套封面都内置风格统一的封底（同背景/字体/配色），保证封面与封底具有整体性。
+    if (template.backCover) {
+      await get().applyBackCoverTemplate(template.backCover.id);
+    }
   },
 
   /**
    * 应用封底模板：插入封底页或切换已有封底的模板。
    * 逻辑同 applyCoverTemplate，pageKind='backCover'，插入到尾部。
    */
-  applyBackCoverTemplate: (templateId) => {
+  applyBackCoverTemplate: async (templateId) => {
     const template = findCoverTemplateById(templateId);
     if (!template) return;
     const size = get().albumSize;
     const pageMm = { width: size?.width ?? 210, height: size?.height ?? 280 };
     const albumName = get().projectName || '我的相册';
-    const photos = usePhotoStore.getState().photos;
+    // 确保照片槽位全部有图：相册照片不足时用预设照片补齐
+    const photos = await ensureCoverSlotPhotos(template.slots.length);
     const dateRange = deriveDateRange(photos);
 
-    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange);
-    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm);
+    // 封底无书脊，元素不偏移
+    const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange, 0);
+    const shapeElements = presetShapeToPageElements(template.presetShapeElements, pageMm, 0);
 
     // 封底通常无照片槽位或单小图
     const photoIds = photos.slice(0, template.slots.length).map((p) => p.id);
@@ -446,7 +636,11 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       pageKind: 'backCover',
       placements,
       background: template.presetBackground ?? '#FFFFFF',
-      slotCornerRadius: 4,
+      spineWidth: 0,
+      spineColor: template.spineColor,
+      slotCornerRadius: template.slotCornerRadius ?? 4,
+      // 照片槽位置顶于装饰形状之上（COVER_Z.photo > decoration），避免被形状遮挡
+      slotZIndices: Object.fromEntries(template.slots.map((s) => [s.id, COVER_Z.photo])),
       textElements,
       shapeElements,
     };
@@ -455,15 +649,27 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       const hasBack = s.pages.some((p) => p.pageKind === 'backCover');
       const newPages = [...s.pages];
       if (hasBack) {
-        // 切换封底模板
+        // 切换封底模板：保留已填照片 + 用户编辑的文字/形状
         const oldBack = newPages.find((p) => p.pageKind === 'backCover')!;
         const oldPhotoIds = oldBack.placements
           .filter((pl) => pl.photoId)
           .map((pl) => pl.photoId!) as string[];
+        // 切换模板：优先保留旧封底照片，不足的槽位用 photos（ensureCoverSlotPhotos 已确保含预设照片）补齐
+        const usedIds = new Set(oldPhotoIds);
+        const extraPhotoIds = photos.filter((p) => !usedIds.has(p.id)).map((p) => p.id);
+        const newPhotoIds = [...oldPhotoIds, ...extraPhotoIds];
         newPage.placements = template.slots.map((slot, i) => ({
           slotId: slot.id,
-          photoId: oldPhotoIds[i] ?? null,
+          photoId: newPhotoIds[i] ?? null,
         }));
+        const oldTextElements = (oldBack.textElements || []).filter(
+          (el) => !el.id.startsWith('cover-text-'),
+        );
+        const oldShapeElements = (oldBack.shapeElements || []).filter(
+          (el) => !el.id.startsWith('cover-shape-'),
+        );
+        newPage.textElements = [...textElements, ...oldTextElements];
+        newPage.shapeElements = [...shapeElements, ...oldShapeElements];
         const idx = newPages.findIndex((p) => p.pageKind === 'backCover');
         newPages[idx] = newPage;
       } else {

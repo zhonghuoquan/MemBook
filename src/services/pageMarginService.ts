@@ -4,6 +4,8 @@ import { useEditorStore } from '../store/editorStore';
 import { usePhotoStore } from '../store/photoStore';
 import { calcMarginOverrides, reclampPage } from '../store/editorStore/helpers';
 
+import { coverSlotSize, coverAnchorPosition } from '../utils/coverScale';
+
 /** mm → 像素转换因子（与 canvas/constants.ts 的 MM_TO_PX 保持一致） */
 const MM_TO_PX = 2;
 
@@ -66,13 +68,21 @@ function calcCoverOverrides(
   if (!template) return null;
   const canvasW = albumSize.width * MM_TO_PX;
   const canvasH = albumSize.height * MM_TO_PX;
+  // 封面页：槽位整体右移书脊宽（mm→px）；封底无书脊（spineWidth=0）
+  const offsetPx = (page.spineWidth ?? 0) * MM_TO_PX;
   const overrides: Record<string, SlotOverride> = {};
+  // 槽位尺寸逐轴适配：某一边全幅（≥95，与页面该边一致）按页面拉伸，否则等比保持模板比例
+  const kx = canvasW / 100;
+  const ky = canvasH / 100;
   for (const slot of template.slots) {
+    const { width, height } = coverSlotSize(slot, kx, ky);
+    // 锚点感知定位：贴边/居中槽位在异宽高比页面上保持视觉关系一致（避免居中偏移、靠边离边）
+    const { x, y } = coverAnchorPosition(slot, canvasW, canvasH, width, height);
     overrides[slot.id] = {
-      x: (slot.x / 100) * canvasW,
-      y: (slot.y / 100) * canvasH,
-      width: (slot.width / 100) * canvasW,
-      height: (slot.height / 100) * canvasH,
+      x: offsetPx + x,
+      y,
+      width,
+      height,
     };
   }
   return { overrides, newPage: { ...page, slotOverrides: overrides } };

@@ -193,7 +193,10 @@ export function useCanvasKeyboard({
           return;
         }
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      // 快捷删除仅用 Delete 键（Backspace 不触发删除，避免误删页面/元素）
+      if (e.key === 'Delete') {
+        // 文字/便利贴编辑中：Delete 仅删除字符，不删除元素（contentEditable 聚焦时 tagName 是 DIV，需显式排除）
+        if (editingTextId || (document.activeElement as HTMLElement | null)?.isContentEditable) return;
         // 多选删除（优先级高于单选）
         if (multiSelectedElements.length >= 2 && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
           for (const m of multiSelectedElements) {

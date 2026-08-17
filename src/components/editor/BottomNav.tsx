@@ -360,9 +360,9 @@ export function BottomNav() {
         return;
       }
 
-      // Delete / Backspace：删除当前页面（仅在无选中元素时触发）
+      // Delete：删除当前页面（仅在无选中元素时触发）；Backspace 不再触发删除，避免误删页面
       // 选中了元素（照片槽/文字/便利贴/贴纸）时交由画布的 useCanvasKeyboard 处理元素删除
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.altKey) {
+      if (e.key === 'Delete' && !e.ctrlKey && !e.altKey) {
         const state = useEditorStore.getState();
         const { selectedSlotId, selectedTextId, selectedStickyId, selectedStickerId, selectedShapeId } = state;
         const page = state.pages[currentPageIndex];

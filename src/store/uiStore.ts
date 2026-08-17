@@ -38,6 +38,7 @@ interface UIState {
   editFlyoutOpen: boolean;
   editFlyoutTab: EditTab;
   editFlyoutCollapsed: boolean; // 照片编辑面板折叠状态，持久化
+  objectPanelCollapsed: boolean; // 右侧对象属性面板折叠状态，持久化
   isComparingOriginal: boolean; // 按住查看原图
   bottomNav: BottomNavState;
   bottomNavHeight: number;   // 底部导航栏高度 (90-280px)
@@ -90,6 +91,7 @@ interface UIState {
   setEditFlyoutOpen: (open: boolean) => void;
   setEditFlyoutTab: (tab: EditTab) => void;
   setEditFlyoutCollapsed: (collapsed: boolean) => void;
+  setObjectPanelCollapsed: (collapsed: boolean) => void;
   setIsComparingOriginal: (v: boolean) => void;
   toggleBottomNav: () => void;
   setBottomNavHeight: (h: number) => void;
@@ -145,6 +147,7 @@ export const useUIStore = create<UIState>((set) => ({
   editFlyoutOpen: false,
   editFlyoutTab: 'adjust',
   editFlyoutCollapsed: (() => { try { return localStorage.getItem('membook_flyout_collapsed') === 'true'; } catch { return false; } })(),
+  objectPanelCollapsed: (() => { try { return localStorage.getItem('membook_object_panel_collapsed') === 'true'; } catch { return false; } })(),
   isComparingOriginal: false,
   bottomNav: 'expanded',
   bottomNavHeight: 150,
@@ -204,6 +207,10 @@ export const useUIStore = create<UIState>((set) => ({
   setEditFlyoutCollapsed: (collapsed) => {
     set({ editFlyoutCollapsed: collapsed });
     try { localStorage.setItem('membook_flyout_collapsed', String(collapsed)); } catch { /* ignore */ }
+  },
+  setObjectPanelCollapsed: (collapsed) => {
+    set({ objectPanelCollapsed: collapsed });
+    try { localStorage.setItem('membook_object_panel_collapsed', String(collapsed)); } catch { /* ignore */ }
   },
   setIsComparingOriginal: (v) => set({ isComparingOriginal: v }),
   toggleBottomNav: () =>

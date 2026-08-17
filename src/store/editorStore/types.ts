@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type {
   AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings, AlbumTypeId,
   EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, ShapeElement, ShapeType, WatermarkSettings,
+  BackgroundApply, BackgroundApplyScope,
 } from '../../types';
 
 /* ── Editor Store (当前编辑状态) ── */
@@ -57,16 +58,17 @@ export interface PageSlice {
   /** 批量操作：在指定位置插入页面并跳转（一次 setState 避免双重重渲染） */
   appendPages: (afterIndex: number, newPages: AlbumPage[]) => void;
   setPageTemplate: (pageIndex: number, templateId: string, preservePhotoIds?: string[]) => void;
-  updatePageBackground: (index: number, color: string) => void;
-  applyBackgroundToAllPages: (color: string) => void;
+  updatePageBackground: (index: number, apply: BackgroundApply) => void;
+  /** 按范围应用背景：区分当前页 / 普通页 / 封面 / 封底 / 全部 */
+  applyBackgroundByScope: (scope: BackgroundApplyScope, apply: BackgroundApply) => void;
   /** 重置当前页所有照片位到当前边距的布局 */
   resetPageLayout: (pageIndex: number) => void;
   /** 在当前页添加一个照片槽位（默认居中，30%×30%，百分比坐标） */
   addPhotoSlot: () => void;
-  /** 应用封面模板：插入封面页或切换已有封面的模板（保留已填照片） */
-  applyCoverTemplate: (templateId: string) => void;
-  /** 应用封底模板：插入封底页或切换已有封底的模板 */
-  applyBackCoverTemplate: (templateId: string) => void;
+  /** 应用封面模板：插入封面页或切换已有封面的模板（保留已填照片，不足用预设照片补齐） */
+  applyCoverTemplate: (templateId: string) => Promise<void>;
+  /** 应用封底模板：插入封底页或切换已有封底的模板（不足用预设照片补齐） */
+  applyBackCoverTemplate: (templateId: string) => Promise<void>;
 }
 
 /* ── 槽位/照片编辑 ──

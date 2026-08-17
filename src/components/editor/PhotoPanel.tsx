@@ -482,7 +482,8 @@ function PhotoFilterBar({ placedCount, unplacedCount, total, mode, onFilter, onE
 
 export function PhotoPanel({ photoImport, onNavigateToSmartLayout }: { photoImport: UsePhotoImportResult; onNavigateToSmartLayout: () => void }) {
   const { t } = useTranslation();
-  const photos = usePhotoStore((s) => s.photos);
+  // 过滤封面预设照片：系统自动为封面槽位生成的占位图，仅封面显示、不出现在照片列表中（用户无感知）
+  const photos = usePhotoStore((s) => s.photos).filter((p) => !p.isCoverPreset);
   const storageMode = useUIStore((s) => s.storageMode);
   const setStorageMode = useUIStore((s) => s.setStorageMode);
   const addToast = useUIStore((s) => s.addToast);
@@ -640,10 +641,10 @@ export function PhotoPanel({ photoImport, onNavigateToSmartLayout }: { photoImpo
     }
   }, [deleteConfirm, photoService.removePhotos, addToast, multiSelectMode, t]);
 
-  // ── Delete/Backspace 键删除选中照片 ──
+  // ── Delete 键删除选中照片（仅 Delete，Backspace 不触发删除） ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (e.key !== 'Delete') return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
       if (selectedPhotoIds.size === 0) return;
       e.preventDefault();

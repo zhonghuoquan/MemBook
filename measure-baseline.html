@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>body{font-family:sans-serif;margin:20px}</style>
+<script src="https://cdn.jsdelivr.net/npm/konva@10.3.0/konva.min.js"></script>
+</head>
+<body>
+<div id="c" style="width:400px;height:300px;background:#fff"></div>
+<pre id="out"></pre>
+<script>
+  const stage=new Konva.Stage({container:'c',width:400,height:300});
+  const layer=new Konva.Layer();
+  stage.add(layer);
+  // 模拟 TextElementNode 逐字 Text：y=100 fontSize=40 默认 textBaseline
+  const t=new Konva.Text({x:100,y:100,text:'春',fontSize:40,fontFamily:'宋体',fill:'#111'});
+  layer.add(t); layer.draw();
+  const cv=stage.content.querySelector('canvas');
+  const ctx=cv.getContext('2d');
+  const img=ctx.getImageData(0,0,400,300).data;
+  let top=null,bottom=null;
+  for(let y=60;y<150;y++){ for(let x=80;x<200;x++){ if(img[(y*400+x)*4+3]>60){top=y;break;} } if(top!==null)break; }
+  for(let y=149;y>=60;y--){ for(let x=80;x<200;x++){ if(img[(y*400+x)*4+3]>60){bottom=y;break;} } if(bottom!==null)break; }
+  const out=document.getElementById('out');
+  out.textContent='konva version='+Konva.version+'\n'+
+    'Konva Text y=100 fontSize=40 宋体 默认textBaseline\n'+
+    '字形顶 y='+top+' 偏移(top-100)='+(top===null?'n/a':(top-100))+'\n'+
+    '字形底 y='+bottom+' 高='+(bottom===null?'n/a':(bottom-top));
+</script>
+</body>
+</html>

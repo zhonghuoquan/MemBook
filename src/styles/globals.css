@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./design-tokens.css" layer(base);
+@import "./fonts.css";
 
 /* ── 拖拽期间禁用所有文本/元素选中（防止工作区紫色高亮） ──
    drag-manager 在 startDrag 时给 <html> 加 .is-dragging 类，

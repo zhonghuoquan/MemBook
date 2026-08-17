@@ -3,7 +3,7 @@
 > 本规范基于 MemBook 项目当前代码现状提炼，后续所有代码开发**必须严格执行**本规范。
 > 规范冲突时：硬约束 > 工程约定 > 风格约定。违反规范需在 PR 中显式说明理由。
 
-最后更新：2026-07-29（新增 9.4 缩略图渲染统一规范）
+最后更新：2026-08-15（新增 9.8 封面/封底模板设计规范）
 
 ---
 
@@ -332,6 +332,86 @@ const id = `page-${Date.now()}`;
 - 通用组件 `components/common/CanvasPageThumbnail.tsx` 封装了渲染流程（缓存查询 → 预加载 → Worker 渲染），新场景直接复用。
 - 底层渲染函数 `renderPageThumbnailInWorker`（`utils/gridThumbnailRenderer.ts`）内部消耗传入的 ImageBitmap（transfer 或 release），调用方**不可**在调用后再次释放。
 - 不同场景通过 `cacheSuffix` 隔离缓存命名空间（如 `'nav'`、`'home'`、`'fs'`），避免缓存冲突。
+
+### 9.5 React 约束（硬约束）
+
+- **禁止使用 `<StrictMode>`**：React 19 开发期 StrictMode 双挂载会使 react-konva 19.x 的 `<Transformer>` 抛 `Cannot read properties of undefined (reading 'setAttrs')`，导致**整个 Konva Stage 崩溃、画布不渲染**（形状/槽位等全部不显示）。入口 [main.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/main.tsx) 已移除 StrictMode（仅开发期生效，生产构建无影响）。若 reintroduce，必须显式在 PR 说明理由并验证画布渲染。
+- **Konva 渐变 stop 必须使用扁平数组** `[offset, color, offset, color]`（`fillLinearGradientColorStops` / `fillRadialGradientColorStops`），禁止嵌套数组 `[[offset, color], ...]`。嵌套数组会导致 `addColorStop` 收到数组而渐变填充失败、形状在画布不可见（缩略图/导出用 Canvas2D 逐 stop 填充，不受此影响，故易漏判）。
+
+### 9.6 封面/书脊域规范
+
+- **概念解耦**：相册封面（主页项目展示）与封面页（打印导出）分离；`AlbumProject` 用 `coverImageId`/`coverPageId` 解耦。
+- **书脊是页面左侧物理扩展**（`AlbumPage.spineWidth` mm + `spineColor`），非装饰 shape；用户可在书脊区自由添加文字/形状。**仅封面页显示**，封底不显示（渲染判断仅 `isCoverPage`；封底模板无 `spineColor`，`applyBackCoverTemplate` 的 `spineWidth=0`）。默认 `DEFAULT_SPINE_WIDTH_MM=18`。全链路（画布/导出/打印）宽度 `+= spineWidth`。
+- **封面模板成套**：`Template.backCover` 关联配套封底；`applyCoverTemplate` 自动同步调用 `applyBackCoverTemplate`。封底与封面同背景/字体/配色，不拆开独立选择。
+- **预设元素坐标转换**：位置 `posX` 含 `spineOffsetX` 偏移，尺寸 `scale` 不含偏移——两者必须区分，否则元素被放大且居中偏移。
+- **封面/封底页设置隔离**：`batchPageSettings` / `setPageSlotCornerRadius` 对 `isCoverOrBackCoverPage` 直接跳过；封面/封底仅在 `setAlbumSize`（改尺寸）时自适应。封面圆角独立设置区（CoverSettings 弹窗）不受 `applyAll` 影响。
+- **槽位圆角每角单独**：`slotCornerRadius` 类型 `number | [tl,tr,br,bl]`；不支持每角单独的场景（缩略图/预览/SmartLayout）用 `normalizeSlotCornerRadius(r)` 取四角平均值归一化。
+- **封面预览**：用共享组件 `components/common/CoverPreview.tsx`（铰链折痕/落地投影/照片位打印纹理），仅组件层叠加，不写入数据。
+- **封面书脊印刷一体连续（2026-08-15）**：封面页书脊背面与封面正面是**印刷一体连续设计**（无视觉间隙 `SPINE_GAP_MM`），编辑器/导出/打印画布宽度 = 页面宽 + 书脊宽；编辑器在 `x=spineWidth` 处用**虚线折叠线**标记书脊/封面交界（仅视觉标记，不占宽度）。封面正面内容偏移量 = `spineWidth`（**禁止**再加间隙）。缩略图/网格/全屏只显示封面正面（去书脊偏移，偏移量 = `spineWidth`）。旧版含间隙数据用 `migrateCoverSpineGapOnce`（db）一次性迁移。
+
+### 9.7 文字元素渲染规范（单一 DOM 排版引擎，2026-08-15）
+
+- **显示与编辑必须是同一个 DOM 节点**：文字元素由 [TextDomNode.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/components/editor/canvas/TextDomNode.tsx) 常驻渲染（Canvas 的「文字 DOM 层」容器内，页面左上角锚定）。显示态只读 + `pointer-events` 穿透；进入编辑仅切换 `contentEditable` + 聚焦光标。**禁止**恢复「Konva 渲染显示 + DOM 浮层编辑」双引擎方案，**禁止** reintroduce half-leading / 基线 / 列容量等任何双引擎补偿公式（两套排版引擎存在固有差异，补偿无法覆盖所有字号/行高/字距/对齐/断行/用户缩放组合，历史教训见开发日志 2026-08-15）。
+- **Konva TextElementNode 仅承载命中/选中/控制点**（透明 Rect 命中区），不得渲染文字内容；导出（exportEngine）与缩略图（thumbnailCore）沿用 Canvas 2D 公式，必须与 DOM 排版公式同源（见下）。
+- **尺寸计算单一来源**：`fitTextSize`（TextDomNode.tsx 导出）与显示层块几何**完全同源**——竖排每列容量 `perCol = floor((height×MM_TO_PX − 2×4px) / (fontSize+letterSpacing))`（无 +1）、列宽 `stepX = fontSize×lineHeight`、字步进 `stepY = fontSize+letterSpacing`、显式 `\n` 即换列（`numCols = Σ ceil(段长/perCol)`）；横排行高 `fontSize×lineHeight`、断行用共享 `wrapTextLines`（CJK 逐字可断、Latin 按空格断）。**单位硬约束**：`el.width/height` 为 mm、`fontSize/letterSpacing` 为逻辑 px，任何公式比较前必须经 `MM_TO_PX` 换算到同一单位（历史 bug：mm 除以 px 导致退出编辑盒尺寸爆炸）。
+- **断行测量必须计入 letterSpacing**：`wrapTextLines` 用 Canvas `measureText` 断行，但 `measureText` 不含 `letter-spacing`，**必须**用 `measureText(s) + s.length×letterSpacing` 判断是否超宽；调用方 contentWpx 需减去末尾一个字距。否则字距较大的多行文本会少算行数 → 文本框高度不足、多行文字被裁剪（历史教训见开发日志 2026-08-15）。
+- **编辑进入路径禁止重算文本框尺寸**：`fitTextSize` 仅在退出编辑且文本已修改时调用；盒子只增不减、左上角不动（竖排宽度按列数增长、高度按最长列增长；横排宽度固定、高度按行数增长）。文本未修改则完全不提交（纯进/出编辑零变化、零空历史快照）。
+- **编辑期间 contentEditable children 由 DOM 自管理**：React 渲染 `undefined` 不触碰已有内容（防光标重置）；文本实时同步走 `onLiveText`（不记录历史），退出统一提交（记录历史）。
+- **竖排语义（与 PPT 一致）**：`writing-mode: vertical-rl` + `text-orientation: upright`；`align` = 列内垂直对齐（断行未满列生效）`verticalAlign` = 列组水平分布；竖排内层 div 必须显式 `box-sizing: content-box`（防全局 border-box 使 height 含 padding）。
+- **封面模板文字排版链路（2026-08-15）**：`PresetTextElement` 支持 `lineHeight`/`letterSpacing`/`verticalAlign`，经 `presetTextToPageElements` 透传为 `PageTextElement`，`CoverPreview.TextPreview` 读取同一套字段渲染。**三处必须同源**——模板预设、转换、预览，禁止预览层硬编码字距/nowrap（历史教训见开发日志 2026-08-15）。多行模板文字用 `\n` 分隔，预览用 `white-space:pre-line` 真实换行，与画布一致。
+- **模板文字应用时按内容自适应**：模板预设 `height` 是偏小占位值，应用模板时 `presetTextToPageElements` 必须对每个**非空**文字元素调用 `fitTextSize` 把文本框撑到 `max(预设高度, 实际文字高度)`，避免超框被 `overflow:hidden` 裁剪。封面/封底共用此函数，同时生效。空文字保持占位尺寸。
+- **封面/封底多尺寸适配**：模板按竖版 210×280 基准设计。应用模板时字号用 `coverFontScale = clamp(min(宽/210, 高/280), 0.5, 1.6)`（**禁止只按宽度缩放**，否则横版/方形页面文字过大）。切换相册尺寸（`setAlbumSize`）时，必须对封面/封底页文字/形状按新旧尺寸等比重映射（`rescaleCoverDecorations`）：正文元素 x 减书脊偏移按 kx 缩放再加回、y/height 按 ky、fontSize 按 kx（书脊元素 `spine-text-*` 书脊宽固定、x 保持、y/height/fontSize 按 ky），文字重映射后重新 `fitTextSize` 撑高。
+- **封面/封底图层 zIndex 约定**：统一用 `COVER_Z = { shape:50, spine:100, text:100 }`（禁止魔法数字）。层级：槽位照片(z≈0) < 模板形状/蒙版(50) < 书脊元素(100) < 模板文字(100)。蒙版/形状必须低于文字，保证标题清晰可读；用户后加元素用 `getGlobalMaxZ`（动态 >100）置于模板之上。
+- **文本框最小尺寸（PPT 逻辑，2026-08-15）**：仅保留极小下限、按方向区分——横排最小 8×4mm、竖排最小 4×8mm。**resize、Konva 命中区（TextElementNode）、DOM 渲染层（TextDomNode）三处必须用同一套 `MIN_W_MM`/`MIN_H_MM` 常量**，禁止某处单独硬编码更大下限（否则"所见非所得"、用户无法缩小）。缩小后未编辑文字退出编辑不触发 `fitTextSize`，框保持缩小尺寸。
+
+### 9.8 封面/封底模板设计规范（2026-08-15）
+
+**坐标与基准**
+- 模板所有元素（`slots` 槽位、`presetTextElements` 预设文字、`presetShapeElements` 预设形状）均为**百分比坐标 0-100**，相对封面整页。
+- 设计基准为竖版 210×280（`REFERENCE_COVER_WIDTH_MM`/`REFERENCE_COVER_HEIGHT_MM`）。文字 `fontSize` 为基于该基准的 mm 值，应用时用 `coverFontScale = clamp(min(宽/210, 高/280), 0.5, 1.6)` 等比缩放。
+
+**跨尺寸适配（等比 vs 拉伸）——核心规则**
+- 原则：**按元素视觉语义分类**。区域/背景型拉伸铺满（颜色/渐变平滑，无视觉破坏）；图形/局部型等比保持宽高比（防图形变形，如圆形必须保持圆形）。
+- 统一走 `utils/coverScale.ts` 的 `coverElementSize()` / `coverSlotSize()`，**禁止三处各自硬编码**：
+  - 蒙版形状（id 含 `mask`）、全幅照片槽：按轴拉伸铺满。
+  - 装饰形状（圆形/菱形/星形/圆角矩形）、局部照片槽：等比（`min(kx,ky)`）保持宽高比。
+  - 槽位**逐轴适配**：某一边 ≥95%（与页面该边一致，如恋恋故事 `48×100` 的高度 100%）该边按页面拉伸，否则该边等比。
+- 三处转换必须共用 coverScale：`presetShapeToPageElements`（模板→mm）、`rescaleCoverDecorations`（切换尺寸）、`calcCoverOverrides`（槽位→px）。位置按页面轴映射（x→宽、y→高），保证随页面定位。
+
+**锚点感知定位（异宽高比页面保持视觉关系）**
+- 尺寸适配后，位置由 `coverAnchorPosition(box, pageW, pageH, w, h)` **锚点感知**重新定位，禁止仅按页面百分比映射（会破坏贴边/居中视觉）：
+  - 贴边元素（原 x≈0 左贴 / x+width≈100 右贴 / y≈0 顶贴 / y+height≈100 底贴）保持贴边；
+  - 居中元素（中心≈50%）保持页面居中；
+  - 其余元素按页面百分比定位。
+- 槽位（`calcCoverOverrides`）、模板形状（`presetShapeToPageElements`）、尺寸切换形状（`rescaleCoverDecorations`）三处必须共用 `coverAnchorPosition`，禁止各自硬编码位置公式。
+
+**封面槽位预设照片**
+- `applyCoverTemplate`/`applyBackCoverTemplate` 为 **async**，用 `ensureCoverSlotPhotos` 保证**只要模板有照片位，所有槽位都有图**：相册照片不足时用 `createDefaultCoverPhotos`（`utils/coverPresetPhoto.ts`，复用预览 cover-landscape.jpg）补齐并加入 photoStore。
+- 调用端（HomeView/CoverLibraryPanel/GridView）必须 `await`，避免在预设照片补齐前读取 pages/photos。
+- 预设照片标记 `isCoverPreset: true`：**仅封面槽位显示，不出现在照片列表**（PhotoPanel 过滤 `!p.isCoverPreset`），画布/缩略图/导出仍按 photoId 正常渲染。
+
+**照片槽位圆角**
+- 用 `Template.slotCornerRadius?: number | [tl,tr,br,bl]`（px）按各模板设计美观性自定义，缺省 4。**必须按每个模板独立审美设定，禁止所有模板统一同一值**。
+- 经验值：
+  - 全幅照片槽圆角 0（铺满不圆角）。
+  - 局部/居中照片大圆角（8-12）。
+  - 贴边/全高槽：贴页面边的角为 0（避免贴边露背景）、内侧角按审美——如恋恋故事右半幅全高 `x:52 w:48 h:100` 四周全直角 `0`（内侧硬边 + 右侧/上下贴边）。
+- `applyCoverTemplate`/`applyBackCoverTemplate` 必须用 `template.slotCornerRadius ?? 4`；封面库预览 `CoverPreview` 用 `slotRadiusCss` 体现同一圆角，预览与实际一致。
+
+**图层层级**
+- 统一用 `COVER_Z = { shape:50, spine:100, text:100 }`（禁魔法数字）。层级：槽位照片(z≈0) < 模板形状/蒙版(50) < 书脊元素(100) < 模板文字(100)。蒙版/形状必须低于文字，保证标题清晰可读；用户后加元素用 `getGlobalMaxZ` 置于模板之上。
+
+**文字排版**
+- 模板文字支持 `lineHeight`/`letterSpacing`/`verticalAlign`，`presetTextToPageElements` 透传、`CoverPreview.TextPreview` 同源渲染——**三处同源**，禁止预览层硬编码字距/nowrap。
+- 多行模板文字用 `\n` 分隔，预览用 `white-space:pre-line` 真实换行，与画布一致。
+- 应用模板时对每个**非空**文字调用 `fitTextSize` 撑高（`max(预设高度, 实际文字高度)`），避免超框裁剪；空文字保持占位尺寸。
+
+**封面预览形状与画布同源**
+- `CoverPreview.ShapePreview` 圆角矩形的圆角半径必须与画布一致：`cornerRadius*min(w,h)/2`（cqw，正圆角），禁止用 `cornerRadius*50%`（椭圆角，随宽高不同导致与画布不一致）。
+- 描边粗细必须 `strokeWidth/2.1`cqw 随封面等比缩放（对应画布 2px/mm），禁止固定像素。
+
+**成套**
+- `Template.backCover` 关联配套封底；`applyCoverTemplate` 自动同步调用 `applyBackCoverTemplate`。封底与封面同背景/字体/配色/圆角语言，不拆开独立选择。
 
 ---
 

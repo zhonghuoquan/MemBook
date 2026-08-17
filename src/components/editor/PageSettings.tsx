@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore } from '../../store';
-import { PAGE_MARGIN_MIN, PAGE_MARGIN_MAX, PAGE_GAP_MIN, PAGE_GAP_MAX, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, SIZE_PRESETS, PAGE_MARGIN_PRESETS, CUSTOM_SIZE_MIN, CUSTOM_SIZE_MAX, isCoverOrBackCoverPage, normalizeSlotCornerRadius } from '../../types';
-import type { PageMarginSettings, AlbumSize, AlbumPage } from '../../types';
+import { PAGE_MARGIN_MIN, PAGE_MARGIN_MAX, PAGE_GAP_MIN, PAGE_GAP_MAX, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, SIZE_PRESETS, PAGE_MARGIN_PRESETS, CUSTOM_SIZE_MIN, CUSTOM_SIZE_MAX, normalizeSlotCornerRadius } from '../../types';
+import type { PageMarginSettings, AlbumSize } from '../../types';
 import { useDraggable } from '../../hooks/useDraggable';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { useWheel } from '../../hooks/useWheel';
@@ -33,9 +33,6 @@ export function PageSettings({ open, onClose }: Props) {
   const [margin, setMargin] = useState(DEFAULT);
   const [gap, setGap] = useState(PAGE_GAP_DEFAULT);
   const [cornerRadius, setCornerRadius] = useState(DEFAULT_SLOT_CORNER_RADIUS);
-  // 封面/封底照片位圆角：支持每角单独设置 [tl, tr, br, bl]
-  const [coverCorners, setCoverCorners] = useState<[number, number, number, number]>([4, 4, 4, 4]);
-  const [coverUniform, setCoverUniform] = useState(true);
   const gapInputRef = useRef<HTMLInputElement>(null);
   const radiusInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,19 +67,6 @@ export function PageSettings({ open, onClose }: Props) {
     setApplyAll(s.applyMarginToAll);
     setShowGuidesLocal(s.showGuides);
     setShowMarginLocal(s.showMarginGuide);
-    // 同步封面/封底圆角：从第一个封面/封底页读取
-    const coverPage = s.pages.find((p) => isCoverOrBackCoverPage(p));
-    const rawCover = coverPage?.slotCornerRadius;
-    if (typeof rawCover === 'number') {
-      setCoverCorners([rawCover, rawCover, rawCover, rawCover]);
-      setCoverUniform(true);
-    } else if (Array.isArray(rawCover)) {
-      setCoverCorners(rawCover);
-      setCoverUniform(rawCover.every((v) => v === rawCover[0]));
-    } else {
-      setCoverCorners([4, 4, 4, 4]);
-      setCoverUniform(true);
-    }
     // 每次打开弹窗时重置为折叠态（只显示当前尺寸）
     setShowSizeOptions(false);
 
@@ -136,18 +120,8 @@ export function PageSettings({ open, onClose }: Props) {
       showGuides: showGuidesLocal, showMarginGuide: showMarginLocal,
     });
 
-    // 封面/封底圆角：独立应用，不受 applyAll 影响
-    const cornerValue: number | [number, number, number, number] = coverUniform
-      ? coverCorners[0]
-      : coverCorners;
-    const store = useEditorStore.getState();
-    const newPages = store.pages.map((p: AlbumPage) =>
-      isCoverOrBackCoverPage(p) ? { ...p, slotCornerRadius: cornerValue } : p
-    );
-    store.setPages(newPages);
-
     onClose();
-  }, [sizePresetId, customW, customH, margin, gap, cornerRadius, applyAll, showGuidesLocal, showMarginLocal, coverCorners, coverUniform, onClose]);
+  }, [sizePresetId, customW, customH, margin, gap, cornerRadius, applyAll, showGuidesLocal, showMarginLocal, onClose]);
 
   // ═══ 取消：丢弃所有本地修改，直接关闭 ═══
   const handleCancel = useCallback(() => {
@@ -163,8 +137,6 @@ export function PageSettings({ open, onClose }: Props) {
     setMargin(DEFAULT);
     setGap(PAGE_GAP_DEFAULT);
     setCornerRadius(DEFAULT_SLOT_CORNER_RADIUS);
-    setCoverCorners([4, 4, 4, 4]);
-    setCoverUniform(true);
     setApplyAll(false);
     setShowGuidesLocal(false);
     setShowMarginLocal(false);
@@ -500,49 +472,6 @@ export function PageSettings({ open, onClose }: Props) {
                 <span className="text-[11px] text-[var(--color-gray-400)] font-[500]">px</span>
               </div>
             </div>
-          </div>
-
-          <div className="h-px bg-[var(--color-border-light)]" />
-
-          {/* ── 封面/封底照片位圆角（独立设置，支持每角单独）── */}
-          <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <span className="text-[11px] font-[600] tracking-wide text-[var(--color-gray-400)] uppercase">{t('editor.pageSettings.coverSlotRadius')}</span>
-              <button
-                onClick={() => setCoverUniform(!coverUniform)}
-                className="text-[10px] font-[500] text-[var(--color-gray-400)] hover:text-[var(--color-brand)] transition-colors"
-              >
-                {coverUniform ? t('editor.pageSettings.perCorner') : t('editor.pageSettings.uniform')}
-              </button>
-            </div>
-            {coverUniform ? (
-              <div className="flex items-center gap-3">
-                <input type="range" min={0} max={24} step={1} value={coverCorners[0]}
-                  onChange={(e) => { const v = +e.target.value; setCoverCorners([v, v, v, v]); }}
-                  className="flex-1 h-1.5 cursor-pointer accent-[var(--color-brand)]" />
-                <div className="flex items-center gap-0.5 bg-[var(--color-gray-50)] rounded-lg px-2.5 py-1.5">
-                  <input type="number" min={0} max={24} value={coverCorners[0]}
-                    onChange={(e) => { const v = clamp(+e.target.value, 0, 24); setCoverCorners([v, v, v, v]); }}
-                    className="w-7 border-none bg-transparent text-[13px] font-[600] text-[#334155] outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                  <span className="text-[11px] text-[var(--color-gray-400)] font-[500]">px</span>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                {([['tl', 0, t('editor.pageSettings.cornerTL')], ['tr', 1, t('editor.pageSettings.cornerTR')], ['bl', 3, t('editor.pageSettings.cornerBL')], ['br', 2, t('editor.pageSettings.cornerBR')]] as const).map(([key, idx, label]) => (
-                  <div key={key} className="flex items-center gap-2 bg-[var(--color-gray-50)] rounded-lg px-2.5 py-1.5">
-                    <span className="text-[10px] font-[500] text-[var(--color-gray-400)] w-8 shrink-0">{label}</span>
-                    <input type="number" min={0} max={24} value={coverCorners[idx]}
-                      onChange={(e) => {
-                        const v = clamp(+e.target.value, 0, 24);
-                        setCoverCorners(prev => { const next = [...prev] as [number, number, number, number]; next[idx] = v; return next; });
-                      }}
-                      className="w-8 border-none bg-transparent text-[13px] font-[600] text-[#334155] outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                    <span className="text-[10px] text-[var(--color-gray-400)] font-[500]">px</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="h-px bg-[var(--color-border-light)]" />

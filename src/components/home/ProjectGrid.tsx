@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -16,7 +17,8 @@ import {
 import type { AlbumProject, AlbumSize, Photo } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT } from '../../types';
 import { EmptyState } from './EmptyState';
-import { PageThumbnail } from './PageThumbnail';
+import { CoverPageCard } from './CoverPageCard';
+import { BookPreviewOverlay } from '../editor/BookPreviewOverlay';
 import { makeDirectPhotoUrl, readPhotoFromDB } from '../../engine/storage-engine';
 import { SLOT_PALETTE } from '../../constants/templatePalette';
 import { useUIStore } from '../../store';
@@ -103,6 +105,8 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sb = useScrollbarVisibility<HTMLDivElement>();
+  // 主页相册卡片全屏查看：记录当前进入全屏的项目（退出后仍停留在相册主页）
+  const [fullscreenProject, setFullscreenProject] = useState<AlbumProject | null>(null);
 
   /* 点击卡片外部关闭菜单 */
   useEffect(() => {
@@ -137,6 +141,17 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
   });
   useEffect(() => { try { localStorage.setItem(SORT_KEY, sortBy); } catch { /* ignore */ } }, [sortBy]);
   const [sortOpen, setSortOpen] = useState(false);
+  const sortBtnRef = useRef<HTMLDivElement>(null);
+  const [sortRect, setSortRect] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  // 打开下拉时测量按钮位置（portal 定位用）
+  useEffect(() => {
+    if (!sortOpen) { setSortRect(null); return; }
+    const el = sortBtnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setSortRect({ top: r.top + r.height, left: r.right, width: r.width });
+  }, [sortOpen]);
 
   const loadCustomOrder = useCallback((): string[] => {
     try { return JSON.parse(localStorage.getItem(CUSTOM_ORDER_KEY) || '[]'); } catch { return []; }
@@ -465,7 +480,7 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
           </div>
 
           {/* Sort */}
-          <div className="relative">
+          <div ref={sortBtnRef} className="relative">
             <button
               className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-[var(--color-border)]
                          rounded-[var(--radius-lg)] text-[var(--text-body-sm)] text-[var(--color-gray-600)]
@@ -480,40 +495,45 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
                 {sortBy === 'custom' ? t('home.projectGrid.sortCustom') : sortBy === 'updatedAt' ? t('home.projectGrid.sortUpdatedAt') : sortBy === 'createdAt' ? t('home.projectGrid.sortCreatedAt') : t('home.projectGrid.sortName')}
               </span>
             </button>
-
-            {sortOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
-                <div className="absolute top-full right-0 mt-1.5 z-20 bg-white border border-[var(--color-border)]
-                                rounded-[var(--radius-xl)] shadow-[var(--shadow-md)] py-1.5 min-w-[140px] overflow-hidden">
-                  {[
-                    { key: 'custom' as const, label: t('home.projectGrid.sortCustom') },
-                    { key: 'updatedAt' as const, label: t('home.projectGrid.sortUpdatedAt') },
-                    { key: 'createdAt' as const, label: t('home.projectGrid.sortCreatedAt') },
-                    { key: 'name' as const, label: t('home.projectGrid.sortNameAZ') },
-                  ].map((option) => (
-                    <button
-                      key={option.key}
-                      className={`w-full flex items-center gap-2 px-3.5 py-2 text-[var(--text-body-sm)]
-                                 border-none bg-transparent cursor-pointer transition-colors
-                                 ${sortBy === option.key
-                                   ? 'text-[var(--color-brand)] bg-[var(--color-surface-selected)]'
-                                   : 'text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]'
-                                 }`}
-                      onClick={() => { setSortBy(option.key); setSortOpen(false); }}
-                    >
-                      {sortBy === option.key && (
-                        <svg viewBox="0 0 12 12" fill="currentColor" className="w-3 h-3 shrink-0">
-                          <path d="M10.5 3L5 9L2 6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                      <span className={sortBy === option.key ? '' : 'ml-[18px]'}>{option.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
+
+          {/* 排序下拉 — 用 portal 渲染到 body，避免被相册卡片的 transform 叠加层遮挡（必定在最顶层） */}
+          {sortOpen && sortRect && createPortal(
+            <>
+              <div className="fixed inset-0 z-[9999]" onClick={() => setSortOpen(false)} />
+              <div
+                className="fixed z-[10000] bg-white border border-[var(--color-border)]
+                           rounded-[var(--radius-xl)] shadow-[var(--shadow-md)] py-1.5 min-w-[140px] overflow-hidden"
+                style={{ top: sortRect.top + 6, right: window.innerWidth - sortRect.left }}
+              >
+                {[
+                  { key: 'custom' as const, label: t('home.projectGrid.sortCustom') },
+                  { key: 'updatedAt' as const, label: t('home.projectGrid.sortUpdatedAt') },
+                  { key: 'createdAt' as const, label: t('home.projectGrid.sortCreatedAt') },
+                  { key: 'name' as const, label: t('home.projectGrid.sortNameAZ') },
+                ].map((option) => (
+                  <button
+                    key={option.key}
+                    className={`w-full flex items-center gap-2 px-3.5 py-2 text-[var(--text-body-sm)]
+                               border-none bg-transparent cursor-pointer transition-colors
+                               ${sortBy === option.key
+                                 ? 'text-[var(--color-brand)] bg-[var(--color-surface-selected)]'
+                                 : 'text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]'
+                               }`}
+                    onClick={() => { setSortBy(option.key); setSortOpen(false); }}
+                  >
+                    {sortBy === option.key && (
+                      <svg viewBox="0 0 12 12" fill="currentColor" className="w-3 h-3 shrink-0">
+                        <path d="M10.5 3L5 9L2 6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    <span className={sortBy === option.key ? '' : 'ml-[18px]'}>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </>,
+            document.body,
+          )}
 
           {/* 选择按钮 — 进入多选模式 */}
           <button
@@ -566,7 +586,7 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
             items={multiSelectMode ? [] : displayProjects.map((p) => p.id)}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-5">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-14 gap-y-12">
               {displayProjects.map((proj) => {
                 const isDemo = displayProjects === demoProjects;
                 const isReal = hasRealProjects && !isDemo;
@@ -593,6 +613,7 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
                     onDuplicate={handleDuplicate}
                     onToggleMenu={(id) => setMenuOpenId(menuOpenId === id ? null : id)}
                     onSelect={() => toggleProjectSelect(proj.id)}
+                    onFullscreen={() => setFullscreenProject(proj)}
                   />
                 );
               })}
@@ -611,17 +632,34 @@ export function ProjectGrid({ onOpenProject, onCreateNew, refreshKey, onProjectC
         />
       )}
       </>)}
+
+      {/* 相册卡片左上角眼睛：进入「真实效果预览」（实物书翻页预览，退出后仍停留相册主页） */}
+      {fullscreenProject && (
+        <BookPreviewOverlay
+          open
+          onClose={() => setFullscreenProject(null)}
+          pages={fullscreenProject.pages}
+          photos={allPhotos}
+          albumSize={fullscreenProject.size ?? null}
+          topBarTitle={fullscreenProject.name}
+        />
+      )}
       
     </div>
   );
 }
 
 /* ── Sortable Card ── */
+/** 封面高度上限（相对列宽的倍率）：封面高 ≤ 列宽 × 该值，避免过长相册撑爆行高 */
+const MAX_COVER_RATIO = 1.5;
+/** 封面最大宽度（px）：封面不超过该宽度，在列内居中，两侧留白更有呼吸感 */
+const MAX_COVER_WIDTH = 200;
+
 function SortableCard({
   proj, photos, isDemo, isSortable, isMultiSelect, isSelected,
   editingId, editName, menuOpenId, inputRef,
   onOpen, onStartRename, onConfirmRename, onRenameKeyDown, onEditNameChange,
-  onDelete, onDuplicate, onToggleMenu, onSelect,
+  onDelete, onDuplicate, onToggleMenu, onSelect, onFullscreen,
 }: {
   proj: AlbumProject;
   photos: Photo[];
@@ -642,6 +680,8 @@ function SortableCard({
   onDuplicate: (p: AlbumProject) => void;
   onToggleMenu: (id: string) => void;
   onSelect: () => void;
+  /** 左上角眼睛按钮 → 全屏查看该相册 */
+  onFullscreen: () => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -659,6 +699,32 @@ function SortableCard({
   const isMenuOpen = menuOpenId === proj.id;
   const size: AlbumSize = proj.size ?? { id: 'a4-default', name: t('home.projectGrid.fallbackSizeName'), width: 210, height: 280, desc: '210×280 mm' };
 
+  // 封面自适应尺寸：按相册比例铺满，但高度不超过列宽 × MAX_COVER_RATIO（保持比例不拉伸）
+  const coverAreaRef = useRef<HTMLDivElement>(null);
+  const [coverSize, setCoverSize] = useState({ w: 0, h: 0 });
+  const coverAspect = size.width / size.height;
+  useEffect(() => {
+    const el = coverAreaRef.current;
+    if (!el) return;
+    const update = () => {
+      const aw = el.clientWidth;
+      const ah = el.clientHeight;
+      if (aw <= 0 || ah <= 0) return;
+      const cap = aw * MAX_COVER_RATIO;
+      let w = Math.min(aw, MAX_COVER_WIDTH);
+      let h = w / coverAspect;
+      // 高度超上限 → 等比缩小（按高度反向推宽），保持比例
+      if (h > cap) { h = cap; w = h * coverAspect; }
+      // 宽度仍不应超过区域宽度
+      if (w > aw) { w = aw; h = w / coverAspect; }
+      setCoverSize({ w, h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [coverAspect]);
+
   const handleCardClick = () => {
     if (isEditing) return;
     if (isMultiSelect) {
@@ -673,91 +739,156 @@ function SortableCard({
       ref={setNodeRef}
       style={style}
       data-project-card={proj.id}
-      className={`
-        bg-[image:var(--gradient-brand-soft)] border rounded-[var(--radius-2xl)] overflow-hidden
-        transition-all duration-200 group shadow-[var(--shadow-soft)]
-        ${isMultiSelect && isSelected
-          ? 'border-[var(--color-brand)] ring-2 ring-[var(--color-brand-light)]'
-          : isMenuOpen
-            ? 'border-[var(--color-primary-300)] shadow-[var(--shadow-md)]'
-            : 'border-[var(--color-border)] hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--color-primary-300)] hover:-translate-y-0.5'
-        }
-      `}
+      className="group relative flex flex-col"
     >
-      {/* Thumbnail — 统一 4:3 比例，所有卡片行高一致 */}
-      <div
-        className="aspect-[4/3] bg-[image:var(--gradient-surface)] p-3 relative cursor-pointer"
-        onClick={handleCardClick}
-        {...(isMultiSelect ? {} : attributes)}
-        {...(isSortable && !isMultiSelect ? listeners : {})}
-      >
-        {/* Drag hint on hover */}
-        {isSortable && !isMultiSelect && (
-          <div className="absolute top-2 left-2 w-6 h-6 flex items-center justify-center
-                          bg-white/80 rounded-[var(--radius-md)] opacity-0 group-hover:opacity-100
-                          text-[var(--color-gray-400)] transition-opacity pointer-events-none z-10 shadow-[var(--shadow-xs)]">
-            <svg viewBox="0 0 10 10" fill="currentColor" className="w-3 h-3">
-              <circle cx="3" cy="2" r="1.2" /><circle cx="7" cy="2" r="1.2" />
-              <circle cx="3" cy="5" r="1.2" /><circle cx="7" cy="5" r="1.2" />
-              <circle cx="3" cy="8" r="1.2" /><circle cx="7" cy="8" r="1.2" />
-            </svg>
-          </div>
-        )}
-
-        {/* 多选模式下的复选框 */}
-        {isMultiSelect && (
-          <div className={`absolute top-2 left-2 w-6 h-6 flex items-center justify-center rounded-full border-2 z-10
-                          transition-all duration-150 shadow-[var(--shadow-xs)]
-                          ${isSelected
-                            ? 'bg-[var(--color-brand)] border-[var(--color-brand)] text-white'
-                            : 'bg-white/90 border-[var(--color-gray-400)] text-transparent group-hover:border-[var(--color-brand)]'
-                          }`}
-          >
-            {isSelected && (
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                <path d="M2.5 6l2.5 2.5 4.5-5" />
+      {/* 封面区 — flex-1 按行内最高相册自适应高度，封面按真实比例居中 */}
+      <div ref={coverAreaRef} className="relative flex-1 flex items-center justify-center">
+        {/* 封面 — 悬浮放大作用于封面本身 */}
+        <div
+          className={`
+            relative w-full cursor-pointer rounded-[7px]
+            transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
+            ${isMultiSelect && isSelected
+              ? 'ring-2 ring-[var(--color-brand)] ring-offset-2 ring-offset-transparent'
+              : ''}
+            ${isMenuOpen
+              ? 'shadow-[0_24px_48px_-12px_rgba(0,0,0,0.28)] -translate-y-1.5'
+              : 'group-hover:shadow-[0_24px_48px_-12px_rgba(0,0,0,0.28)] group-hover:-translate-y-1.5 group-hover:scale-[1.03]'}
+          `}
+          style={{
+            width: coverSize.w || '100%',
+            height: coverSize.h || 'auto',
+            aspectRatio: `${size.width} / ${size.height}`,
+          }}
+          onClick={handleCardClick}
+          {...(isMultiSelect ? {} : attributes)}
+          {...(isSortable && !isMultiSelect ? listeners : {})}
+        >
+          {/* 左上角全屏查看按钮（眼睛图标，悬浮显示） */}
+          {!isMultiSelect && proj.pages && proj.pages.length > 0 && (
+            <button
+              title={t('home.projectGrid.fullscreenView')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onFullscreen(); }}
+              className="absolute top-2 left-2 w-7 h-7 flex items-center justify-center
+                         rounded-full backdrop-blur shadow-[var(--shadow-xs)] z-10 cursor-pointer
+                         bg-[var(--color-surface)]/85 border border-[var(--color-border)]
+                         text-[var(--color-gray-500)] hover:text-[var(--color-brand)] hover:border-[var(--color-primary-300)]
+                         opacity-0 group-hover:opacity-100 transition-all duration-150"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8z" />
+                <circle cx="8" cy="8" r="2.3" />
               </svg>
-            )}
-          </div>
-        )}
+            </button>
+          )}
 
-        {/* 封面缩略图 — 居中填满 */}
-        <div className="absolute inset-[12px] flex items-center justify-center">
-          <div
-            className="relative"
-            style={{
-              aspectRatio: `${size.width} / ${size.height}`,
-              maxWidth: '100%',
-              maxHeight: '100%',
-              ...(size.width / size.height > 4 / 3
-                ? { width: '100%' }
-                : { height: '100%' }),
-            }}
-          >
-            {proj.pages && proj.pages.length > 0 ? (
-              <PageThumbnail page={proj.pages[0]} photos={photos} albumSize={size} />
-            ) : (
-              <div
-                className="absolute inset-0 flex items-center justify-center rounded-[var(--radius-md)]"
-                style={{ backgroundImage: SLOT_PALETTE[0] }}
-              >
-                <div className="w-12 h-12 rounded-full bg-white/60 flex items-center justify-center shadow-[var(--shadow-xs)]">
-                  <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-6 h-6 text-[var(--color-brand)]">
-                    <rect x="4" y="4" width="24" height="24" rx="3" />
-                    <circle cx="13" cy="12" r="3.5" />
-                    <path d="M6 26l7-8 5 5 7-7 6 10" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
+          {/* 多选模式下的复选框 */}
+          {isMultiSelect && (
+            <div className={`absolute top-2 left-2 w-6 h-6 flex items-center justify-center rounded-full border-2 z-10
+                            transition-all duration-150 shadow-[var(--shadow-xs)]
+                            ${isSelected
+                              ? 'bg-[var(--color-brand)] border-[var(--color-brand)] text-white'
+                              : 'bg-white/90 border-[var(--color-gray-400)] text-transparent group-hover:border-[var(--color-brand)]'
+                            }`}
+            >
+              {isSelected && (
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                  <path d="M2.5 6l2.5 2.5 4.5-5" />
+                </svg>
+              )}
+            </div>
+          )}
+
+          {proj.pages && proj.pages.length > 0 ? (
+            <CoverPageCard page={proj.pages[0]} photos={photos} albumSize={size} />
+          ) : (
+            <div
+              className="absolute inset-0 flex items-center justify-center rounded-[1px_2px_3px_1px]"
+              style={{ backgroundImage: SLOT_PALETTE[0] }}
+            >
+              <div className="w-14 h-14 rounded-full bg-white/60 flex items-center justify-center shadow-[var(--shadow-xs)]">
+                <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-7 h-7 text-[var(--color-brand)]">
+                  <rect x="4" y="4" width="24" height="24" rx="3" />
+                  <circle cx="13" cy="12" r="3.5" />
+                  <path d="M6 26l7-8 5 5 7-7 6 10" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* "..." menu (real projects only) — 在多选模式下隐藏 */}
+          {!isDemo && !isMultiSelect && (
+            <>
+              <button
+                data-project-menu
+                className={`absolute top-2.5 right-2.5 w-8 h-8 flex items-center justify-center
+                           bg-[var(--color-surface)]/85 backdrop-blur border border-[var(--color-border)]
+                           rounded-full text-[var(--color-gray-500)]
+                           hover:bg-white hover:text-[var(--color-brand)] hover:border-[var(--color-primary-300)]
+                           transition-all duration-150 cursor-pointer shadow-[var(--shadow-xs)]
+                           ${isMenuOpen ? 'opacity-100 text-[var(--color-brand)] border-[var(--color-primary-300)]' : 'opacity-0 group-hover:opacity-100'}`}
+                onClick={(e) => { e.stopPropagation(); onToggleMenu(proj.id); }}
+                title={t('home.projectGrid.moreActions')}
+              >
+                <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
+                  <circle cx="7" cy="3" r="1.2" />
+                  <circle cx="7" cy="7" r="1.2" />
+                  <circle cx="7" cy="11" r="1.2" />
+                </svg>
+              </button>
+
+              {isMenuOpen && (
+                <div data-project-menu className="absolute top-11 right-2.5 z-20 bg-white border border-[var(--color-border)]
+                                rounded-[var(--radius-xl)] shadow-[var(--shadow-md)] py-1.5 min-w-[130px] overflow-hidden">
+                  <button
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                               text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
+                               border-none bg-transparent cursor-pointer transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onStartRename(proj); }}
+                  >
+                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
+                      <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
+                    </svg>
+                    {t('home.projectGrid.rename')}
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                               text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
+                               border-none bg-transparent cursor-pointer transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onDuplicate(proj); }}
+                  >
+                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                      <rect x="2" y="2" width="10" height="10" rx="1.5" />
+                      <path d="M9.5 2.5v-1a1 1 0 0 0-1-1h-3a1 1 0 0 0-1 1v1" />
+                      <path d="M6.5 6.5h-1a1 1 0 0 0-1 1v1" />
+                      <path d="M7.5 6.5h1a1 1 0 0 1 1 1v1" />
+                    </svg>
+                    {t('home.projectGrid.copy')}
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
+                               text-[var(--color-error)] hover:bg-[var(--color-error-light)]
+                               border-none bg-transparent cursor-pointer transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onDelete(proj); }}
+                  >
+                    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                      <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+                      <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
+                    </svg>
+                    {t('home.projectGrid.deleteAction')}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 
-      {/* Info — 统一高度，便于阅读 */}
-      <div className="p-3.5 flex flex-col h-[78px] justify-between">
-        {/* Name */}
-        <div className="flex items-start gap-1.5 min-w-0">
+      {/* Info — 等高信息区，文字更小，内容居中 */}
+      <div className="mt-2.5 h-[52px] px-0.5 flex flex-col items-center justify-between text-center">
+        <div className="flex items-center justify-center gap-1.5 min-w-0">
           {isEditing ? (
             <input
               ref={inputRef}
@@ -767,15 +898,15 @@ function SortableCard({
               onBlur={onConfirmRename}
               onKeyDown={onRenameKeyDown}
               maxLength={30}
-              className="flex-1 text-[var(--text-body)] font-[600] text-[var(--color-gray-800)]
+              className="flex-1 min-w-0 text-[13px] font-[600] text-[var(--color-gray-800)]
                          bg-[var(--color-primary-50)] border border-[var(--color-primary-300)]
-                         rounded-[var(--radius-sm)] px-2 py-0.5 outline-none"
+                         rounded-[var(--radius-sm)] px-2 py-0.5 outline-none text-center"
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
             <span
-              className="text-[var(--text-body)] font-[600] text-[var(--color-gray-800)] truncate flex-1 min-w-0
-                         cursor-pointer hover:text-[var(--color-brand)] transition-colors"
+              className="text-[13px] font-[600] text-[var(--color-gray-800)] truncate max-w-full
+                         cursor-pointer hover:text-[var(--color-primary-600)] transition-colors"
               onClick={(e) => { e.stopPropagation(); onStartRename(proj); }}
               title={t('home.projectGrid.clickToRename')}
             >
@@ -783,87 +914,19 @@ function SortableCard({
             </span>
           )}
           {isDemo && (
-            <span className="text-[var(--text-nano)] text-[var(--color-primary-600)] bg-[var(--color-primary-50)] px-2 py-0.5 rounded-full shrink-0 mt-0.5 font-[500]">
+            <span className="text-[10px] text-[var(--color-primary-600)] bg-[var(--color-primary-50)] px-1.5 py-0.5 rounded-full shrink-0 font-[500]">
               {t('home.projectGrid.demo')}
             </span>
           )}
         </div>
 
-        <div className="flex flex-col gap-0.5">
-          <div className="text-[var(--text-caption)] text-[var(--color-gray-400)] truncate font-[500]">
-            {t('home.projectGrid.pageCount', { count: proj.pages?.length || 0, size: proj.size?.desc || t('home.projectGrid.defaultSize') })}
-          </div>
-          <div className="text-[var(--text-caption)] text-[var(--color-gray-400)]">
-            {proj.updatedAt ? timeAgo(proj.updatedAt, t) : t('home.projectGrid.notEdited')}
-          </div>
+        <div className="text-[11px] leading-snug text-[var(--color-text-tertiary)] truncate max-w-full">
+          {t('home.projectGrid.pageCount', { count: proj.pages?.length || 0, size: proj.size?.desc || t('home.projectGrid.defaultSize') })}
+        </div>
+        <div className="text-[11px] leading-snug text-[var(--color-text-tertiary)]">
+          {proj.updatedAt ? timeAgo(proj.updatedAt, t) : t('home.projectGrid.notEdited')}
         </div>
       </div>
-
-      {/* "..." menu (real projects only) — 在多选模式下隐藏 */}
-      {!isDemo && !isMultiSelect && (
-        <>
-          <button
-            data-project-menu
-            className={`absolute top-2.5 right-2.5 w-8 h-8 flex items-center justify-center
-                       bg-white/90 border border-[var(--color-border)] rounded-full
-                       text-[var(--color-gray-500)]
-                       hover:bg-white hover:text-[var(--color-brand)] hover:border-[var(--color-primary-300)]
-                       transition-all duration-150 cursor-pointer shadow-[var(--shadow-xs)]
-                       ${isMenuOpen ? 'opacity-100 text-[var(--color-brand)] border-[var(--color-primary-300)]' : 'opacity-0 group-hover:opacity-100'}`}
-            onClick={(e) => { e.stopPropagation(); onToggleMenu(proj.id); }}
-            title={t('home.projectGrid.moreActions')}
-          >
-            <svg viewBox="0 0 14 14" fill="currentColor" className="w-3.5 h-3.5">
-              <circle cx="7" cy="3" r="1.2" />
-              <circle cx="7" cy="7" r="1.2" />
-              <circle cx="7" cy="11" r="1.2" />
-            </svg>
-          </button>
-
-          {isMenuOpen && (
-            <div data-project-menu className="absolute top-10 right-2.5 z-20 bg-white border border-[var(--color-border)]
-                            rounded-[var(--radius-xl)] shadow-[var(--shadow-md)] py-1.5 min-w-[130px] overflow-hidden">
-                <button
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
-                             text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
-                             border-none bg-transparent cursor-pointer transition-colors"
-                  onClick={(e) => { e.stopPropagation(); onStartRename(proj); }}
-                >
-                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
-                    <path d="M10 1.5l2.5 2.5L4.5 12H2v-2.5L10 1.5z" />
-                  </svg>
-                  {t('home.projectGrid.rename')}
-                </button>
-                <button
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
-                             text-[var(--color-gray-700)] hover:bg-[var(--color-surface-hover)]
-                             border-none bg-transparent cursor-pointer transition-colors"
-                  onClick={(e) => { e.stopPropagation(); onDuplicate(proj); }}
-                >
-                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                    <rect x="2" y="2" width="10" height="10" rx="1.5" />
-                    <path d="M9.5 2.5v-1a1 1 0 0 0-1-1h-3a1 1 0 0 0-1 1v1" />
-                    <path d="M6.5 6.5h-1a1 1 0 0 0-1 1v1" />
-                    <path d="M7.5 6.5h1a1 1 0 0 1 1 1v1" />
-                  </svg>
-                  {t('home.projectGrid.copy')}
-                </button>
-                <button
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[var(--text-body-sm)]
-                             text-[var(--color-error)] hover:bg-[var(--color-error-light)]
-                             border-none bg-transparent cursor-pointer transition-colors"
-                  onClick={(e) => { e.stopPropagation(); onDelete(proj); }}
-                >
-                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                    <path d="M2 3.5h10" /><path d="M4.5 3.5V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
-                    <path d="M11 3.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8" />
-                  </svg>
-                  {t('home.projectGrid.deleteAction')}
-                </button>
-              </div>
-          )}
-        </>
-      )}
     </div>
   );
 }

@@ -1,0 +1,145 @@
+/* 内置艺术字体（适合相册使用）：中文 7 款 + 英文 7 款
+ * 来源：Google Fonts（SIL OFL 开源许可），本地打包离线可用。
+ * font-family 名称与 TEXT_FONT_FAMILIES 一致，供文字元素/画布/导出/缩略图使用。
+ */
+
+/* ── 中文艺术字体（完整 CJK） ── */
+@font-face {
+  font-family: '站酷快乐体';
+  src: url('../assets/fonts/ZCOOLKuaiLe.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '马善政毛笔楷书';
+  src: url('../assets/fonts/MaShanZheng.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '柳建毛草体';
+  src: url('../assets/fonts/LiuJianMaoCao.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '站酷庆科黄油体';
+  src: url('../assets/fonts/ZCOOLQingKeHuangYou.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '龙藏体';
+  src: url('../assets/fonts/LongCang.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '直播星体';
+  src: url('../assets/fonts/ZhiMangXing.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '站酷小薇体';
+  src: url('../assets/fonts/ZCOOLXiaoWei.ttf') format('truetype');
+  font-display: swap;
+}
+
+/* ── 英文字术字体（latin 子集） ── */
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('../assets/fonts/PlayfairDisplay.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cormorant Garamond';
+  src: url('../assets/fonts/CormorantGaramond.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Dancing Script';
+  src: url('../assets/fonts/DancingScript.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Great Vibes';
+  src: url('../assets/fonts/GreatVibes.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Caveat';
+  src: url('../assets/fonts/Caveat.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Pacifico';
+  src: url('../assets/fonts/Pacifico.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Montserrat';
+  src: url('../assets/fonts/Montserrat.woff2') format('woff2');
+  font-display: swap;
+}
+
+/* ── 自备艺术字体（用户本地打包，13 款） ── */
+@font-face {
+  font-family: 'Azedo Light';
+  src: url('../assets/fonts/AzedoLight.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Beyno';
+  src: url('../assets/fonts/Beyno.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Big John';
+  src: url('../assets/fonts/BigJohn.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Comfortaa';
+  src: url('../assets/fonts/ComfortaaLight.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Hagin Caps Thin';
+  src: url('../assets/fonts/HaginCapsThin.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Hitch-hike';
+  src: url('../assets/fonts/Hitchhike.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Intro Cond Light';
+  src: url('../assets/fonts/IntroCondLightFree.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Jokerman';
+  src: url('../assets/fonts/Jokerman.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mr. Jackson Rankenstein';
+  src: url('../assets/fonts/MrJacksonRankenstein.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Rage';
+  src: url('../assets/fonts/Rage.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Corbelli';
+  src: url('../assets/fonts/Corbelli.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Segoe UI SemiBold';
+  src: url('../assets/fonts/SegoeSemiBold.ttf') format('truetype');
+  font-display: swap;
+}
+@font-face {
+  font-family: '新蒂小丸子体';
+  src: url('../assets/fonts/XinDiXiaoWanZi.ttf') format('truetype');
+  font-display: swap;
+}

@@ -51,10 +51,10 @@ export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center z-[var(--z-overlay)]"
+      className="fixed inset-0 flex items-center justify-center z-[var(--z-modal)]"
     >
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-[var(--color-surface-overlay)]" />
+      {/* Overlay：点击灰色区域关闭弹窗 */}
+      <div className="absolute inset-0 bg-[var(--color-surface-overlay)]" onClick={onClose} />
       {/* Dialog */}
       <div
         className="relative bg-[var(--color-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-md)] w-[90vw] max-h-[90vh] grid grid-rows-[auto_1fr_auto] overflow-hidden animate-[modalFadeIn_0.2s_ease-out]"

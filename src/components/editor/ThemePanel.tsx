@@ -18,7 +18,7 @@ export function ThemePanel() {
       addToast({ type: 'info', message: t('editor.themePanel.noPage') });
       return;
     }
-    updatePageBackground(currentPageIndex, color);
+    updatePageBackground(currentPageIndex, { background: color });
     addToast({ type: 'success', message: t('editor.themePanel.bgUpdated') });
   };
 

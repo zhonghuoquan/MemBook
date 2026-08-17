@@ -1,14 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../store';
 import {
   STICKY_COLORS, TEXT_STYLE_PRESETS, SHAPE_TYPES,
+  DEFAULT_TEXT_LINE_HEIGHT, DEFAULT_TEXT_LETTER_SPACING,
 } from '../../types';
 import type { BrushType, PageTextElement, StickyNote, ShapeType } from '../../types';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { BrushPreview } from './tools/BrushPreview';
 import { ColorPicker } from './tools/ColorPicker';
-import { ColorPalette } from './tools/ColorPalette';
 import { BackgroundPicker } from './tools/BackgroundPicker';
 
 /* ── 画笔类型 SVG 图标 ── */
@@ -40,41 +40,22 @@ export function ToolsPanel() {
   const setBrushSettings = useEditorStore((s) => s.setBrushSettings);
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const updatePageBackground = useEditorStore((s) => s.updatePageBackground);
-  const applyBackgroundToAllPages = useEditorStore((s) => s.applyBackgroundToAllPages);
+  const applyBackgroundByScope = useEditorStore((s) => s.applyBackgroundByScope);
   const addTextElement = useEditorStore((s) => s.addTextElement);
   const sb = useScrollbarVisibility<HTMLDivElement>();
   const addStickyNote = useEditorStore((s) => s.addStickyNote);
-  const updateShapeElement = useEditorStore((s) => s.updateShapeElement);
-  const removeShapeElement = useEditorStore((s) => s.removeShapeElement);
   const setPendingTextEditId = useEditorStore((s) => s.setPendingTextEditId);
   const setPendingShapeType = useEditorStore((s) => s.setPendingShapeType);
   const removeBrushStroke = useEditorStore((s) => s.removeBrushStroke);
   const pages = useEditorStore((s) => s.pages);
   const currentPage = pages[currentPageIndex];
 
-  /* ── 文字/便利贴选中态与编辑方法 ── */
-  const selectedTextId = useEditorStore((s) => s.selectedTextId);
-  const selectedStickyId = useEditorStore((s) => s.selectedStickyId);
-  const selectedShapeId = useEditorStore((s) => s.selectedShapeId);
+  /* ── 添加元素后清空其它选中态，交由右侧属性面板编辑 ── */
   const setSelectedTextId = useEditorStore((s) => s.setSelectedTextId);
   const setSelectedStickyId = useEditorStore((s) => s.setSelectedStickyId);
   const setSelectedShapeId = useEditorStore((s) => s.setSelectedShapeId);
-  const updateTextElement = useEditorStore((s) => s.updateTextElement);
-  const updateStickyNote = useEditorStore((s) => s.updateStickyNote);
-  const selectedTextEl = currentPage?.textElements?.find((e) => e.id === selectedTextId);
-  const selectedStickyNote = currentPage?.stickyNotes?.find((n) => n.id === selectedStickyId);
-  const selectedShape = currentPage?.shapeElements?.find((s) => s.id === selectedShapeId);
 
-  /* 文字字体列表 */
-  const FONT_FAMILIES = ['思源黑体', '宋体', '微软雅黑', '楷体', '黑体', '仿宋'];
-
-  /* ── 折叠状态 ── */
-  const [, setCollapsedSections] = useState<Record<string, boolean>>({});
-  const toggleSection = (key: string) => {
-    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  /* ── 便利贴默认参数（用于新建便利贴；选中便利贴的属性在下方面板编辑） ── */
+  /* ── 便利贴默认参数（用于新建便利贴；选中便利贴的属性在右侧面板编辑） ── */
   const DEFAULT_STICKY_COLOR = STICKY_COLORS[0].color;
   const DEFAULT_STICKY_STYLE = 'rounded' as const;
   const DEFAULT_STICKY_SIZE = { w: 120, h: 120 }; // md
@@ -92,17 +73,22 @@ export function ToolsPanel() {
     const el: PageTextElement = {
       id: `text-${Date.now()}`,
       x: 30, y: 30,
-      width: 150, height: (preset?.fontSize ?? 20) * 2.5,
+      width: 150,
+      // 高度与单行文字高度一致（与 fitTextSize 计算一致：fontSize*1.2 + 内边距），避免文本框远超文字高度
+      height: Math.round((preset?.fontSize ?? 20) * 1.2 + 4),
       text: '',
       fontSize: preset?.fontSize ?? 20,
       fontFamily: '思源黑体',
       color: preset?.color ?? '#212529',
       align: 'left',
+      verticalAlign: 'center',
       bold: preset?.bold ?? false,
       italic: preset?.italic ?? false,
       underline: false,
       rotation: 0,
       zIndex: 0,
+      lineHeight: DEFAULT_TEXT_LINE_HEIGHT,
+      letterSpacing: DEFAULT_TEXT_LETTER_SPACING,
     };
     addTextElement(currentPageIndex, el);
     // 自动选中新文字并进入编辑模式
@@ -162,18 +148,14 @@ export function ToolsPanel() {
 
   return (
     <aside className="flex-1 bg-[var(--color-surface)] flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-[var(--color-border-light)]">
-        <span className="text-[var(--text-body)] font-[500] text-[var(--color-gray-800)]">{t('editor.tools.title')}</span>
-      </div>
-
       {/* Content */}
-      <div ref={sb.ref} className={`flex-1 overflow-y-auto ps-scroll pl-4 pr-1 py-4 space-y-2 ${sb.className}`} {...sb.handlers}>
+      <div ref={sb.ref} className={`flex-1 overflow-y-auto ps-scroll pl-4 pr-1 py-4 space-y-4 ${sb.className}`} {...sb.handlers}>
 
-        {/* ═══════════════════ 1. 画笔 & 橡皮擦 ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.brushSection')} icon="brush" defaultOpen onToggle={() => toggleSection('brush')}>
-          {/* 工具切换 */}
-          <div className="flex items-center gap-1.5 mb-3">
+        {/* ═══════════════════ 1. 绘制工具（画笔 & 橡皮擦） ═══════════════════ */}
+        <section>
+          <SectionTitle>{t('editor.tools.brushSection')}</SectionTitle>
+          {/* 工具切换：始终可见，点击即用 */}
+          <div className="flex items-center gap-1.5">
             <ToolButton
               active={activeTool === 'brush'}
               onClick={() => setActiveTool(activeTool === 'brush' ? 'none' : 'brush')}
@@ -196,10 +178,9 @@ export function ToolsPanel() {
             </ToolButton>
           </div>
 
-          {/* 画笔设置 */}
+          {/* 画笔设置：选中画笔时展开 */}
           {activeTool === 'brush' && (
-            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {/* 预览 */}
+            <div className="mt-2.5 space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
               <BrushPreview
                 brushType={brushSettings.brushType}
                 strokeWidth={brushSettings.strokeWidth}
@@ -207,7 +188,6 @@ export function ToolsPanel() {
                 opacity={brushSettings.opacity}
               />
 
-              {/* 笔触类型 */}
               <div>
                 <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">{t('editor.tools.brushType')}</div>
                 <div className="flex gap-1.5">
@@ -228,7 +208,6 @@ export function ToolsPanel() {
                 </div>
               </div>
 
-              {/* 粗细 */}
               <div>
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
                   <span>{t('editor.tools.strokeWidth')}</span>
@@ -239,7 +218,6 @@ export function ToolsPanel() {
                   className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
               </div>
 
-              {/* 颜色 */}
               <ColorPicker
                 selectedColor={brushSettings.color}
                 recentColors={brushSettings.recentColors}
@@ -248,7 +226,6 @@ export function ToolsPanel() {
                 size="sm"
               />
 
-              {/* 透明度 */}
               <div>
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
                   <span>{t('editor.tools.opacity')}</span>
@@ -261,11 +238,10 @@ export function ToolsPanel() {
             </div>
           )}
 
-          {/* 橡皮擦设置 */}
+          {/* 橡皮擦设置：选中橡皮擦时展开 */}
           {activeTool === 'eraser' && (
-            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)] border border-[var(--color-error)]/20">
+            <div className="mt-2.5 space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)] border border-[var(--color-error)]/20">
               <div className="text-[10px] font-[500] text-[var(--color-gray-500)]">{t('editor.tools.eraserHint')}</div>
-              {/* 橡皮擦大小 */}
               <div>
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
                   <span>{t('editor.tools.eraserSize')}</span>
@@ -276,7 +252,6 @@ export function ToolsPanel() {
                   onChange={(e) => setBrushSettings({ strokeWidth: +e.target.value / 2 })}
                   className="w-full h-1.5 cursor-pointer accent-[var(--color-error)]" />
               </div>
-              {/* 清除全部 */}
               {brushStrokes.length > 0 && (
                 <button
                   onClick={handleClearAllStrokes}
@@ -287,198 +262,30 @@ export function ToolsPanel() {
               )}
             </div>
           )}
+        </section>
 
-          {activeTool !== 'brush' && activeTool !== 'eraser' && (
-            <div className="text-[11px] text-[var(--color-gray-400)] px-3 py-2 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {t('editor.tools.brushHint')}
-            </div>
-          )}
-        </CollapsibleSection>
-
-        {/* ═══════════════════ 2. 文字 ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.textSection')} icon="text" defaultOpen onToggle={() => toggleSection('text')}
-          headerAction={
-            <button
+        {/* ═══════════════════ 2. 添加元素（文字 & 便利贴） ═══════════════════ */}
+        <section>
+          <SectionTitle>{t('editor.tools.elementsSection')}</SectionTitle>
+          <div className="grid grid-cols-2 gap-1.5">
+            <AddButton
               onClick={() => handleAddText()}
-              title={t('editor.tools.addText')}
-              className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)]
-                         border border-[var(--color-primary-400)] text-[var(--color-primary-600)]
-                         bg-[var(--color-surface-selected)] cursor-pointer
-                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors"
-            >
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
-                <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
-              </svg>
-            </button>
-          }
-        >
-          {/* 文字属性面板（选中文字元素时显示） */}
-          {selectedTextEl && (
-            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              <div className="text-[10px] font-[500] text-[var(--color-brand)] uppercase tracking-wide">{t('editor.tools.textProperties')}</div>
-              {/* 字体 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.fontFamily')}</div>
-                <select value={selectedTextEl.fontFamily} onChange={(e) => updateTextElement(currentPageIndex, selectedTextEl.id, { fontFamily: e.target.value })}
-                  className="w-full h-7 px-1.5 border border-[var(--color-border)] rounded text-[11px] bg-white cursor-pointer outline-none">
-                  {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              {/* 字号 */}
-              <div>
-                <div className="flex items-center justify-between text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">
-                  <span>{t('editor.tools.fontSize')}</span>
-                  <span className="font-[600] tabular-nums">{selectedTextEl.fontSize}px</span>
-                </div>
-                <input type="range" min={8} max={72} value={selectedTextEl.fontSize}
-                  onChange={(e) => updateTextElement(currentPageIndex, selectedTextEl.id, { fontSize: Math.max(1, Math.min(999, +e.target.value || 12)) })}
-                  className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
-              </div>
-              {/* 加粗 / 斜体 */}
-              <div className="flex gap-1.5">
-                <button onClick={() => updateTextElement(currentPageIndex, selectedTextEl.id, { bold: !selectedTextEl.bold })}
-                  className={`flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border cursor-pointer transition-colors
-                    ${selectedTextEl.bold ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'}`}>
-                  <span className="font-bold">B</span> {t('editor.tools.bold')}
-                </button>
-                <button onClick={() => updateTextElement(currentPageIndex, selectedTextEl.id, { italic: !selectedTextEl.italic })}
-                  className={`flex-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border cursor-pointer transition-colors
-                    ${selectedTextEl.italic ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'}`}>
-                  <span className="italic">I</span> {t('editor.tools.italic')}
-                </button>
-              </div>
-              {/* 颜色 */}
-              <div>
-                <ColorPalette
-                  label={t('editor.tools.textColor')}
-                  selectedColor={selectedTextEl.color}
-                  onColorChange={(c) => updateTextElement(currentPageIndex, selectedTextEl.id, { color: c })}
-                />
-              </div>
-              {/* 对齐 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.align')}</div>
-                <div className="flex gap-1.5">
-                  {([
-                    { key: 'left' as const, label: t('editor.tools.alignLeft'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="2" y1="7" x2="9" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-                    { key: 'center' as const, label: t('editor.tools.alignCenter'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="4" y1="7" x2="10" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-                    { key: 'right' as const, label: t('editor.tools.alignRight'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="5" y1="7" x2="12" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-                  ]).map(({ key, label, icon }) => (
-                    <button key={key} title={label}
-                      onClick={() => updateTextElement(currentPageIndex, selectedTextEl.id, { align: key })}
-                      className={`flex-1 flex items-center justify-center py-1.5 rounded-[var(--radius-sm)] border cursor-pointer transition-colors
-                        ${selectedTextEl.align === key ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'}`}>
-                      {icon}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* 文字方向 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.textDirection')}</div>
-                <div className="flex gap-1.5">
-                  <button onClick={() => updateTextElement(currentPageIndex, selectedTextEl.id, { rotation: 0 })}
-                    className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border cursor-pointer transition-colors
-                      ${selectedTextEl.rotation !== -90 ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'}`}>
-                    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3"><line x1="1.5" y1="3" x2="10.5" y2="3"/><line x1="1.5" y1="6" x2="8" y2="6"/><line x1="1.5" y1="9" x2="10.5" y2="9"/></svg>
-                    {t('editor.tools.horizontal')}
-                  </button>
-                  <button onClick={() => updateTextElement(currentPageIndex, selectedTextEl.id, { rotation: -90 })}
-                    className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[500] border cursor-pointer transition-colors
-                      ${selectedTextEl.rotation === -90 ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]' : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'}`}>
-                    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3"><line x1="3" y1="1.5" x2="3" y2="10.5"/><line x1="6" y1="2" x2="6" y2="7.5"/><line x1="9" y1="1.5" x2="9" y2="10.5"/></svg>
-                    {t('editor.tools.vertical')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 未选中文字时的提示 */}
-          {!selectedTextEl && (
-            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {t('editor.tools.textHint')}
-            </div>
-          )}
-        </CollapsibleSection>
-
-        {/* ═══════════════════ 3. 便利贴 ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.stickySection')} icon="sticky" defaultOpen onToggle={() => toggleSection('sticky')}
-          headerAction={
-            <button
+              label={t('editor.tools.addText')}
+              icon={<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4"><path d="M4 3h8M8 3v10M5.5 13h5"/></svg>}
+            />
+            <AddButton
               onClick={() => handleAddSticky()}
-              title={t('editor.tools.addSticky')}
-              className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)]
-                         border border-[var(--color-primary-400)] text-[var(--color-primary-600)]
-                         bg-[var(--color-surface-selected)] cursor-pointer
-                         hover:bg-[var(--color-primary-50)] hover:border-[var(--color-primary-500)] transition-colors"
-            >
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
-                <line x1="7" y1="2" x2="7" y2="12" /><line x1="2" y1="7" x2="12" y2="7" />
-              </svg>
-            </button>
-          }
-        >
-          {/* 便利贴属性面板（选中便利贴时显示） */}
-          {selectedStickyNote && (
-            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              <div className="text-[10px] font-[500] text-[var(--color-brand)] uppercase tracking-wide">{t('editor.tools.stickyProperties')}</div>
-              {/* 颜色 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">{t('editor.tools.color')}</div>
-                <div className="flex gap-1.5 flex-wrap">
-                  {STICKY_COLORS.map((sc) => (
-                    <button
-                      key={sc.color}
-                      onClick={() => updateStickyNote(currentPageIndex, selectedStickyNote.id, { color: sc.color })}
-                      className={`w-7 h-7 rounded-[4px] border-2 cursor-pointer transition-transform hover:scale-110
-                        ${selectedStickyNote.color === sc.color ? 'border-[var(--color-brand)] scale-110' : 'border-[var(--color-border)]'}`}
-                      style={{ backgroundColor: sc.color }}
-                      title={sc.name}
-                    />
-                  ))}
-                </div>
-              </div>
-              {/* 样式 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1.5">{t('editor.tools.style')}</div>
-                <div className="flex gap-1.5">
-                  {([
-                    { key: 'rounded' as const, label: t('editor.tools.styleRounded') },
-                    { key: 'square' as const, label: t('editor.tools.styleSquare') },
-                    { key: 'tape' as const, label: t('editor.tools.styleTape') },
-                    { key: 'shadow' as const, label: t('editor.tools.styleShadow') },
-                  ]).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => updateStickyNote(currentPageIndex, selectedStickyNote.id, { style: key })}
-                      className={`flex-1 py-1.5 rounded-[var(--radius-sm)] text-[10px] font-[500] border cursor-pointer transition-colors
-                        ${(selectedStickyNote.style || 'rounded') === key
-                          ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
-                          : 'border-[var(--color-border)] bg-white text-[var(--color-gray-500)] hover:border-[var(--color-gray-300)]'
-                        }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+              label={t('editor.tools.addSticky')}
+              icon={<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path d="M3 3h10v6l-3 3H3z" fill="var(--color-primary-100)" strokeLinejoin="round"/><path d="M10 13l3-3"/></svg>}
+            />
+          </div>
+          <div className="text-[11px] text-[var(--color-gray-400)] px-1 pt-1.5">{t('editor.tools.elementsHint')}</div>
+        </section>
 
-          {/* 未选中便利贴时的提示 */}
-          {!selectedStickyNote && (
-            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {t('editor.tools.stickyHint')}
-            </div>
-          )}
-        </CollapsibleSection>
-
-        {/* ═══════════════════ 3.5 形状 ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.shapeSection')} icon="shape" defaultOpen onToggle={() => toggleSection('shape')}>
-          {/* 形状选择面板 */}
-          <div className="p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)] space-y-2">
-            <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.addShape')}</div>
+        {/* ═══════════════════ 3. 形状 ═══════════════════ */}
+        <section>
+          <SectionTitle>{t('editor.tools.shapeSection')}</SectionTitle>
+          <div className="p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
             <div className="grid grid-cols-4 gap-1.5">
               {SHAPE_TYPES.map((st) => (
                 <button
@@ -495,146 +302,43 @@ export function ToolsPanel() {
               ))}
             </div>
           </div>
-
-          {/* 选中形状时的属性编辑面板 */}
-          {selectedShape && (
-            <div className="space-y-3 p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              <div className="text-[10px] font-[500] text-[var(--color-brand)] uppercase tracking-wide">{t('editor.tools.shapeProperties')}</div>
-              {/* 尺寸 */}
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeWidth')}</div>
-                  <input type="number" min={5} value={Math.round(selectedShape.width)}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { width: Math.max(5, +e.target.value || 5) })}
-                    className="w-full h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeHeight')}</div>
-                  <input type="number" min={5} value={Math.round(selectedShape.height)}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { height: Math.max(5, +e.target.value || 5) })}
-                    className="w-full h-7 px-2 border border-[var(--color-border)] rounded text-[11px] bg-white outline-none" />
-                </div>
-              </div>
-              {/* 填充色（支持无填充） */}
-              <ColorPalette
-                label={t('editor.tools.shapeFill')}
-                selectedColor={selectedShape.fill}
-                onColorChange={(c) => updateShapeElement(currentPageIndex, selectedShape.id, { fill: c })}
-                allowEmpty
-              />
-              {/* 描边 */}
-              <div>
-                <ColorPalette
-                  label={t('editor.tools.shapeStroke')}
-                  selectedColor={selectedShape.stroke}
-                  onColorChange={(c) => updateShapeElement(currentPageIndex, selectedShape.id, { stroke: c })}
-                />
-                <div className="mt-2">
-                  <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
-                    <span>{t('editor.tools.shapeStrokeWidth')}</span>
-                    <span className="font-[600] tabular-nums">{selectedShape.strokeWidth}px</span>
-                  </div>
-                  <input type="range" min={0} max={20} value={selectedShape.strokeWidth}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { strokeWidth: +e.target.value })}
-                    className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
-                </div>
-              </div>
-              {/* 透明度 */}
-              <div>
-                <div className="flex items-center justify-between text-[10px] text-[var(--color-gray-500)] mb-1">
-                  <span>{t('editor.tools.opacity')}</span>
-                  <span className="font-[600] tabular-nums">{Math.round(selectedShape.opacity * 100)}%</span>
-                </div>
-                <input type="range" min={0} max={100} value={Math.round(selectedShape.opacity * 100)}
-                  onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { opacity: +e.target.value / 100 })}
-                  className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
-              </div>
-              {/* 旋转 */}
-              <div>
-                <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeRotation')}</div>
-                <div className="flex items-center gap-2">
-                  <input type="range" min={0} max={359} value={((selectedShape.rotation % 360) + 360) % 360}
-                    onChange={(e) => updateShapeElement(currentPageIndex, selectedShape.id, { rotation: +e.target.value })}
-                    className="flex-1 h-1.5 cursor-pointer accent-[var(--color-brand)]" />
-                  <span className="text-[10px] font-[600] tabular-nums">{Math.round(((selectedShape.rotation % 360) + 360) % 360)}°</span>
-                </div>
-              </div>
-              {/* 删除 */}
-              <button
-                onClick={() => { removeShapeElement(currentPageIndex, selectedShape.id); setSelectedShapeId(null); }}
-                className="w-full py-1.5 text-[11px] font-[500] text-[var(--color-error)] border border-[var(--color-error)]/30 rounded-[var(--radius-sm)] bg-[var(--color-error-light)] hover:bg-[var(--color-error)]/10 cursor-pointer transition-colors"
-              >
-                {t('editor.tools.deleteShape')}
-              </button>
-            </div>
-          )}
-
-          {/* 未选中形状时的提示 */}
-          {!selectedShape && (
-            <div className="text-[11px] text-[var(--color-gray-400)] p-3 bg-[var(--color-surface-hover)] rounded-[var(--radius-md)]">
-              {t('editor.tools.shapeHint')}
-            </div>
-          )}
-        </CollapsibleSection>
+          <div className="text-[11px] text-[var(--color-gray-400)] px-1 pt-1.5">{t('editor.tools.shapeHint')}</div>
+        </section>
 
         {/* ═══════════════════ 4. 背景 ═══════════════════ */}
-        <CollapsibleSection title={t('editor.tools.backgroundSection')} icon="bg" defaultOpen onToggle={() => toggleSection('bg')}>
+        <section>
+          <SectionTitle>{t('editor.tools.backgroundSection')}</SectionTitle>
           <BackgroundPicker
-            currentPageBg={currentPage?.background}
-            onApplyBg={(color) => updatePageBackground(currentPageIndex, color)}
-            onApplyToAll={applyBackgroundToAllPages}
+            currentPage={currentPage}
+            onApplyBg={(bg) => updatePageBackground(currentPageIndex, bg)}
+            onApplyByScope={applyBackgroundByScope}
           />
-        </CollapsibleSection>
+        </section>
 
       </div>
     </aside>
   );
 }
 
-/* ── 可折叠区域 ── */
-function CollapsibleSection({
-  title,
-  defaultOpen,
-  onToggle,
-  children,
-  headerAction,
-}: {
-  title: string;
-  icon?: string;
-  defaultOpen: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-  /** 标题栏右侧的操作区（如添加按钮），不随展开/收起隐藏 */
-  headerAction?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const toggle = () => { setOpen(!open); onToggle(); };
-
+/* ── 分区标题 ── */
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-[var(--radius-md)] border border-[var(--color-border-light)] bg-white overflow-hidden">
-      <div className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--color-surface-hover)] transition-colors">
-        <button
-          onClick={toggle}
-          className="flex items-center gap-2 flex-1 cursor-pointer border-none bg-transparent p-0"
-        >
-          <svg
-            viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-            className={`w-3 h-3 text-[var(--color-gray-400)] transition-transform ${open ? 'rotate-90' : ''}`}
-          >
-            <path d="M4.5 2l4 4-4 4"/>
-          </svg>
-          <span className="text-[12px] font-[500] text-[var(--color-gray-700)]">{title}</span>
-        </button>
-        {headerAction && (
-          <div className="shrink-0">{headerAction}</div>
-        )}
-      </div>
-      {open && (
-        <div className="px-3 pb-3">
-          {children}
-        </div>
-      )}
-    </section>
+    <h3 className="flex items-center gap-1.5 text-[11px] font-[600] text-[var(--color-gray-600)] uppercase tracking-wide mb-2">
+      {children}
+    </h3>
+  );
+}
+
+/* ── 添加元素按钮 ── */
+function AddButton({ onClick, label, icon }: { onClick: () => void; label: string; icon: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] border border-dashed border-[var(--color-primary-400)] bg-[var(--color-surface-selected)] text-[var(--color-primary-700)] hover:bg-[var(--color-primary-50)] cursor-pointer transition-colors"
+    >
+      {icon}
+      <span className="text-[11px] font-[500]">{label}</span>
+    </button>
   );
 }
 
@@ -671,7 +375,13 @@ function ShapeIcon({ type, className }: { type: ShapeType; className?: string })
   const props = { className, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '1.5', strokeLinejoin: 'round' as const };
   switch (type) {
     case 'rectangle': return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="1"/></svg>;
-    case 'square': return <svg {...props}><rect x="4" y="4" width="16" height="16" rx="1"/></svg>;
+    case 'roundedRect': return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="4"/></svg>;
+    case 'singleRoundRect': return <svg {...props}><path d="M9 5H20v14H4v-9Q4 5 9 5z"/></svg>;
+    case 'diagonalRoundRect': return <svg {...props}><path d="M9 5H20v11Q20 19 17 19H4v-9Q4 5 9 5z"/></svg>;
+    case 'parallelogram': return <svg {...props}><path d="M5 5h16l-3 14H2z"/></svg>;
+    case 'trapezoid': return <svg {...props}><path d="M8 5h8l5 14H3z"/></svg>;
+    case 'cutCornerRect': return <svg {...props}><path d="M9 5H20v14H4V9z"/></svg>;
+    case 'cutDiagonalRect': return <svg {...props}><path d="M9 5H20v10l-4 4H4V9z"/></svg>;
     case 'circle': return <svg {...props}><circle cx="12" cy="12" r="9"/></svg>;
     case 'ellipse': return <svg {...props}><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>;
     case 'triangle': return <svg {...props}><path d="M12 4l9 16H3z"/></svg>;
