@@ -68,7 +68,8 @@ jobs:
             throw "找不到 Windows updater 签名文件('*.exe.sig')，请确认已配置 TAURI_SIGNING_PRIVATE_KEY。nsis 目录内容：`n$names"
           }
           $sig = (Get-Content $sigFile.FullName -Raw).Trim()
-          $exe = [System.IO.Path]::GetFileName($sigFile.FullName -replace '\.sig$','')
+          $baseName = $sigFile.FullName -replace '\.sig$',''
+          $exe = [System.IO.Path]::GetFileName($baseName)
           $url = "https://github.com/${repo}/releases/download/${tag}/${exe}"
           $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           $manifest = [ordered]@{
@@ -159,7 +160,8 @@ jobs:
           $sigFile = Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig" | Select-Object -First 1
           if (-not $sigFile) { throw "找不到 macOS updater 签名文件('.app.tar.gz.sig')，请确认 bundle.createUpdaterArtifacts 已开启" }
           $sig = (Get-Content $sigFile.FullName -Raw).Trim()
-          $artifact = [System.IO.Path]::GetFileName($sigFile.FullName -replace '\.sig$','')
+          $baseName = $sigFile.FullName -replace '\.sig$',''
+          $artifact = [System.IO.Path]::GetFileName($baseName)
           $url = "https://github.com/${repo}/releases/download/${tag}/${artifact}"
           $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           $manifest = [ordered]@{
