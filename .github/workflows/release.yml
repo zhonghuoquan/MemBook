@@ -37,9 +37,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Tauri app (NSIS)
+      - name: Normalize signing key
+        shell: pwsh
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $clean = ($env:RAW_KEY -replace '[\s\r\n]+', '').Trim()
+          if ([string]::IsNullOrEmpty($clean)) {
+            throw 'TAURI_SIGNING_PRIVATE_KEY 为空！请在仓库 Settings → Secrets and variables → Actions 中配置该密钥。'
+          }
+          if (-not $clean.StartsWith('dW50cnVzdGVk')) {
+            throw "密钥格式错误：应以 dW50cnVzdGVk 开头（rsign 加密格式），实际开头为 '$($clean.Substring(0,[Math]::Min(20,$clean.Length)))'。请从本地 .tauri\membook-updater.key 重新复制粘贴。"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY=$clean" -Encoding utf8
+          Write-Host "签名密钥已清洗：长度 $($clean.Length) 字符"
+
+      - name: Build Tauri app (NSIS)
         run: npx tauri build --bundles nsis
 
       - name: Generate update manifest (Windows)
@@ -118,9 +131,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Tauri app (universal DMG)
+      - name: Normalize signing key
+        shell: pwsh
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $clean = ($env:RAW_KEY -replace '[\s\r\n]+', '').Trim()
+          if ([string]::IsNullOrEmpty($clean)) {
+            throw 'TAURI_SIGNING_PRIVATE_KEY 为空！请在仓库 Settings → Secrets and variables → Actions 中配置该密钥。'
+          }
+          if (-not $clean.StartsWith('dW50cnVzdGVk')) {
+            throw "密钥格式错误：应以 dW50cnVzdGVk 开头（rsign 加密格式），实际开头为 '$($clean.Substring(0,[Math]::Min(20,$clean.Length)))'。请从本地 .tauri\membook-updater.key 重新复制粘贴。"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY=$clean" -Encoding utf8
+          Write-Host "签名密钥已清洗：长度 $($clean.Length) 字符"
+
+      - name: Build Tauri app (universal DMG)
         run: npx tauri build --bundles app,dmg --target universal-apple-darwin
 
       - name: Generate update manifest (macOS)
