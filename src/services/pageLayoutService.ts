@@ -2,8 +2,10 @@ import type { AlbumPage, Photo, PhotoPlacement, SlotOverride } from '../types';
 import { TEMPLATES, GOOGLE_PHOTOS_TEMPLATE_ID, isGooglePhotosPage } from '../types';
 import { refitPageWithRotation, layoutSinglePage } from '../engine/google-photos-layout';
 import type { TierPattern } from '../engine/google-photos-layout';
-import { calcCoverFitWithRotation, computePanForResizedSlot } from '../utils/photoGeometry';
+import { calcCoverFitWithRotation, computePanForResizedSlot, refitPlacementPan } from '../utils/photoGeometry';
+import { getSlotRect, MM_TO_PX } from '../utils/sharedRender';
 import { shufflePagePhotos as computeShuffledPagePhotos, shuffleWithSeed } from '../utils/shufflePagePhotos';
+import { markPhotoJustPlaced } from '../components/editor/canvas/photoJustPlaced';
 import { useEditorStore } from '../store/editorStore';
 import { usePhotoStore } from '../store/photoStore';
 import { useUIStore } from '../store/uiStore';
@@ -32,6 +34,77 @@ function getPhotoMap(): Map<string, Photo> {
   const photoMap = new Map<string, Photo>();
   for (const p of allPhotos) photoMap.set(p.id, p);
   return photoMap;
+}
+
+type SlotRectShape = { x: number; y: number; width: number; height: number };
+
+/** 槽位在页面内的像素矩形（GP 覆盖 / 模板兜底，与渲染端 getSlotRect 同源） */
+function rectForSlot(page: AlbumPage, slotId: string): SlotRectShape | null {
+  const { albumSize, pageMargin } = useEditorStore.getState();
+  if (!albumSize) return null;
+  const lw = albumSize.width * MM_TO_PX;
+  const lh = albumSize.height * MM_TO_PX;
+  return getSlotRect(slotId, page, lw, lh, pageMargin);
+}
+
+/**
+ * 按「目标槽位 → 照片」分配重建页面 placements，并把每张照片的平移重新拟合到目标槽位，避免重排后露白。
+ * - assignments: 目标 slotId → photoId（该照片将占用该槽位）；未在 assignments 中的槽位保持不变。
+ * - 保留源照片的非几何编辑（滤镜/调整/翻转/旋转/panRotation）；
+ * - panX/panY/panScale 用 refitPlacementPan 按新槽尺寸重拟合（几何信息缺失时回退居中，cover-fit 必填满）。
+ */
+function reorderPagePhotoAssignments(page: AlbumPage, assignments: Record<string, string>): AlbumPage {
+  const photoMap = getPhotoMap();
+  // 记录每张照片当前所在槽位的矩形，作为旧几何参照
+  const photoSourceRect = new Map<string, SlotRectShape | null>();
+  for (const pl of page.placements) {
+    if (!pl.photoId) continue;
+    if (!photoSourceRect.has(pl.photoId)) photoSourceRect.set(pl.photoId, rectForSlot(page, pl.slotId));
+  }
+  const newPlacements = page.placements.map((bucket) => {
+    const photoId = assignments[bucket.slotId];
+    if (!photoId) return bucket; // 空槽/未参与重排的槽位不变
+    const srcPlace = page.placements.find((pl) => pl.photoId === photoId);
+    if (!srcPlace) return { ...bucket, photoId };
+    const sourceRect = photoSourceRect.get(photoId) ?? null;
+    const targetRect = rectForSlot(page, bucket.slotId);
+    const photo = photoMap.get(photoId);
+    const refit = photo && sourceRect && targetRect
+      ? refitPlacementPan(
+          photo.width, photo.height,
+          sourceRect.width, sourceRect.height,
+          targetRect.width, targetRect.height,
+          srcPlace,
+        )
+      : {};
+    return {
+      ...srcPlace, // 携带源照片的全部编辑
+      slotId: bucket.slotId,
+      photoId,
+      panX: refit.panX,
+      panY: refit.panY,
+      panScale: refit.panScale !== undefined ? refit.panScale : undefined,
+    };
+  });
+  return { ...page, placements: newPlacements };
+}
+
+/** 重排/换位后，对"槽位发生改变"的照片打落位动效标记，
+ *  让 CanvasPhotoRenderer 播放与"从照片列表拖入照片位"一致的 Q 弹入场动画。
+ *  需在 store setState 之前调用（React 提交时 key 已在集合中）。 */
+function markMovedPhotosForAnimation(
+  oldPlacements: PhotoPlacement[],
+  newPlacements: PhotoPlacement[],
+): void {
+  const oldSlotByPhoto = new Map<string, string>();
+  for (const p of oldPlacements) if (p.photoId) oldSlotByPhoto.set(p.photoId, p.slotId);
+  for (const p of newPlacements) {
+    if (!p.photoId) continue;
+    const oldSlot = oldSlotByPhoto.get(p.photoId);
+    if (oldSlot !== undefined && oldSlot !== p.slotId) {
+      markPhotoJustPlaced(p.slotId, p.photoId);
+    }
+  }
 }
 
 
@@ -202,6 +275,8 @@ export const pageLayoutService = {
       const photoMap = getPhotoMap();
       const migrator = makePlacementMigrator(page.placements, page.slotOverrides ?? {}, photoMap);
       const regen = buildRegenPageData(shuffled.mmLayout, migrator);
+      // 对换槽照片打落位动效标记（GP 随机重排同样复用 Q 弹动画）
+      markMovedPhotosForAnimation(page.placements, regen.placements);
 
       useEditorStore.setState((s) => {
         const np = [...s.pages];
@@ -223,40 +298,74 @@ export const pageLayoutService = {
       return true;
     }
 
-    const photoStateKeys: (keyof PhotoPlacement)[] = [
-      'photoId', 'crop', 'rotation', 'flipH', 'flipV', 'adjustments',
-      'filter', 'filterIntensity', 'panX', 'panY', 'panScale', 'panRotation',
-    ];
-
     const filledIndices = page.placements
       .map((p, i) => (p.photoId ? i : -1))
       .filter((i): i is number => i >= 0);
 
-    const photoStates = filledIndices.map((i) => {
-      const state: Record<string, unknown> = {};
-      for (const k of photoStateKeys) state[k] = page.placements[i][k];
-      return state;
+    const filledPhotoIds = filledIndices.map((i) => page.placements[i].photoId as string);
+    const shuffledPhotoIds = shuffleWithSeed(filledPhotoIds, seed);
+
+    // P2-fix: 不再把绝对 panX/panY 原样搬运（换到宽高比不同的槽会露白），
+    // 而是按「目标槽→照片」重建，并把每张照片的平移重拟合到目标槽位。
+    const assignments: Record<string, string> = {};
+    filledIndices.forEach((idx, k) => {
+      assignments[page.placements[idx].slotId] = shuffledPhotoIds[k];
     });
-    const shuffledStates = shuffleWithSeed(photoStates, seed);
+    const npPage = reorderPagePhotoAssignments(page, assignments);
+    // 对换槽照片打落位动效标记（复用照片列表拖入的 Q 弹动画）
+    markMovedPhotosForAnimation(page.placements, npPage.placements);
 
     useEditorStore.setState((s) => {
       const np = [...s.pages];
-      const npPage = { ...page };
-      const npPlacements = npPage.placements.map((p, i) => {
-        const pos = filledIndices.indexOf(i);
-        if (pos < 0) return p;
-        const newP = { ...p } as Record<string, unknown>;
-        for (const k of photoStateKeys) {
-          newP[k] = shuffledStates[pos][k];
-        }
-        return newP as PhotoPlacement;
-      });
-
-      np[pageIndex] = { ...npPage, placements: npPlacements };
+      np[pageIndex] = npPage;
       return { pages: np, selectedSlotId: null };
     });
     pushSnapshot(useEditorStore.getState().pages, useEditorStore.getState().selectedSlotId);
     useUIStore.getState().addToast({ type: 'success', message: i18n.t('services.pageLayout.shuffled') });
+    return true;
+  },
+
+  /** 拖动换位：保持槽几何不变，交换两个照片位并把各自平移重拟合到对方槽位（避免露白）。
+   *  fromIndex/toIndex 为 page.placements 的下标（与旧 swapPagePhotoPlacements 语义一致）。 */
+  swapPagePhotos(pageIndex: number, fromIndex: number, toIndex: number): boolean {
+    const state = useEditorStore.getState();
+    const page = state.pages[pageIndex];
+    if (!page || !state.albumSize) return false;
+    const placements = page.placements;
+    if (fromIndex < 0 || fromIndex >= placements.length || toIndex < 0 || toIndex >= placements.length) return false;
+    if (fromIndex === toIndex) return false;
+
+    const fromSlotId = placements[fromIndex].slotId;
+    const toSlotId = placements[toIndex].slotId;
+    const fromPhotoId = placements[fromIndex].photoId;
+    const toPhotoId = placements[toIndex].photoId;
+
+    const assignments: Record<string, string> = {};
+    if (fromPhotoId) assignments[toSlotId] = fromPhotoId;
+    if (toPhotoId) assignments[fromSlotId] = toPhotoId;
+
+    let resultPage = reorderPagePhotoAssignments(page, assignments);
+
+    // GP 页面：同步交换 mmLayout（index 与 gp-i 槽位对齐），保持索引与 placements 的 photoId 一致
+    if (isGooglePhotosPage(page) && page.googlePhotosMmLayout) {
+      const mm = [...page.googlePhotosMmLayout];
+      if (fromIndex < mm.length && toIndex < mm.length) {
+        const t = mm[fromIndex];
+        mm[fromIndex] = mm[toIndex];
+        mm[toIndex] = t;
+      }
+      resultPage = { ...resultPage, googlePhotosMmLayout: mm };
+    }
+
+    // 对换槽照片打落位动效标记（复用照片列表拖入的 Q 弹动画）
+    markMovedPhotosForAnimation(page.placements, resultPage.placements);
+
+    useEditorStore.setState((s) => {
+      const np = [...s.pages];
+      np[pageIndex] = resultPage;
+      return { pages: np, selectedSlotId: null };
+    });
+    pushSnapshot(useEditorStore.getState().pages, useEditorStore.getState().selectedSlotId);
     return true;
   },
 

@@ -86,7 +86,8 @@ export function ShapeProperties({ shape }: { shape: ShapeElement }) {
                   min={0}
                   max={100}
                   value={Math.round(effectiveCr * 100)}
-                  onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { cornerRadius: Math.max(0, Math.min(1, +e.target.value / 100)) })}
+                  onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { cornerRadius: Math.max(0, Math.min(1, +e.target.value / 100)) }, false)}
+                  onPointerUp={() => updateShapeElement(currentPageIndex, shape.id, { cornerRadius: shape.cornerRadius }, true)}
                   className="w-full accent-[var(--color-brand)]"
                 />
               </div>
@@ -106,7 +107,8 @@ export function ShapeProperties({ shape }: { shape: ShapeElement }) {
                   min={0}
                   max={100}
                   value={Math.round(effectiveCut * 100)}
-                  onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { cornerCut: Math.max(0, Math.min(1, +e.target.value / 100)) })}
+                  onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { cornerCut: Math.max(0, Math.min(1, +e.target.value / 100)) }, false)}
+                  onPointerUp={() => updateShapeElement(currentPageIndex, shape.id, { cornerCut: shape.cornerCut }, true)}
                   className="w-full accent-[var(--color-brand)]"
                 />
               </div>
@@ -119,7 +121,8 @@ export function ShapeProperties({ shape }: { shape: ShapeElement }) {
               <span className="font-[600] tabular-nums">{Math.round(shape.opacity * 100)}%</span>
             </div>
             <input type="range" min={0} max={100} value={Math.round(shape.opacity * 100)}
-              onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { opacity: +e.target.value / 100 })}
+              onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { opacity: +e.target.value / 100 }, false)}
+              onPointerUp={() => updateShapeElement(currentPageIndex, shape.id, { opacity: shape.opacity }, true)}
               className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
           </div>
           {/* 旋转 */}
@@ -127,7 +130,8 @@ export function ShapeProperties({ shape }: { shape: ShapeElement }) {
             <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.shapeRotation')}</div>
             <div className="flex items-center gap-2">
               <input type="range" min={0} max={359} value={((shape.rotation % 360) + 360) % 360}
-                onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { rotation: +e.target.value })}
+                onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { rotation: +e.target.value }, false)}
+                onPointerUp={() => updateShapeElement(currentPageIndex, shape.id, { rotation: shape.rotation }, true)}
                 className="flex-1 h-1.5 cursor-pointer accent-[var(--color-brand)]" />
               <span className="text-[10px] font-[600] tabular-nums">{Math.round(((shape.rotation % 360) + 360) % 360)}°</span>
             </div>
@@ -188,7 +192,8 @@ export function ShapeProperties({ shape }: { shape: ShapeElement }) {
               </div>
             </div>
             <input type="range" min={MIN_STROKE_WIDTH} max={MAX_STROKE_WIDTH} step={0.25} value={shape.strokeWidth}
-              onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { strokeWidth: Math.max(MIN_STROKE_WIDTH, Math.min(MAX_STROKE_WIDTH, +e.target.value)) })}
+              onChange={(e) => updateShapeElement(currentPageIndex, shape.id, { strokeWidth: Math.max(MIN_STROKE_WIDTH, Math.min(MAX_STROKE_WIDTH, +e.target.value)) }, false)}
+              onPointerUp={() => updateShapeElement(currentPageIndex, shape.id, { strokeWidth: shape.strokeWidth }, true)}
               className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
           </div>
           <ColorPalette

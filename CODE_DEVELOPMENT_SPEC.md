@@ -139,8 +139,14 @@ src/
 
 ### 4.3 历史快照（pushSnapshot）
 
-- 所有改变 pages 的 action **必须在 set 之后调用 `pushSnapshot(get)`**。
-- 连续滑动操作（pan / 调整 / 滤镜强度）使用去重 key：`pushSnapshot(get, 'adj-${pageIndex}-${slotId}')`，300ms 内同 key 合并。
+- 所有改变 pages 且被用户感知为「一次操作」的 action **必须在 set 之后调用 `pushSnapshot(get)`**——含封面设置确认、间距/边距/圆角调整、页面增删改、元素增删/移动等。
+- 连续/滑块类操作统一用 **`recordHistory` 参数**（已替代旧 mergeKey 方案，禁止再用 `pushSnapshot(get, key)`）：
+  - 相关 update 函数签名带 `recordHistory?: boolean`，内部 `if (recordHistory !== false) pushSnapshot(get)`（默认记历史）。
+  - **元素类 update（text/sticky/sticker/shape）必须仅在实际修改到元素时才压快照**（`map` 标记 `changed`）：元素不存在（如切模板/撤销后已被移除，TextDomNode 卸载清理仍会补提交）时不得压「冗余快照」，否则历史栈多出一条无效条目，第一次撤销会恢复到错误状态。
+  - 滑块 `onChange` 传 `recordHistory=false`（拖动实时更新、不入历史），松手 `onPointerUp` 传 `true` 提交一条快照，避免一次拖动刷屏历史。
+  - 覆盖：文字（字号/行距/字距）、形状（圆角/切角/透明度/旋转/描边宽）、照片（亮度/对比度/滤镜强度/旋转/缩放 pan 等）。
+- contentEditable 编辑态（文字/便利贴/水印等）下 `Ctrl+Z`/`Ctrl+Y` **放行给浏览器原生文本撤销/重做**（编辑中撤销字符，退出编辑后再撤销整次操作，PPT 行为）；应用级 undo 仅在非编辑态拦截（`editingTextId` 或 `document.activeElement.isContentEditable` 判定，且**编辑元素必须仍存在于当前页**，残留 `editingTextId` 不拦截、撤销前 `setEditingTextId(null)` 防文字被隐藏渲染）。
+- **切换封面/封底模板必须完整保留用户内容**（applyCoverTemplate/applyBackCoverTemplate 切换分支）：照片编辑属性按 photoId 用 `makePlacementMigrator` + `calcCoverOverrides` 迁移（pan/缩放/裁剪/旋转/滤镜/明暗/阴影，按新旧槽位尺寸重映射 pan）；**场景1 书脊规则**——`spineWidth`/`spineAnchorMm` 沿用旧封面不重置，**`spineColor`/`spineLogoColor` 重置为新模板默认**（底色=`template.spineColor`、logo 色=空=按底色深浅自动黑/白）；书脊文字沿用用户版本；贴纸/便利贴随切换迁移。**场景2 撤销/重做**：切换压一次快照（封面+封底成套），撤销精确还原切换前、重做完整还原切换后。
 - 跨 store 编排（如 photoService）下沉到 services 层，service 内部调用 `pushSnapshot`。
 
 ### 4.4 选区互斥

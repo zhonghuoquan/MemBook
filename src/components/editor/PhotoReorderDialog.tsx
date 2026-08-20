@@ -108,7 +108,6 @@ export function PhotoReorderDialog({ open, onClose }: Props) {
   const { t } = useTranslation();
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const pages = useEditorStore((s) => s.pages);
-  const swapPagePhotoPlacements = useEditorStore((s) => s.swapPagePhotoPlacements);
   const allPhotos = usePhotoStore((s) => s.photos);
   const albumSize = useEditorStore((s) => s.albumSize);
 
@@ -211,14 +210,14 @@ export function PhotoReorderDialog({ open, onClose }: Props) {
   const dragOriginRef = useRef<{ idx: number; startX: number; startY: number } | null>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // 用 ref 镜像 filledItems / currentPageIndex / swapPagePhotoPlacements，
+  // 用 ref 镜像 filledItems / currentPageIndex / swapPagePhotos，
   // 让 mousemove/mouseup 回调读取最新值，同时让 effect 只依赖 dragIndex（不会因 filledItems 重建而反复注册/注销监听）
   const filledItemsRef = useRef(filledItems);
   filledItemsRef.current = filledItems;
   const currentPageIndexRef = useRef(currentPageIndex);
   currentPageIndexRef.current = currentPageIndex;
-  const swapRef = useRef(swapPagePhotoPlacements);
-  swapRef.current = swapPagePhotoPlacements;
+  const swapPhotosRef = useRef(pageLayoutService.swapPagePhotos);
+  swapPhotosRef.current = pageLayoutService.swapPagePhotos;
 
   const handleMouseDown = (e: React.MouseEvent, idx: number) => {
     if (e.button !== 0) return;
@@ -259,7 +258,7 @@ export function PhotoReorderDialog({ open, onClose }: Props) {
         }
         const targetItem = targetFilteredIdx !== null ? items[targetFilteredIdx] : null;
         if (targetItem && targetItem.index !== origin.idx) {
-          swapRef.current(currentPageIndexRef.current, origin.idx, targetItem.index);
+          swapPhotosRef.current(currentPageIndexRef.current, origin.idx, targetItem.index);
         }
       }
       dragOriginRef.current = null;

@@ -59,8 +59,9 @@ export const pageMarginService = {
 /**
  * 封面/封底页的槽位坐标转换：按模板百分比 × 整页像素直接生成 slotOverrides。
  * 不应用 pageMargin，与预设文字/形状的坐标系（整页 mm × MM_TO_PX = 整页像素）保持一致。
+ * 导出供 applyCoverTemplate 切换模板时计算新封面槽位覆盖，迁移照片编辑属性。
  */
-function calcCoverOverrides(
+export function calcCoverOverrides(
   page: AlbumPage,
   albumSize: AlbumSize,
 ): { overrides: Record<string, SlotOverride>; newPage: AlbumPage } | null {
@@ -68,8 +69,8 @@ function calcCoverOverrides(
   if (!template) return null;
   const canvasW = albumSize.width * MM_TO_PX;
   const canvasH = albumSize.height * MM_TO_PX;
-  // 封面页：槽位整体右移书脊宽（mm→px）；封底无书脊（spineWidth=0）
-  const offsetPx = (page.spineWidth ?? 0) * MM_TO_PX;
+  // 封面页：槽位整体右移书脊偏移锚点（mm→px，内容烘焙偏移/折线位置）；封底无书脊（spineWidth=0）
+  const offsetPx = (page.spineAnchorMm ?? page.spineWidth ?? 0) * MM_TO_PX;
   const overrides: Record<string, SlotOverride> = {};
   // 槽位尺寸逐轴适配：某一边全幅（≥95，与页面该边一致）按页面拉伸，否则等比保持模板比例
   const kx = canvasW / 100;

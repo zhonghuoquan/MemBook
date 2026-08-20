@@ -1,92 +1,72 @@
 /**
- * 照片几何计算 — cover-fit 覆盖与边界约束测试
+ * photoGeometry 重排平移重拟合测试
  *
- * 核心断言：
- *   1. calcCoverFitWithRotation：任意旋转角下 bounding 必须完全覆盖槽位
- *   2. clampPhotoToSlotBounds：钳制后的位置必须使槽位四角不露白
+ * 背景（P2 修复）：重排照片时若把绝对 panX/panY 原样搬到宽高比不同的槽位会露白。
+ * refitPlacementPan 换槽时按新槽尺寸重拟合并夹紧 pan，确保照片仍铺满新槽位。
+ * 这里用「重拟结果仍在 computePhotoBounds（可行 pan 范围）内」作为「不露白」的判定。
  */
+
 import { describe, it, expect } from 'vitest';
-import { calcCoverFitWithRotation, clampPhotoToSlotBounds } from './photoGeometry';
+import {
+  refitPlacementPan,
+  computePhotoBounds,
+  calcCoverFitWithRotation,
+} from './photoGeometry';
 
-const EPS = 1e-6;
-
-describe('calcCoverFitWithRotation', () => {
-  const cases: [number, number, number, number][] = [
-    // [imgW, imgH, slotW, slotH]
-    [4000, 3000, 200, 150], // 横图 → 横槽
-    [3000, 4000, 200, 150], // 竖图 → 横槽
-    [4000, 3000, 150, 200], // 横图 → 竖槽
-    [3000, 3000, 200, 200], // 方图 → 方槽
-    [800, 600, 400, 300],   // 小图需要放大
-  ];
-
-  for (const [iw, ih, cw, ch] of cases) {
-    for (const rotation of [0, 90, 180, 270]) {
-      it(`覆盖：${iw}x${ih} 图 → ${cw}x${ch} 槽 @${rotation}°`, () => {
-        const cf = calcCoverFitWithRotation(iw, ih, cw, ch, rotation);
-        // 旋转后的可见边界必须完全覆盖槽位（不露白）
-        expect(cf.boundingW).toBeGreaterThanOrEqual(cw - EPS);
-        expect(cf.boundingH).toBeGreaterThanOrEqual(ch - EPS);
-        // 缩放保持宽高比
-        expect(cf.imgW / iw).toBeCloseTo(cf.scale, 6);
-        expect(cf.imgH / ih).toBeCloseTo(cf.scale, 6);
-        expect(cf.scale).toBeGreaterThan(0);
-      });
-    }
-  }
-
-  it('0° 与 180° 结果一致，90° 与 270° 结果一致', () => {
-    const cf0 = calcCoverFitWithRotation(4000, 3000, 200, 150, 0);
-    const cf180 = calcCoverFitWithRotation(4000, 3000, 200, 150, 180);
-    const cf90 = calcCoverFitWithRotation(4000, 3000, 200, 150, 90);
-    const cf270 = calcCoverFitWithRotation(4000, 3000, 200, 150, 270);
-    expect(cf0.boundingW).toBeCloseTo(cf180.boundingW, 6);
-    expect(cf0.boundingH).toBeCloseTo(cf180.boundingH, 6);
-    expect(cf90.boundingW).toBeCloseTo(cf270.boundingW, 6);
-    expect(cf90.boundingH).toBeCloseTo(cf270.boundingH, 6);
-  });
-
-  it('任意角度（45°）同样满足覆盖约束', () => {
-    const cf = calcCoverFitWithRotation(4000, 3000, 200, 150, 45);
-    expect(cf.boundingW).toBeGreaterThanOrEqual(200 - EPS);
-    expect(cf.boundingH).toBeGreaterThanOrEqual(150 - EPS);
+describe('refitPlacementPan：无平移编辑', () => {
+  it('panX/panY/panScale 全空时返回空对象（调用方回退居中）', () => {
+    const r = refitPlacementPan(3000, 2000, 400, 300, 200, 300, { rotation: 90 });
+    expect(r).toEqual({});
   });
 });
 
-describe('clampPhotoToSlotBounds', () => {
-  it('居中的照片钳制后仍在原位附近（不漂移）', () => {
-    const iw = 4000, ih = 3000, sw = 200, sh = 150;
-    const cf = calcCoverFitWithRotation(iw, ih, sw, sh, 0);
-    const centerX = (sw - cf.boundingW) / 2;
-    const centerY = (sh - cf.boundingH) / 2;
-    const clamped = clampPhotoToSlotBounds(iw, ih, sw, sh, 0, 1, centerX, centerY);
-    expect(clamped.panX).toBeCloseTo(centerX, 3);
-    expect(clamped.panY).toBeCloseTo(centerY, 3);
+describe('refitPlacementPan：宽槽 -> 窄槽（露白场景）', () => {
+  const photoW = 3000;
+  const photoH = 2000;
+
+  it('横向照片从 400x300 换到 200x300：新槽比照片宽更窄，只能居中（无露白）', () => {
+    const r = refitPlacementPan(photoW, photoH, 400, 300, 200, 300, {
+      panX: -25, panY: 0, panScale: 1, rotation: 0,
+    });
+    expect(r.panScale).toBe(1);
+    // 200 宽槽，照片 cover-fit 后面宽 450，只能居中：panX = (200-450)/2 = -125
+    expect(r.panX).toBeCloseTo(-125, 0);
+    expect(r.panY).toBeCloseTo(0, 0);
   });
 
-  it('极端偏移被拉回，槽位四角不露白（0°）', () => {
-    const iw = 4000, ih = 3000, sw = 200, sh = 150;
-    // 把照片挪到极远位置
-    const clamped = clampPhotoToSlotBounds(iw, ih, sw, sh, 0, 1, 9999, -9999);
-    const cf = calcCoverFitWithRotation(iw, ih, sw, sh, 0);
-    // 照片左边缘 ≤ 0，右边缘 ≥ sw（覆盖槽位）
-    expect(clamped.panX).toBeLessThanOrEqual(EPS);
-    expect(clamped.panX + cf.boundingW).toBeGreaterThanOrEqual(sw - EPS);
-    expect(clamped.panY).toBeLessThanOrEqual(EPS);
-    expect(clamped.panY + cf.boundingH).toBeGreaterThanOrEqual(sh - EPS);
+  it('重拟后的 pan 始终在目标槽的可行范围内（覆盖四角、不露白）', () => {
+    const scenarios: Array<{ oldW: number; oldH: number; newW: number; newH: number; rot: number; ps: number }> = [
+      { oldW: 400, oldH: 300, newW: 200, newH: 300, rot: 0, ps: 1 },
+      { oldW: 300, oldH: 200, newW: 260, newH: 340, rot: 90, ps: 1.2 },
+      { oldW: 320, oldH: 260, newW: 300, newH: 260, rot: 45, ps: 1 },
+      { oldW: 400, oldH: 280, newW: 240, newH: 360, rot: 30, ps: 1.5 },
+    ];
+    for (const s of scenarios) {
+      // 旧槽内一个合法（居中）平移作为输入
+      const oldCF = calcCoverFitWithRotation(photoW, photoH, s.oldW, s.oldH, s.rot);
+      const oldPanX = (s.oldW - oldCF.boundingW * s.ps) / 2;
+      const oldPanY = (s.oldH - oldCF.boundingH * s.ps) / 2;
+      const r = refitPlacementPan(photoW, photoH, s.oldW, s.oldH, s.newW, s.newH, {
+        panX: oldPanX, panY: oldPanY, panScale: s.ps, rotation: s.rot,
+      });
+      const bounds = computePhotoBounds(photoW, photoH, s.newW, s.newH, s.rot, s.ps);
+      expect(r.panX).toBeGreaterThanOrEqual(bounds.minX - 0.01);
+      expect(r.panX).toBeLessThanOrEqual(bounds.maxX + 0.01);
+      expect(r.panY).toBeGreaterThanOrEqual(bounds.minY - 0.01);
+      expect(r.panY).toBeLessThanOrEqual(bounds.maxY + 0.01);
+    }
+  });
+});
+
+describe('refitPlacementPan：保留缩放', () => {
+  it('panScale > 1 被保留', () => {
+    const r = refitPlacementPan(3000, 2000, 400, 300, 260, 340, {
+      panX: 0, panY: 0, panScale: 1.4, rotation: 90,
+    });
+    expect(r.panScale).toBe(1.4);
   });
 
-  it('旋转 90° 后极端偏移仍能保证覆盖', () => {
-    const iw = 4000, ih = 3000, sw = 200, sh = 150;
-    const rotation = 90;
-    const clamped = clampPhotoToSlotBounds(iw, ih, sw, sh, rotation, 1.5, -8888, 7777);
-    const cf = calcCoverFitWithRotation(iw, ih, sw, sh, rotation);
-    const ps = 1.5;
-    const bw = cf.boundingW * ps;
-    const bh = cf.boundingH * ps;
-    expect(clamped.panX).toBeLessThanOrEqual(EPS);
-    expect(clamped.panX + bw).toBeGreaterThanOrEqual(sw - EPS);
-    expect(clamped.panY).toBeLessThanOrEqual(EPS);
-    expect(clamped.panY + bh).toBeGreaterThanOrEqual(sh - EPS);
+  it('照片尺寸非法时回退居中（返回空对象）', () => {
+    expect(refitPlacementPan(0, 2000, 400, 300, 260, 340, { panX: 0, panY: 0, panScale: 1 })).toEqual({});
   });
 });

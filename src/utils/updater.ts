@@ -36,6 +36,22 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 const CHECK_COOLDOWN_KEY = 'membook-update-last-check';
 const CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * 已下载/待安装的 Update 句柄。
+ * checkForUpdate 检测到新版后即暂存于此，供后台下载与稍后安装复用，
+ * 避免「检查 → 下载 → 安装」多次重复 check 请求。
+ */
+let pendingUpdate: Update | null = null;
+
+function toInfo(update: Update): UpdateInfo {
+  return {
+    version: update.version,
+    currentVersion: APP_VERSION,
+    date: update.date,
+    body: update.body,
+  };
+}
+
 export interface UpdateInfo {
   version: string;
   currentVersion: string;
@@ -62,17 +78,22 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
       logger.info('[updater] 当前已是最新版本');
       return null;
     }
+    // 暂存句柄，供后台下载 / 稍后安装复用
+    if (pendingUpdate && pendingUpdate !== update) {
+      pendingUpdate.close().catch(() => {});
+    }
+    pendingUpdate = update;
     logger.info(`[updater] 发现新版本 ${update.version}（当前 ${APP_VERSION}）`);
-    return {
-      version: update.version,
-      currentVersion: APP_VERSION,
-      date: update.date,
-      body: update.body,
-    };
+    return toInfo(update);
   } catch (e) {
     logger.warn('[updater] 检查更新失败:', e);
     return null;
   }
+}
+
+/** 取当前暂存（待下载/已下载）更新的展示信息，无则返回 null */
+export function getPendingUpdateInfo(): UpdateInfo | null {
+  return pendingUpdate ? toInfo(pendingUpdate) : null;
 }
 
 /**
@@ -100,37 +121,62 @@ export function markChecked(): void {
 }
 
 /**
- * 下载并安装更新。
+ * 后台下载已检测到的新版更新包（只下载，不安装）。
+ * 下载完成后调用 installPrepared() 才会真正安装并重启。
  * @param onProgress 下载进度回调
  */
-export async function downloadAndInstall(
+export async function startAutoDownload(
   onProgress?: (p: UpdateProgress) => void,
-): Promise<void> {
+): Promise<UpdateInfo | null> {
+  if (!isTauri || !pendingUpdate) return null;
+
+  try {
+    const update = pendingUpdate;
+    let total = 0;
+    let downloaded = 0;
+
+    await update.download((event: DownloadEvent) => {
+      switch (event.event) {
+        case 'Started':
+          total = event.data.contentLength ?? 0;
+          onProgress?.({ phase: 'downloading', downloaded: 0, total });
+          break;
+        case 'Progress':
+          downloaded += event.data.chunkLength;
+          onProgress?.({ phase: 'downloading', downloaded, total });
+          break;
+        case 'Finished':
+          onProgress?.({ phase: 'done', downloaded: total, total });
+          break;
+      }
+    });
+
+    return toInfo(update);
+  } catch (e) {
+    logger.warn('[updater] 后台下载失败:', e);
+    throw e;
+  }
+}
+
+/**
+ * 安装已下载好的更新并重启应用。
+ * 应在 startAutoDownload 成功后用户确认时调用。
+ */
+export async function installPrepared(): Promise<void> {
   if (!isTauri) throw new Error('自动更新仅在桌面端可用');
+  if (!pendingUpdate) throw new Error('没有已下载的更新');
 
-  const update = await check();
-  if (!update) throw new Error('没有可用更新');
-
-  let total = 0;
-  let downloaded = 0;
-
-  await update.downloadAndInstall((event: DownloadEvent) => {
-    switch (event.event) {
-      case 'Started':
-        total = event.data.contentLength ?? 0;
-        onProgress?.({ phase: 'downloading', downloaded: 0, total });
-        break;
-      case 'Progress':
-        downloaded += event.data.chunkLength;
-        onProgress?.({ phase: 'downloading', downloaded, total });
-        break;
-      case 'Finished':
-        onProgress?.({ phase: 'installing', downloaded: total, total });
-        break;
-    }
-  });
-
-  onProgress?.({ phase: 'done' });
+  const update = pendingUpdate;
+  try {
+    await update.install();
+  } catch (e) {
+    logger.error('[updater] 安装更新失败:', e);
+    throw e;
+  } finally {
+    pendingUpdate.close().catch(() => {});
+    pendingUpdate = null;
+  }
+  await relaunchApp();
 }
 
 /**
@@ -144,36 +190,6 @@ export async function relaunchApp(): Promise<void> {
     logger.error('[updater] 重启失败:', e);
     throw e;
   }
-}
-
-/**
- * 从 Update 对象直接下载安装（用于已有 Update 引用的场景）。
- * 保留 downloadAndInstall 作为简化版本，此方法暴露完整控制。
- */
-export async function installUpdate(
-  update: Update,
-  onProgress?: (p: UpdateProgress) => void,
-): Promise<void> {
-  let total = 0;
-  let downloaded = 0;
-
-  await update.downloadAndInstall((event: DownloadEvent) => {
-    switch (event.event) {
-      case 'Started':
-        total = event.data.contentLength ?? 0;
-        onProgress?.({ phase: 'downloading', downloaded: 0, total });
-        break;
-      case 'Progress':
-        downloaded += event.data.chunkLength;
-        onProgress?.({ phase: 'downloading', downloaded, total });
-        break;
-      case 'Finished':
-        onProgress?.({ phase: 'installing', downloaded: total, total });
-        break;
-    }
-  });
-
-  onProgress?.({ phase: 'done' });
 }
 
 /** 导出 Update 类型供组件使用 */

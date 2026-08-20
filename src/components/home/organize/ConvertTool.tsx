@@ -15,7 +15,7 @@ import {
   convertToJpg,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, RangeSlider, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, downloadBlob, estimateJpgSize, formatBytes, RangeSlider, ThumbImage, useLazyList, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -93,6 +93,10 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
   const selectedPhotos = filteredPhotos.filter((p) => !deselectedIds.has(p.id));
   const allSelected =
     filteredPhotos.length > 0 && filteredPhotos.every((p) => !deselectedIds.has(p.id));
+
+  // 照片选择网格 + 文件预览列表懒加载（初始一批，滚动到底自动追加，最终全部可展示）
+  const gridList = useLazyList(filteredPhotos.length, 200);
+  const previewList = useLazyList(selectedPhotos.length, 50);
 
   const handleExecute = async () => {
     if (selectedPhotos.length === 0) return;
@@ -230,7 +234,7 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
                 </div>
               </div>
               <div className="grid gap-1.5 max-h-[280px] overflow-y-auto overflow-x-hidden p-0.5 custom-scrollbar" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}>
-                {filteredPhotos.map((p) => {
+                {filteredPhotos.slice(0, gridList.visibleCount).map((p) => {
                   const selected = !deselectedIds.has(p.id);
                   return (
                     <div
@@ -262,6 +266,8 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
                     </div>
                   );
                 })}
+                {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
+                {gridList.visibleCount < filteredPhotos.length && <div ref={gridList.sentinelRef} className="h-1" />}
               </div>
             </div>
           )}
@@ -289,9 +295,9 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
             </label>
           )}
 
-          {/* 文件列表预览（含原大小 + 预估 JPG 大小） */}
+          {/* 文件列表预览（含原大小 + 预估 JPG 大小，懒加载） */}
           <div className="max-h-[200px] overflow-y-auto overflow-x-hidden space-y-1 pr-1 custom-scrollbar">
-            {selectedPhotos.slice(0, 20).map((p) => {
+            {selectedPhotos.slice(0, previewList.visibleCount).map((p) => {
               const estSize = estimateJpgSize(p.size, p.ext, quality);
               const isExpanding = estSize > p.size;
               return (
@@ -306,9 +312,8 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
                 </div>
               );
             })}
-            {selectedPhotos.length > 20 && (
-              <div className="text-xs text-center text-[var(--color-gray-400)] py-1">{t('home.organize.convert.moreFiles', { count: selectedPhotos.length - 20 })}</div>
-            )}
+            {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
+            {previewList.visibleCount < selectedPhotos.length && <div ref={previewList.sentinelRef} className="h-1" />}
             {/* 汇总：原总大小 → 预估总大小 */}
             {selectedPhotos.length > 0 && (
               <div className="text-xs px-2 py-1.5 rounded bg-[var(--color-brand-bg)] text-[var(--color-brand)] flex items-center gap-2 font-[600] mt-1">

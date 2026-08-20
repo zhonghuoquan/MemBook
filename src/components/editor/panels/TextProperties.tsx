@@ -3,16 +3,23 @@
  * 顶部标签切换：基础设置 / 颜色，避免颜色区占用过多高度。
  * 传入选中的文字元素 el；store 的 currentPageIndex / updateTextElement 在组件内读取。
  */
-import { useState } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../../store';
 import type { PageTextElement } from '../../../types';
 import { ColorPalette } from '../tools/ColorPalette';
 import { gradientToCss } from '../../../constants/colorPalette';
+import {
+  filterByAvailability,
+  detectExtraSystemFonts,
+  queryInstalledFontFamilies,
+} from '../../../utils/availableFonts';
+import { FontFamilySelect } from '../tools/FontFamilySelect';
 
-/** 文字字体列表：中文在上、英文在下，各按常用度排序。
- * 系统字体（中文 12 + 英文 8）直接写字体名，系统已装则正常显示、未装则回退默认字体；
- * 艺术字体（中文 8 + 英文 7 + 自备英文 12）已打包进 src/assets/fonts，经 src/styles/fonts.css @font-face 加载，离线可用。 */
+/** 文字字体列表（基础名单）：中文在上、英文在下，各按常用度排序。
+ * 系统字体项在渲染下拉时会按本机可用性过滤（没装就不显示）；
+ * 艺术字体（已打包进 src/assets/fonts，经 fonts.css @font-face 加载）恒显示；
+ * 并叠加「额外常见系统字体」探测结果 + 「系统全部已装字体」（Local Font Access）。 */
 export const TEXT_FONT_FAMILIES = [
   // ══ 中文（上） ══
   // ── 常用中文字体 12 种（系统自带） ──
@@ -94,6 +101,30 @@ export function TextProperties({ el }: { el: PageTextElement }) {
     { key: 'color', label: t('editor.tools.textTabColor') },
   ];
 
+  // ── 可用字体列表（A+B 方案） ──
+  // A：基础名单过滤（内置艺术恒显 + 系统项按本机可用性过滤）+ 额外常见系统字体探测
+  const baseFiltered = useMemo(() => filterByAvailability(TEXT_FONT_FAMILIES), []);
+  const [extraSystem, setExtraSystem] = useState<string[]>([]);
+  // B：Local Font Access 枚举的全部已装字体（在 select 聚焦用户手势中触发，可能一次性授权）
+  const [localFonts, setLocalFonts] = useState<string[]>([]);
+  const localFontsLoadedRef = useRef(false);
+  useEffect(() => {
+    setExtraSystem(detectExtraSystemFonts());
+  }, []);
+  const handleFontFocus = () => {
+    if (localFontsLoadedRef.current) return;
+    localFontsLoadedRef.current = true;
+    // 异步枚举全部已装字体；失败/拒绝则保持仅 A 的结果
+    queryInstalledFontFamilies().then(setLocalFonts).catch(() => {});
+  };
+  const fontList = useMemo(() => {
+    const list = [...baseFiltered, ...extraSystem];
+    for (const f of localFonts) if (!list.includes(f)) list.push(f);
+    // 当前选中的字体即便未探测到也补上，避免下拉失控回退
+    if (el.fontFamily && !list.includes(el.fontFamily)) list.push(el.fontFamily);
+    return list;
+  }, [baseFiltered, extraSystem, localFonts, el.fontFamily]);
+
   return (
     <div className="space-y-3">
       {/* 标签切换 */}
@@ -116,12 +147,13 @@ export function TextProperties({ el }: { el: PageTextElement }) {
           {/* 字体 */}
           <div>
             <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.fontFamily')}</div>
-            <select value={el.fontFamily} onChange={(e) => updateTextElement(currentPageIndex, el.id, { fontFamily: e.target.value })}
-              className="w-full h-7 px-2 border border-[var(--color-border)] rounded-lg text-[11px] bg-white cursor-pointer outline-none transition-colors focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand)]/15">
-              {TEXT_FONT_FAMILIES.map((f) => (
-                <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
-              ))}
-            </select>
+            <FontFamilySelect
+              value={el.fontFamily}
+              fontList={fontList}
+              localFonts={localFonts}
+              onOpen={handleFontFocus}
+              onChange={(family) => updateTextElement(currentPageIndex, el.id, { fontFamily: family })}
+            />
           </div>
           {/* 字号（slider + 数字输入联动） */}
           <div>
@@ -138,7 +170,8 @@ export function TextProperties({ el }: { el: PageTextElement }) {
               </div>
             </div>
             <input type="range" min={8} max={72} value={el.fontSize}
-              onChange={(e) => updateTextElement(currentPageIndex, el.id, { fontSize: Math.max(1, Math.min(999, +e.target.value || 12)) })}
+              onChange={(e) => updateTextElement(currentPageIndex, el.id, { fontSize: Math.max(1, Math.min(999, +e.target.value || 12)) }, false)}
+              onPointerUp={() => updateTextElement(currentPageIndex, el.id, { fontSize: el.fontSize }, true)}
               className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
           </div>
           {/* 行间距（横排=行高倍数，竖排=列间距倍数） */}
@@ -148,7 +181,8 @@ export function TextProperties({ el }: { el: PageTextElement }) {
               <span className="font-[600] tabular-nums">{(el.lineHeight ?? 1.2).toFixed(1)}</span>
             </div>
             <input type="range" min={0.6} max={3} step={0.1} value={el.lineHeight ?? 1.2}
-              onChange={(e) => updateTextElement(currentPageIndex, el.id, { lineHeight: +e.target.value })}
+              onChange={(e) => updateTextElement(currentPageIndex, el.id, { lineHeight: +e.target.value }, false)}
+              onPointerUp={() => updateTextElement(currentPageIndex, el.id, { lineHeight: el.lineHeight ?? 1.2 }, true)}
               className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
           </div>
           {/* 字间距（横排=水平字符间距，竖排=垂直字符间距） */}
@@ -158,7 +192,8 @@ export function TextProperties({ el }: { el: PageTextElement }) {
               <span className="font-[600] tabular-nums">{el.letterSpacing ?? 0}px</span>
             </div>
             <input type="range" min={0} max={20} step={1} value={el.letterSpacing ?? 0}
-              onChange={(e) => updateTextElement(currentPageIndex, el.id, { letterSpacing: +e.target.value })}
+              onChange={(e) => updateTextElement(currentPageIndex, el.id, { letterSpacing: +e.target.value }, false)}
+              onPointerUp={() => updateTextElement(currentPageIndex, el.id, { letterSpacing: el.letterSpacing ?? 0 }, true)}
               className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
           </div>
           {/* 加粗 / 斜体 */}
@@ -174,16 +209,16 @@ export function TextProperties({ el }: { el: PageTextElement }) {
               <span className="italic">I</span> {t('editor.tools.italic')}
             </button>
           </div>
-          {/* 对齐 */}
+          {/* 水平对齐 */}
           <div>
             <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.align')}</div>
             <div className="flex gap-1.5">
               {([
-                { key: 'left' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="2" y1="7" x2="9" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-                { key: 'center' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="4" y1="7" x2="10" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-                { key: 'right' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="5" y1="7" x2="12" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
-              ]).map(({ key, icon }) => (
-                <button key={key} title={key}
+                { key: 'left' as const, title: t('editor.tools.alignLeft'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="2" y1="7" x2="9" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
+                { key: 'center' as const, title: t('editor.tools.alignCenter'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="4" y1="7" x2="10" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
+                { key: 'right' as const, title: t('editor.tools.alignRight'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="2" y1="3" x2="12" y2="3"/><line x1="5" y1="7" x2="12" y2="7"/><line x1="2" y1="11" x2="12" y2="11"/></svg> },
+              ]).map(({ key, title, icon }) => (
+                <button key={key} title={title}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => updateTextElement(currentPageIndex, el.id, { align: key })}
                   className={`flex-1 flex items-center justify-center py-1.5 rounded-[var(--radius-sm)] border cursor-pointer transition-colors
@@ -198,11 +233,11 @@ export function TextProperties({ el }: { el: PageTextElement }) {
             <div className="text-[10px] font-[500] text-[var(--color-gray-500)] mb-1">{t('editor.tools.verticalAlign')}</div>
             <div className="flex gap-1.5">
               {([
-                { key: 'top' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="2" x2="12" y2="2"/><line x1="3" y1="6" x2="9" y2="6"/><line x1="3" y1="10" x2="12" y2="10"/></svg> },
-                { key: 'center' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="3" x2="12" y2="3"/><line x1="3" y1="7" x2="9" y2="7"/><line x1="3" y1="11" x2="12" y2="11"/></svg> },
-                { key: 'bottom' as const, icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="12" x2="12" y2="12"/><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="12" y2="8"/></svg> },
-              ]).map(({ key, icon }) => (
-                <button key={key} title={key}
+                { key: 'top' as const, title: t('editor.tools.alignTop'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="2" x2="12" y2="2"/><line x1="3" y1="6" x2="9" y2="6"/><line x1="3" y1="10" x2="12" y2="10"/></svg> },
+                { key: 'center' as const, title: t('editor.tools.alignMiddle'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="3" x2="12" y2="3"/><line x1="3" y1="7" x2="9" y2="7"/><line x1="3" y1="11" x2="12" y2="11"/></svg> },
+                { key: 'bottom' as const, title: t('editor.tools.alignBottom'), icon: <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3"><line x1="3" y1="2" x2="3" y2="12"/><line x1="3" y1="12" x2="12" y2="12"/><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="12" y2="8"/></svg> },
+              ]).map(({ key, title, icon }) => (
+                <button key={key} title={title}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => updateTextElement(currentPageIndex, el.id, { verticalAlign: key })}
                   className={`flex-1 flex items-center justify-center py-1.5 rounded-[var(--radius-sm)] border cursor-pointer transition-colors

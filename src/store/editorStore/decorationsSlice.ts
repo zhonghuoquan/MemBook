@@ -50,18 +50,20 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
     pushSnapshot(get);
   },
   updateStickyNote: (pageIndex, noteId, patch, recordHistory?: boolean) => {
+    let changed = false;
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
-      newPages[pageIndex] = {
-        ...newPages[pageIndex],
-        stickyNotes: (newPages[pageIndex].stickyNotes || []).map((n) =>
-          n.id === noteId ? { ...n, ...patch } : n,
-        ),
-      };
+      const stickyNotes = (newPages[pageIndex].stickyNotes || []).map((n) => {
+        if (n.id === noteId) { changed = true; return { ...n, ...patch }; }
+        return n;
+      });
+      // 元素不存在（如切模板/撤销后已移除）：不修改也不压快照，避免「冗余快照」导致撤销错位
+      if (!changed) return s;
+      newPages[pageIndex] = { ...newPages[pageIndex], stickyNotes };
       return { pages: newPages };
     });
-    if (recordHistory !== false) pushSnapshot(get);
+    if (changed && recordHistory !== false) pushSnapshot(get);
   },
   removeStickyNote: (pageIndex, noteId) => {
     set((s) => {
@@ -92,18 +94,20 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
     pushSnapshot(get);
   },
   updateTextElement: (pageIndex, elId, patch, recordHistory?: boolean) => {
+    let changed = false;
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
-      newPages[pageIndex] = {
-        ...newPages[pageIndex],
-        textElements: (newPages[pageIndex].textElements || []).map((el) =>
-          el.id === elId ? { ...el, ...patch } : el,
-        ),
-      };
+      const textElements = (newPages[pageIndex].textElements || []).map((el) => {
+        if (el.id === elId) { changed = true; return { ...el, ...patch }; }
+        return el;
+      });
+      // 元素不存在（如切模板/撤销后已移除）：不修改也不压快照，避免「冗余快照」导致撤销错位
+      if (!changed) return s;
+      newPages[pageIndex] = { ...newPages[pageIndex], textElements };
       return { pages: newPages };
     });
-    if (recordHistory !== false) pushSnapshot(get);
+    if (changed && recordHistory !== false) pushSnapshot(get);
   },
   removeTextElement: (pageIndex, elId) => {
     set((s) => {
@@ -134,18 +138,20 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
     pushSnapshot(get);
   },
   updateStickerElement: (pageIndex, stickerId, patch, recordHistory?: boolean) => {
+    let changed = false;
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
-      newPages[pageIndex] = {
-        ...newPages[pageIndex],
-        stickerElements: (newPages[pageIndex].stickerElements || []).map((st) =>
-          st.id === stickerId ? { ...st, ...patch } : st,
-        ),
-      };
+      const stickerElements = (newPages[pageIndex].stickerElements || []).map((st) => {
+        if (st.id === stickerId) { changed = true; return { ...st, ...patch }; }
+        return st;
+      });
+      // 元素不存在（如切模板/撤销后已移除）：不修改也不压快照，避免「冗余快照」导致撤销错位
+      if (!changed) return s;
+      newPages[pageIndex] = { ...newPages[pageIndex], stickerElements };
       return { pages: newPages };
     });
-    if (recordHistory !== false) pushSnapshot(get);
+    if (changed && recordHistory !== false) pushSnapshot(get);
   },
   removeStickerElement: (pageIndex, stickerId) => {
     set((s) => {
@@ -176,18 +182,20 @@ export const createDecorationsSlice: EditorSlice<DecorationsSlice> = (set, get) 
     pushSnapshot(get);
   },
   updateShapeElement: (pageIndex, shapeId, patch, recordHistory?: boolean) => {
+    let changed = false;
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
-      newPages[pageIndex] = {
-        ...newPages[pageIndex],
-        shapeElements: (newPages[pageIndex].shapeElements || []).map((sh) =>
-          sh.id === shapeId ? { ...sh, ...patch } : sh,
-        ),
-      };
+      const shapeElements = (newPages[pageIndex].shapeElements || []).map((sh) => {
+        if (sh.id === shapeId) { changed = true; return { ...sh, ...patch }; }
+        return sh;
+      });
+      // 元素不存在（如切模板/撤销后已移除）：不修改也不压快照，避免「冗余快照」导致撤销错位
+      if (!changed) return s;
+      newPages[pageIndex] = { ...newPages[pageIndex], shapeElements };
       return { pages: newPages };
     });
-    if (recordHistory !== false) pushSnapshot(get);
+    if (changed && recordHistory !== false) pushSnapshot(get);
   },
   removeShapeElement: (pageIndex, shapeId) => {
     set((s) => {

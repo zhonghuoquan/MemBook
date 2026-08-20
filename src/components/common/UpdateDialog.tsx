@@ -1,26 +1,18 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  downloadAndInstall, relaunchApp,
-  markChecked, type UpdateInfo, type UpdateProgress,
+  installPrepared, markChecked, type UpdateInfo,
 } from '../../utils/updater';
 import { captureError } from '../../utils/sentry';
-import { useUIStore } from '../../store';
 
 interface UpdateDialogProps {
-  /** 初始更新信息（由 App 启动时检查传入） */
+  /** 已下载完成、待安装的更新信息（由 App 后台自动下载后传入） */
   update: UpdateInfo | null;
   /** 关闭弹窗 */
   onClose: () => void;
 }
 
-type Phase = 'idle' | 'downloading' | 'done' | 'error';
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+type Phase = 'idle' | 'installing' | 'error';
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return '—';
@@ -32,39 +24,28 @@ function formatDate(dateStr?: string): string {
 }
 
 /**
- * 更新提示弹窗：展示新版本信息，支持下载安装进度与重启。
+ * 更新提示弹窗：新版本已后台下载完成，展示版本信息，用户确认后安装并重启。
+ * 安装由 installPrepared() 完成（内含 relaunch），仅保留 idle/installing/error 三态。
  */
 export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
   const { t } = useTranslation();
-  const addToast = useUIStore((s) => s.addToast);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleDownload = useCallback(async () => {
-    setPhase('downloading');
+  // 安装已后台下载好的新版并重启（installPrepared 内含 relaunch）
+  const handleInstall = useCallback(async () => {
+    setPhase('installing');
     setError(null);
     try {
-      await downloadAndInstall((p) => {
-        setProgress(p);
-        if (p.phase === 'installing') setPhase('done');
-      });
-      setPhase('done');
+      await installPrepared();
+      setPhase('idle');
     } catch (e) {
       const msg = (e as Error).message || String(e);
       setError(msg);
       setPhase('error');
-      captureError(e as Error, { context: 'update_download' });
+      captureError(e as Error, { context: 'update_install' });
     }
   }, []);
-
-  const handleInstallAndRestart = useCallback(async () => {
-    try {
-      await relaunchApp();
-    } catch (e) {
-      addToast({ type: 'error', message: t('updater.updateFailed', { message: (e as Error).message }) });
-    }
-  }, [addToast, t]);
 
   const handleRemindLater = useCallback(() => {
     markChecked();
@@ -72,10 +53,6 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
   }, [onClose]);
 
   if (!update) return null;
-
-  const pct = progress?.total && (progress.total ?? 0) > 0
-    ? Math.min(100, Math.round(((progress.downloaded ?? 0) / (progress.total as number)) * 100))
-    : 0;
 
   return (
     <div
@@ -140,33 +117,15 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
             </div>
           )}
 
-          {/* 下载进度条 */}
-          {phase === 'downloading' && progress && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[12px] text-[var(--color-text-secondary)]">
-                <span>{t('updater.downloading')}</span>
-                <span className="font-mono">{pct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-[var(--color-surface-raised)] overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-[var(--color-primary-500)] to-[var(--color-primary-600)] transition-all duration-200 rounded-full"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              {(progress.total ?? 0) > 0 && (
-                <div className="text-[11px] text-[var(--color-text-tertiary)] text-right font-mono">
-                  {formatBytes(progress.downloaded ?? 0)} / {formatBytes(progress.total ?? 0)}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 安装完成提示 */}
-          {phase === 'done' && (
-            <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-success-light)] border border-[var(--color-success)]/30">
-              <p className="text-[13px] text-[var(--color-text-primary)] leading-relaxed">
-                {t('updater.updateComplete')}
-              </p>
+          {/* 正在安装 */}
+          {phase === 'installing' && (
+            <div className="flex items-center gap-3 p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-[var(--color-primary-600)] animate-spin">
+                <path d="M21 12a9 9 0 11-6.2-8.5" strokeLinecap="round" />
+              </svg>
+              <span className="text-[13px] text-[var(--color-text-secondary)]">
+                {t('updater.installing')}
+              </span>
             </div>
           )}
 
@@ -193,39 +152,26 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
                 {t('updater.remindLater')}
               </button>
               <button
-                onClick={handleDownload}
+                onClick={handleInstall}
                 className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
                            bg-gradient-to-r from-[var(--color-primary-600)] to-[var(--color-primary-700)]
                            text-white border-none
                            hover:opacity-90 transition-opacity cursor-pointer
                            shadow-sm"
               >
-                {t('updater.downloadNow')}
+                {t('updater.installAndRestart')}
               </button>
             </>
           )}
 
-          {phase === 'downloading' && (
+          {phase === 'installing' && (
             <button
               disabled
               className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
                          bg-[var(--color-surface-raised)] text-[var(--color-text-tertiary)]
                          border border-[var(--color-border)] cursor-not-allowed"
             >
-              {t('updater.downloading')}
-            </button>
-          )}
-
-          {phase === 'done' && (
-            <button
-              onClick={handleInstallAndRestart}
-              className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
-                         bg-gradient-to-r from-[var(--color-primary-600)] to-[var(--color-primary-700)]
-                         text-white border-none
-                         hover:opacity-90 transition-opacity cursor-pointer
-                         shadow-sm"
-            >
-              {t('updater.installAndRestart')}
+              {t('updater.installing')}
             </button>
           )}
 
@@ -240,7 +186,7 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
                 {t('common.close')}
               </button>
               <button
-                onClick={handleDownload}
+                onClick={handleInstall}
                 className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
                            bg-gradient-to-r from-[var(--color-primary-600)] to-[var(--color-primary-700)]
                            text-white border-none

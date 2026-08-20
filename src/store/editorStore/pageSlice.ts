@@ -1,13 +1,14 @@
 import type { AlbumPage, SlotLayout, PresetTextElement, PresetShapeElement, PageTextElement, ShapeElement, BackgroundApply } from '../../types';
 import { DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, findTemplateById, isCoverPage, isBackCoverPage, isCoverOrBackCoverPage } from '../../types';
 import { pageLayoutService } from '../../services/pageLayoutService';
-import { pageMarginService } from '../../services/pageMarginService';
-import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ } from './helpers';
+import { pageMarginService, calcCoverOverrides } from '../../services/pageMarginService';
+import { dirtyMarginPageIds, pushSnapshot, getGlobalMaxZ, makePlacementMigrator } from './helpers';
 import { findCoverTemplateById } from '../../types/cover-templates';
 import { DEFAULT_SPINE_WIDTH_MM } from '../../components/editor/canvas/constants';
 import { fitTextSize } from '../../components/editor/canvas/TextDomNode';
 import { coverElementSize, coverAnchorPosition, isMaskShape } from '../../utils/coverScale';
 import { createDefaultCoverPhotos } from '../../utils/coverPresetPhoto';
+import { SPINE_DATE_BOTTOM_MM } from '../../utils/sharedRender';
 import { usePhotoStore } from '../photoStore';
 import type { EditorSlice, PageSlice } from './types';
 
@@ -167,7 +168,11 @@ function buildSpineElements(
   const centerX = spineWidth / 2;
   // 竖排文本：盒宽与普通竖排文字一致（单列宽度 = 字号+6，与 fitTextSize 一致），贴合文字列；
   // 高度按内容（每字 字号+2 + 上下内边距）自适应。保证控制器(选框)与编辑输入框尺寸一致、不超出书脊。
-  const mk = (id: string, centerY: number, text: string, fontSize: number, h: number): PageTextElement => {
+  const mk = (
+    id: string, centerY: number, text: string, fontSize: number, h: number,
+    align: 'left' | 'center' | 'right' = 'center',
+    verticalAlign?: 'top' | 'center' | 'bottom',
+  ): PageTextElement => {
     const boxW = Math.min(fontSize + 6, spineWidth);
     return {
       id: `spine-text-${id}-${Date.now().toString(36)}`,
@@ -177,9 +182,11 @@ function buildSpineElements(
       height: h,
       text,
       fontSize,
-      fontFamily: "'Helvetica Neue', Arial, sans-serif",
+      // 书脊文字默认字体 = 应用默认字体 思源黑体（与新建文字元素一致）
+      fontFamily: '思源黑体',
       color: 'rgba(60,60,70,0.9)',
-      align: 'center',
+      align,
+      verticalAlign,
       bold: false,
       italic: false,
       // 书脊文字：isVertical 已逐字正立竖排（自上而下），不另旋转；若再加 -90 会把正立字旋转成横躺导致角度错误
@@ -190,19 +197,17 @@ function buildSpineElements(
   };
 
   const els: PageTextElement[] = [];
-  // 顶部 MemBook logo 水印的顶边距（mm）：与画布渲染一致（logo 顶部 y = spineWidth*0.7）
-  // 底部日期以此为基准，使其底边距与顶部 logo 顶边距高度一致，上下对称。
-  const logoTopOffset = spineWidth * 0.7;
   // 相册名：放在画册纵向中线上（页高 50%），高度按内容增长，至少容纳 50mm
   const nameFs = 9;
   const nameH = Math.max(50, albumName.length * (nameFs + 2) + 8);
   els.push(mk('name', pageHeight * 0.5, albumName, nameFs, nameH));
-  // 日期：放到底部书脊，底边距与顶部 logo 顶边距一致（页高 - logoTopOffset - 盒高/2）
+  // 日期：放到底部书脊，底边距固定 15mm（与顶部 logo 顶边距 SPINE_LOGO_TOP_MM=15 镜像对称）；
+  // 水平居中 + 垂直底部对齐（基于文本框，竖排语义：align=水平、verticalAlign=垂直）
   if (dateRange) {
     const dateFs = 8;
     const dateH = Math.max(20, dateRange.length * (dateFs + 2) + 8);
-    const dateCenterY = pageHeight - logoTopOffset - dateH / 2;
-    els.push(mk('date', dateCenterY, dateRange, dateFs, dateH));
+    const dateCenterY = pageHeight - SPINE_DATE_BOTTOM_MM - dateH / 2;
+    els.push(mk('date', dateCenterY, dateRange, dateFs, dateH, 'center', 'bottom'));
   }
   return els;
 }
@@ -512,11 +517,17 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
     const photos = await ensureCoverSlotPhotos(template.slots.length);
     const dateRange = deriveDateRange(photos);
 
-    // 书脊为封面页左侧物理扩展：默认宽度 + 模板默认书脊色
-    const spineWidth = DEFAULT_SPINE_WIDTH_MM;
+    // 书脊为封面页左侧物理扩展。切换模板时按场景1规则处理（2026-08-19）：
+    // 书脊宽度/锚点沿用旧封面（用户调整过的不重置）；但书脊底色/logo 色重置为新模板默认——
+    // 底色=template.spineColor，logo 色=空（undefined 按底色深浅自动黑/白），不沿用旧封面
+    const oldCoverInfo = get().pages.find((p) => p.pageKind === 'cover');
+    const spineWidth = oldCoverInfo?.spineWidth ?? DEFAULT_SPINE_WIDTH_MM;
     const spineColor = template.spineColor;
+    const spineLogoColor: string | undefined = undefined;
     // 封面正面内容整体右移书脊宽度（印刷一体：书脊背面与封面正面连续，无视觉间隙），书脊背面在左侧
     const contentOffset = spineWidth;
+    // 书脊偏移锚点 = 内容烘焙的偏移量（折线位置）。书脊宽度后续调整时内容不再移动，渲染按 (书脊宽-锚点) 偏移
+    const spineAnchorMm = oldCoverInfo?.spineAnchorMm ?? oldCoverInfo?.spineWidth ?? contentOffset;
 
     // 预设元素落位（百分比→mm，正文整体右移 contentOffset）
     const textElements = presetTextToPageElements(template.presetTextElements, pageMm, albumName, dateRange, contentOffset);
@@ -539,7 +550,9 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       placements,
       background: template.presetBackground ?? '#FFFFFF',
       spineWidth,
+      spineAnchorMm,
       spineColor,
+      spineLogoColor,
       slotCornerRadius: template.slotCornerRadius ?? 4,
       // 照片槽位置顶于装饰形状之上（COVER_Z.photo > decoration），避免被形状遮挡
       slotZIndices: Object.fromEntries(template.slots.map((s) => [s.id, COVER_Z.photo])),
@@ -552,7 +565,7 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       const newPages = [...s.pages];
       let coverIdx: number;
       if (hasCover) {
-        // 切换封面模板：保留已填照片 + 用户编辑的文字/形状
+        // 切换封面模板：完整保留用户内容——照片（含编辑属性按 photoId 迁移）+ 用户文字/形状 + 贴纸/便利贴 + 书脊设置
         const oldCover = newPages.find((p) => p.pageKind === 'cover')!;
         const oldPhotoIds = oldCover.placements
           .filter((pl) => pl.photoId)
@@ -562,21 +575,37 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         const usedIds = new Set(oldPhotoIds);
         const extraPhotoIds = photos.filter((p) => !usedIds.has(p.id)).map((p) => p.id);
         const newPhotoIds = [...oldPhotoIds, ...extraPhotoIds];
-        newPage.placements = template.slots.map((slot, i) => ({
-          slotId: slot.id,
-          photoId: newPhotoIds[i] ?? null,
-        }));
+        // 照片编辑属性迁移：按 photoId 用 makePlacementMigrator 保留 pan/缩放/裁剪/旋转/滤镜/明暗/阴影，
+        // 并按新旧槽位尺寸重映射 pan（避免切换模板后照片调整归零，2026-08-19）
+        const photoMap = new Map(photos.map((p) => [p.id, p]));
+        const migratePlacement = makePlacementMigrator(oldCover.placements, oldCover.slotOverrides ?? {}, photoMap);
+        const newCoverOverrides = size ? calcCoverOverrides(newPage, size)?.overrides ?? {} : {};
+        const oldPlByPhoto = new Map(oldCover.placements.filter((pl) => pl.photoId).map((pl) => [pl.photoId!, pl]));
+        newPage.placements = template.slots.map((slot, i) => {
+          const photoId = newPhotoIds[i] ?? null;
+          if (!photoId) return { slotId: slot.id, photoId: null };
+          const migrated = migratePlacement(photoId, slot.id, newCoverOverrides[slot.id] ?? { x: 0, y: 0, width: 0, height: 0 });
+          if (oldPlByPhoto.get(photoId)?.shadow) migrated.shadow = true;
+          return migrated;
+        });
+        // 书脊文字：保留旧封面版本（用户可能改过相册名/日期，且已按保留的书脊宽居中）；
+        // 旧封面无书脊文字时回退用新模板生成的书脊文字（书脊宽沿用旧值，居中一致）
+        const oldSpineTexts = (oldCover.textElements || []).filter((el) => el.id.startsWith('spine-text-'));
+        const keepSpineTexts = oldSpineTexts.length > 0 ? oldSpineTexts : spineElements;
         // 保留旧封面用户编辑的文字（排除书脊自动生成元素 + 模板预设文字）
-        const oldTextElements = (oldCover.textElements || []).filter(
+        const oldUserTexts = (oldCover.textElements || []).filter(
           (el) => !el.id.startsWith('spine-text-') && !el.id.startsWith('cover-text-'),
         );
         // 保留旧封面用户添加的形状（排除模板预设形状）
         const oldShapeElements = (oldCover.shapeElements || []).filter(
           (el) => !el.id.startsWith('cover-shape-'),
         );
-        // 合并：书脊 + 新模板预设文字 + 旧封面用户文字 + 新模板预设形状 + 旧封面用户形状
-        newPage.textElements = [...spineElements, ...textElements, ...oldTextElements];
-        newPage.shapeElements = [...shapeElements, ...oldShapeElements];
+        // 合并：旧书脊文字 + 用户文字 + 新模板预设文字 + 用户形状 + 新模板预设形状
+        newPage.textElements = [...keepSpineTexts, ...oldUserTexts, ...textElements];
+        newPage.shapeElements = [...oldShapeElements, ...shapeElements];
+        // 贴纸/便利贴随切换保留
+        newPage.stickerElements = [...(oldCover.stickerElements || [])];
+        newPage.stickyNotes = [...(oldCover.stickyNotes || [])];
         coverIdx = newPages.findIndex((p) => p.pageKind === 'cover');
         newPages[coverIdx] = newPage;
       } else {
@@ -596,20 +625,23 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         return { pages: np };
       });
     }
-    pushSnapshot(get);
 
     // 整体成套设计：应用封面时自动同步应用配套封底（template.backCover），不拆分开。
     // 每套封面都内置风格统一的封底（同背景/字体/配色），保证封面与封底具有整体性。
+    // 封面 + 封底合并为一次快照：这里不压快照，封底联动调用传 recordHistory=false 跳过自身快照，
+    // 统一在 if 之后 pushSnapshot 一次 → 一次 Ctrl+Z 撤销整套封面/封底设置（2026-08-19）
     if (template.backCover) {
-      await get().applyBackCoverTemplate(template.backCover.id);
+      await get().applyBackCoverTemplate(template.backCover.id, false);
     }
+    pushSnapshot(get);
   },
 
   /**
    * 应用封底模板：插入封底页或切换已有封底的模板。
    * 逻辑同 applyCoverTemplate，pageKind='backCover'，插入到尾部。
+   * recordHistory=false（被 applyCoverTemplate 成套联动调用）时不压快照，由调用方统一提交。
    */
-  applyBackCoverTemplate: async (templateId) => {
+  applyBackCoverTemplate: async (templateId, recordHistory = true) => {
     const template = findCoverTemplateById(templateId);
     if (!template) return;
     const size = get().albumSize;
@@ -649,7 +681,7 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       const hasBack = s.pages.some((p) => p.pageKind === 'backCover');
       const newPages = [...s.pages];
       if (hasBack) {
-        // 切换封底模板：保留已填照片 + 用户编辑的文字/形状
+        // 切换封底模板：完整保留用户内容——照片（含编辑属性按 photoId 迁移）+ 用户文字/形状 + 贴纸/便利贴
         const oldBack = newPages.find((p) => p.pageKind === 'backCover')!;
         const oldPhotoIds = oldBack.placements
           .filter((pl) => pl.photoId)
@@ -658,10 +690,18 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         const usedIds = new Set(oldPhotoIds);
         const extraPhotoIds = photos.filter((p) => !usedIds.has(p.id)).map((p) => p.id);
         const newPhotoIds = [...oldPhotoIds, ...extraPhotoIds];
-        newPage.placements = template.slots.map((slot, i) => ({
-          slotId: slot.id,
-          photoId: newPhotoIds[i] ?? null,
-        }));
+        // 照片编辑属性迁移：按 photoId 保留 pan/缩放/裁剪/旋转/滤镜/明暗/阴影，并按新旧槽位尺寸重映射 pan
+        const photoMap = new Map(photos.map((p) => [p.id, p]));
+        const migratePlacement = makePlacementMigrator(oldBack.placements, oldBack.slotOverrides ?? {}, photoMap);
+        const newBackOverrides = size ? calcCoverOverrides(newPage, size)?.overrides ?? {} : {};
+        const oldPlByPhoto = new Map(oldBack.placements.filter((pl) => pl.photoId).map((pl) => [pl.photoId!, pl]));
+        newPage.placements = template.slots.map((slot, i) => {
+          const photoId = newPhotoIds[i] ?? null;
+          if (!photoId) return { slotId: slot.id, photoId: null };
+          const migrated = migratePlacement(photoId, slot.id, newBackOverrides[slot.id] ?? { x: 0, y: 0, width: 0, height: 0 });
+          if (oldPlByPhoto.get(photoId)?.shadow) migrated.shadow = true;
+          return migrated;
+        });
         const oldTextElements = (oldBack.textElements || []).filter(
           (el) => !el.id.startsWith('cover-text-'),
         );
@@ -670,6 +710,9 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
         );
         newPage.textElements = [...textElements, ...oldTextElements];
         newPage.shapeElements = [...shapeElements, ...oldShapeElements];
+        // 贴纸/便利贴随切换保留
+        newPage.stickerElements = [...(oldBack.stickerElements || [])];
+        newPage.stickyNotes = [...(oldBack.stickyNotes || [])];
         const idx = newPages.findIndex((p) => p.pageKind === 'backCover');
         newPages[idx] = newPage;
       } else {
@@ -677,6 +720,6 @@ export const createPageSlice: EditorSlice<PageSlice> = (set, get) => ({
       }
       return { pages: newPages };
     });
-    pushSnapshot(get);
+    if (recordHistory !== false) pushSnapshot(get);
   },
 });

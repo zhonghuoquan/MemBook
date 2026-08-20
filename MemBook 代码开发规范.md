@@ -229,6 +229,8 @@ const id = `page-${Date.now()}`;
 
 **注意**：z-index 受 stacking context 影响。若父容器有 `z-index` 或特定 `transform`/`opacity`，子元素的 z-index 仅在父级上下文内生效。下拉菜单需放在不受父级限制的位置，或父级不设 z-index。
 
+**弹窗层级强制要求**（2026-08-19）：所有全屏弹窗（Modal、AboutDialog、确认框等）必须用 `z-[var(--z-modal)]`（100）或以上，**禁止**用固定 `z-50`（`--z-overlay` 级）——封面书实物效果组件 `HardcoverFrame` 内部铰链/高光/折痕元素 zIndex 高达 50~60，`z-50` 弹窗会被其穿透遮挡（历史问题见开发日志 2026-08-19）。弹窗内再弹的确认框须高于主弹窗（如 `z-[calc(var(--z-modal)+1)]`）。
+
 ### 6.4 圆角/间距
 
 - 圆角使用令牌：`--radius-sm/md/lg/xl/2xl`。
@@ -348,6 +350,11 @@ const id = `page-${Date.now()}`;
 - **槽位圆角每角单独**：`slotCornerRadius` 类型 `number | [tl,tr,br,bl]`；不支持每角单独的场景（缩略图/预览/SmartLayout）用 `normalizeSlotCornerRadius(r)` 取四角平均值归一化。
 - **封面预览**：用共享组件 `components/common/CoverPreview.tsx`（铰链折痕/落地投影/照片位打印纹理），仅组件层叠加，不写入数据。
 - **封面书脊印刷一体连续（2026-08-15）**：封面页书脊背面与封面正面是**印刷一体连续设计**（无视觉间隙 `SPINE_GAP_MM`），编辑器/导出/打印画布宽度 = 页面宽 + 书脊宽；编辑器在 `x=spineWidth` 处用**虚线折叠线**标记书脊/封面交界（仅视觉标记，不占宽度）。封面正面内容偏移量 = `spineWidth`（**禁止**再加间隙）。缩略图/网格/全屏只显示封面正面（去书脊偏移，偏移量 = `spineWidth`）。旧版含间隙数据用 `migrateCoverSpineGapOnce`（db）一次性迁移。
+- **书脊底色/Logo 独立渲染（2026-08-19）**：封面页书脊区域（`0..spineWidth`）底色用 `AlbumPage.spineColor`（缺省回退页面 `background`），与封面正面背景区分——画布在整块背景上叠一层书脊色 `Rect`（Canvas.tsx）、导出在逻辑坐标 `0..spineMm` 填充 `spineColor`（exportEngine.ts renderPage）。书脊 MemBook logo 支持**自定义颜色**：`AlbumPage.spineLogoColor`（未设置按书脊底色深浅自动黑/白），画布/导出必须共用 `sharedRender.resolveSpineLogoColor`（取色）与 `tintMonochromeImage`（单色位图 `source-in` 重着色），**禁止两端各自内联选色/改色**。缩略图/网格/全屏不显示书脊（保持现状，不随此变更）。
+- **书脊宽度可调（2026-08-19，锚点模型：书脊向左扩展、封面内容固定）**：`CoverSettings` 书脊区提供「书脊宽度(mm)」输入，书脊区顺序为**宽度 → Logo 颜色 → 底色**。确认时 `applySpineSettings`（CoverSettings 内）写入 `spineWidth/spineColor/spineLogoColor` + **冻结锚点 `spineAnchorMm`**（首次调整时冻结，旧数据缺省回退当前 spineWidth）。封面区内容（文字/形状/贴纸/便利贴/槽位/笔触）数据坐标**一律不移动**，各渲染端统一按 `(当前书脊宽 − 锚点)` 偏移（书脊向左扩展、封面内容固定）；**书脊自动文字（`spine-text-*`，相册名/日期）在数据层按新书脊宽重新水平居中**（`x = 新宽/2 − 盒宽/2`，盒宽 `min(原宽, 新宽)`），与画布预览 `renderTextForSpine` 完全一致；**日期文字固定「水平居中 + 垂直底部对齐」（竖排语义：`align`=水平、`verticalAlign`=垂直；`align:'center'` + `verticalAlign:'bottom'`）+ 底边距固定 `SPINE_DATE_BOTTOM_MM`（15mm，与顶部 logo 顶边距 `SPINE_LOGO_TOP_MM` 镜像对称）**——`y` 为盒顶坐标 = `页高 − 15 − 盒高`，新建/预览/确认三处共用同一常量与公式（禁止各自硬编码 `书脊宽×0.7` 或 `±盒高/2`，否则打开封面设置预览时日期会上下跳）；导出对书脊文字（`spine-text-*`）与书脊底色逆补偿 delta（绘制 x = 数据/0 − delta），保证三端书脊文字始终居中于书脊。书脊 Logo 颜色可选手动色或「自动」（勾选自动则 `spineLogoColor` 不写入）。
+- **书脊 Logo 尺寸封顶（2026-08-19）**：Logo 宽 = `min(书脊宽×0.6, 12)`mm（画布 Canvas.tsx 与导出 exportEngine.ts 必须一致）、水平居中于当前书脊、顶部距页边固定 `SPINE_LOGO_TOP_MM=15`mm——避免书脊变宽时 Logo 膨胀过大。
+- **封面设置为右侧面板 + 画布实时预览（2026-08-19）**：`CoverSettings` 是编辑器**右侧设置面板**（挂载于 EditorView 画布容器，`absolute right-0 z-50`，入口走 `uiStore.coverSettingsOpen`，**禁止**改回居中遮罩弹窗）。打开面板后修改参数通过 `uiStore.coverPreview`（非持久化预览覆盖，含 `slotCornerRadius/spineColor/spineWidth/spineLogoColor`）**实时驱动画布封面渲染**（Canvas 封面数据优先读预览，仅封面/封底页生效）；点「确认」才写入 `store.pages`（`applySpineSettings` 内容不移动、书脊文字居中），点「取消」/关闭按钮/Esc 清预览恢复原状。**禁止**把预览值直接写进页面数据（会污染历史/undo）。面板打开时**点击画布不关闭面板**（无 document 级 mousedown 取消监听）、画布可正常交互（**不使用 ModalGuard**，它会把 body 设 `pointer-events:none` 屏蔽画布）。
+- **预览偏移与写回（2026-08-19）**：预览书脊宽度变化时，封面正面内容/槽位/笔触/文字/便利贴/贴纸/形状渲染坐标右移 delta（书脊区域元素除外），书脊文字实时居中；封面正面元素的 `onUpdate`/`onMove` 对 x 做**逆偏移**（减 delta），避免预览拖拽污染数据。**跳动感优化**：`groupOX` 用稳定 `spineAnchorPx`（锚点×MM_TO_PX，来自数据而非预览开始时刻）补偿（`+（锚点 − spinePx）× zoom`）使封面内容视口稳定、视觉上书脊向左凸出——预览与确认后状态共用同一逻辑，**禁止再引入临时 ref**。
 
 ### 9.7 文字元素渲染规范（单一 DOM 排版引擎，2026-08-15）
 
@@ -363,6 +370,8 @@ const id = `page-${Date.now()}`;
 - **封面/封底多尺寸适配**：模板按竖版 210×280 基准设计。应用模板时字号用 `coverFontScale = clamp(min(宽/210, 高/280), 0.5, 1.6)`（**禁止只按宽度缩放**，否则横版/方形页面文字过大）。切换相册尺寸（`setAlbumSize`）时，必须对封面/封底页文字/形状按新旧尺寸等比重映射（`rescaleCoverDecorations`）：正文元素 x 减书脊偏移按 kx 缩放再加回、y/height 按 ky、fontSize 按 kx（书脊元素 `spine-text-*` 书脊宽固定、x 保持、y/height/fontSize 按 ky），文字重映射后重新 `fitTextSize` 撑高。
 - **封面/封底图层 zIndex 约定**：统一用 `COVER_Z = { shape:50, spine:100, text:100 }`（禁止魔法数字）。层级：槽位照片(z≈0) < 模板形状/蒙版(50) < 书脊元素(100) < 模板文字(100)。蒙版/形状必须低于文字，保证标题清晰可读；用户后加元素用 `getGlobalMaxZ`（动态 >100）置于模板之上。
 - **文本框最小尺寸（PPT 逻辑，2026-08-15）**：仅保留极小下限、按方向区分——横排最小 8×4mm、竖排最小 4×8mm。**resize、Konva 命中区（TextElementNode）、DOM 渲染层（TextDomNode）三处必须用同一套 `MIN_W_MM`/`MIN_H_MM` 常量**，禁止某处单独硬编码更大下限（否则"所见非所得"、用户无法缩小）。缩小后未编辑文字退出编辑不触发 `fitTextSize`，框保持缩小尺寸。
+- **添加文字交互：点击落点生成（2026-08-18）**：「添加文字」是**一次性工具模式**（`activeTool='text'`，再次点击按钮取消）：点击后画布指针显示 **I 形**，内容元素 `listening=false` 点击穿透到 Stage；用户**单击**后，以**点击处为文本框左上角**生成文本框（宽 150、高随字号）、选中并进入编辑，随即 `setActiveTool('none')` 退出。（`ToolsPanel` 落模式开关 + `Canvas` Stage `onMouseDown `+`'text'` 分支处理，坐标按 `(stagePos−groupOX/OY)/zoom/MM_TO_PX` 换算。）
+- **空文本占位提示（2026-08-18）**：空文本框的"双击输入文字"占位用**绝对定位灰色浮层**（`#999`+斜体，`pointer-events:none`）而非内容 DOM 文本，**由 store 实时文本（`onLiveText`→`updateTextElement`）驱动**：编辑/非编辑态均在有输入时自动隐藏、删除空后重现；**禁止**把占位作为真实内容写入 `el.text`（否则导出/缩略图会带上占位）。
 
 ### 9.8 封面/封底模板设计规范（2026-08-15）
 
@@ -412,6 +421,52 @@ const id = `page-${Date.now()}`;
 
 **成套**
 - `Template.backCover` 关联配套封底；`applyCoverTemplate` 自动同步调用 `applyBackCoverTemplate`。封底与封面同背景/字体/配色/圆角语言，不拆开独立选择。
+
+### 9.9 字体来源与本地字体加载（2026-08-18）
+
+**字体来源（`TEXT_FONT_FAMILIES` 动态化，A+B 方案）**
+- 文字字体下拉不再是固定硬编码名单，由 `utils/availableFonts.ts` 提供**动态可用列表**，分三档合并：
+  - **内置艺术字体（恒显示）**：`BUNDLED_FONT_NAMES`（与 `fonts.css` 的 `@font-face` 一一对应，已打进安装包离线可用），**不受可用性过滤**。
+  - **A·常见系统字体探测**：`probeSystemFontAvailable` 用 `document.fonts.check`（兜底宽高测量、极端兜底 `true`）检测一批常见中英文字体，`filterByAvailability` 只保留本机**确实可用**的项——解决固定名单"没装就悄悄回退"的问题。`EXTRA_SYSTEM_FONT_CANDIDATES` 为额外候选，`detectExtraSystemFonts` 追加到列表尾部。
+  - **B·系统全部已装字体（Local Font Access）**：`queryInstalledFontFamilies` 调 `window.queryLocalFonts()` 枚举含第三方在内的全部字体。**必须在用户手势中调用**（`select` 的 `onFocus`，可能一次性授权）；不支持/无权限/被拒绝/异常时返回空 → **回退到仅 A 结果**。结果在模块级缓存，避免反复弹授权。
+- 当前选中 `el.fontFamily` 未探测到时**追加保留**，避免下拉失控回退。
+- **硬约束**：探测/枚举结果只影响"显示成列表"，`el.fontFamily` 仍是普通字符串，落到四端（编辑器画布 / 导出 Canvas / 预览 / 缩略图）。
+- **字体下拉 UI（2026-08-18）**：用自定义 `FontFamilySelect`（分组：内置艺术/系统可用/本机；顶部搜索；每项以自身字体预览；**高度随右侧可用空间自适应** `clamp(min160, max640)` + 样式化滚动条 + 视口 clamp 不溢出面板），**禁止**回退原生 `<select>`（几百个字体时样式不可控且溢出右侧面板）。
+- **底部缩略导航栏避让（2026-08-18）**：下拉面板高度计算以「窗口高 − `uiStore.bottomNavHeight`(90–280，用户可拖)」为**有效下边界**，并在选定 top 后再兜底钳制 `top+height ≤ viewBottom`——保证面板永不遮挡底部缩略导航栏。
+
+**四端一致性与 Worker**
+- A/B 拿到的均为**本机已安装系统字体**，编辑器/导出/预览/缩略图共用同一浏览器 OS 字体栈即可一致；**缩略图 Web Worker 的 OffscreenCanvas 也能按系统字体渲染**（Worker 无法访问 `document.fonts` 的仅指 @font-face 内嵌字体，系统字体不受影响）。因此本功能**不需要**给 Worker 投递字体字节。
+- 若今后引入"用户导入 .ttf/.otf 文件"（C 方案）：必须持久化字体字节（IndexedDB/用户目录）并**启动时重新 `new FontFace` 注册到 `document.fonts`**，且需把字体字节投递给缩略图 Worker（Worker 内 `self.fonts.add`）或让相关缩略图回退主线程渲染，否则四端不一致。
+
+### 9.10 照片整理·修改拍摄信息-无日期列表（2026-08-18）
+- 列表用**自适应网格**（`grid-cols-[repeat(auto-fill,minmax(205px,1fr))]`）而非固定列数：面板越宽列数越多、越窄自动少列，避免窄屏拥挤；**禁止**再退回单列 `space-y` 或固定 3 列（固定列在窄面板会挤压卡片内容）。
+- 卡片统一**横向布局**：左缩略图 `w-14 self-stretch`（配合 `ThumbImage aspect='fill'` 用 object-cover 铺满，**高度与右侧信息区拉伸等高**，非固定正方形），右列自上而下「文件名（可点击复制）→ 日期输入 → 提示 → 按钮」。识别状态用缩略图底部色条（绿=已识别 / 深灰=未识别），不占文件名行。
+- **点击文件名复制**用 `navigator.clipboard.writeText`，无权限时降级 textarea+`execCommand`，成功弹 toast；**禁止**用 `window.prompt` 等打断性方案。
+- **大列表懒加载**（2026-08-19）：无日期/无 GPS 等可能很长的照片列表**禁止**再硬编码 `slice(0, N)` + 静态「还有 N 张」提示（剩余永远展示不出来）；必须用共享 `useLazyList(total, batch)`（organize/shared.tsx）——初始一批 + 列表末尾哨兵进入视口自动追加下一批，滚动到底最终全部可展示。ConvertTool 的照片选择网格与文件预览列表同样适用。
+
+### 9.11 翻页预览渐进式渲染（2026-08-19）
+- **首屏快进**：`BookPreviewOverlay` 打开时先渲染封面/封底真实页 + 首批 `FIRST_BATCH=8` 张内容页即创建翻页书（PageFlip），未渲染内容页用浅灰「加载占位页」`LOADING_PAGE_DATAURL` 填充（页数完整、可立即翻页）——**禁止**回退「全部内容页渲染完才创建翻页书」（页面多时点击封面要等很久，历史性能问题见开发日志 2026-08-19）。
+- **后台分批热替换**：其余内容页按批（每批 8 张）后台渲染，页间 `setTimeout(0)` 让出主线程防卡顿；每批完成用 `PageFlip.updateFromImages(pageImagesRef.current)` 热替换——翻页进行中（`getState() !== 'read'`）先置 `pendingUpdateRef`，静止后（`changeState='read'`）再替换，不打断翻页动画。
+- **就绪前点击不丢失**：翻页书未创建时点封面/封底走 `pendingOpenRef` 标记，翻页书就绪后自动 `openFlipBook`——**禁止**就绪前静默忽略点击。
+- **渲染进度提示**：分批渲染期间显示「正在生成预览页面 x/N」胶囊（i18n `editor.bookPreview.generatingPages`），`pointer-events-none` 不挡书不拦点击；全部渲染完清除。
+- **约束沿用**：首批渲染也必须显式传 `albumSize`（冷启动 store 为 null 渲染失败）；页面尺寸沿用 `pageSizeRef`（coverW/spreadW/pageH 同源），`applyFlipBuffer` 缓冲盒在创建后与 resize 时统一设置。
+
+### 9.12 画布对齐系统（2026-08-19）
+- **统一开关**：对齐能力（动态吸附 + 引导线）由 `uiStore.alignEnabled`（默认 `true`，localStorage `membook_align_enabled` 持久化）统一控制，底部导航栏左侧「对齐」按钮切换（`editor.bottomNav.align`），点击即时生效；**禁止**回退「无开关、仅 Alt 临时禁用」（历史问题见开发日志 2026-08-19）。按住 Alt 仍可临时禁用（`altKeyRef`/`disableSnap`）。
+- **全元素覆盖**：对齐目标 = 当前页所有照片位（template.slots + extraSlots）+ 文字/便利贴/贴纸/形状（text/sticky 为左上角坐标、sticker/shape 为中心坐标，统一转页面逻辑像素**左上角基准**），由 `buildAlignTargets`（Canvas）单点收集——照片位与装饰元素**共用同一目标集**，拖动任意元素都能对齐到页面边/中线/边距/其他元素。
+- **统一入口 `alignDrag`**：装饰节点（TextElementNode/StickyNoteNode/StickerNode/ShapeNode）与多选组移动通过 Canvas 传入的稳定 `alignDrag` 回调（useCallback + ref 持有最新 updateGuideLines/clearGuideLines/buildAlignTargets，避免陈旧闭包与 memo 击穿）做「开关门控 + Alt + findSnap + 引导线 + 返回吸附偏移」；各节点按自身坐标语义算包围盒后叠加偏移（text/sticky/shape 写 store 时应用；sticker 不写 store、直接写 Konva 节点位置再于 dragEnd 读取提交）。
+- **多选组移动对齐**：以组包围盒检测吸附，排除全部选中元素 id（避免组内自对齐），偏移叠加到移动增量。
+- **开关关闭兜底**：对齐开关关闭时 `clearGuideLines()` 清残留引导线；`findSnap` 调用处必须按 `alignEnabled` 门控（禁用吸附且不显示引导线）。
+
+### 9.13 标尺与参考线（2026-08-19）
+- **统一开关**：标尺 + 参考线由 `uiStore.rulerEnabled`（默认 false，localStorage `membook_ruler_enabled` 持久化）统一控制，底部导航左侧「对齐」旁「标尺」按钮切换；**关闭时标尺与参考线均隐藏**。
+- **参考线数据归属**：相册级编辑辅助 `AlbumGuideLine`（id/orientation/position，position 为 **mm** 页面坐标），存 `albumMetaSlice.guideLines` + `AlbumProject.guideLines` 随项目持久化；**禁止**写入页面数据/元素（不参与导出/缩略图/打印/undo）。旧数据缺省空数组，无需迁移。
+- **标尺渲染**：[CanvasRulers.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/components/editor/CanvasRulers.tsx) 顶部横尺 + 左侧竖尺**固定于滚动容器视口边缘**（Canvas 主 return 外包 `relative w-full h-full pointer-events-none` wrapper，滚动容器 `absolute inset-0 pointer-events-auto`；标尺条 pointer-events-auto）；刻度 canvas 绘制、**单位按 mm**（页面 210mm 标 0~210，`mmToPx=MM_TO_PX`；主刻度间距从 1/2/5/10/20/50/100/200mm 中按 `mm×MM_TO_PX×zoom ≥ 60px` 自适应），**数字放外侧（textBaseline top）、刻度线放内侧**（主 24→13 / 中 24→16 / 次 24→19），互不重叠；页面内容范围高亮；随滚动/缩放重绘。
+- **参考线渲染/交互**：参考线 Layer 位于 Stage 顶层（内容层之上），坐标 = `groupOX/OY + 位置mm×MM_TO_PX×zoom`（**必须含 groupOX/OY 才是 Stage 空间**——对齐引导线 `updateGuideLines` 已修复该偏移）；**珊瑚粉虚线 `#FF6B8B`**（已保存参考线与拖出中临时预览线颜色必须一致），拖拽移动（**dragEnd 一次提交**，避免拖拽中 store 重渲染抖动）、双击删除；**从顶部横尺拖出水平参考线（'horizontal'）、左侧竖尺拖出垂直参考线（'vertical'）**，方向语义 = 参考线本身方向（横线用 Y、竖线用 X），禁止传反。
+- **顶部控件避让**：标尺开启时页面顶部悬浮工具栏（`PageToolbar`）与右上角显示模式按钮（`PageDisplayModeToggle`）的 `top` 必须下移至 `RULER_SIZE + 12px`（读取 `uiStore.rulerEnabled` + `RULER_SIZE`），关闭恢复 12px，防止遮挡标尺。
+- **对齐吸附接入**：`buildAlignTargets` 把参考线作为零宽/零高细长 bounds 目标，**仅 `rulerEnabled` 时参与**（避免吸附到隐藏参考线）；吸附生效仍受 `alignEnabled` 门控。
+- **静态辅助线快速开关**：边距辅助线（`showMarginGuide`，安全区虚线）与页面辅助线（`showGuides`，中线/三分线）在底部导航左侧「对齐/标尺」旁提供「边距」「辅助线」胶囊按钮快速切换（直接 `setShowMarginGuide`/`setShowGuides`，存 `albumMetaSlice` 随项目持久化）；画布渲染直接读 store 字段，「页面设置」弹窗打开时从 store 读入本地开关，两处状态保持同源（禁止各自独立维护导致不同步）。
+- **封面页辅助线排除书脊**（2026-08-19）：封面页书脊为左侧物理扩展区，辅助线基准必须用「页面内容实际区域」——`contentX = isCoverLike ? spinePx : 0`、`contentW = isCoverLike ? CANVAS_W - spinePx : CANVAS_W`（`spinePx = spineWidthMm × MM_TO_PX`）；边距框左右边、三分线/中线 X 坐标均基于 `contentX + contentW × 比例`，水平线两端限制在 `[contentX, contentX+contentW]` 不穿书脊，垂直方向不变。普通页/封底 `spinePx=0` 时退化为整画布，禁止再次用含书脊总宽 `CANVAS_W` 当基准。
 
 ---
 

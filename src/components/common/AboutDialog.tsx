@@ -11,12 +11,14 @@ interface AboutDialogProps {
 }
 
 const FEATURE_KEYS: { icon: string; titleKey: string; descKey: string }[] = [
-  { icon: '📐', titleKey: 'about.featuresList.customSize.title', descKey: 'about.featuresList.customSize.desc' },
+  { icon: '📖', titleKey: 'about.featuresList.spineCover.title', descKey: 'about.featuresList.spineCover.desc' },
+  { icon: '🎠', titleKey: 'about.featuresList.flipPreview.title', descKey: 'about.featuresList.flipPreview.desc' },
   { icon: '✨', titleKey: 'about.featuresList.smartLayout.title', descKey: 'about.featuresList.smartLayout.desc' },
-  { icon: '🎨', titleKey: 'about.featuresList.filterAdjust.title', descKey: 'about.featuresList.filterAdjust.desc' },
-  { icon: '🖌️', titleKey: 'about.featuresList.brushStickyText.title', descKey: 'about.featuresList.brushStickyText.desc' },
+  { icon: '🖼️', titleKey: 'about.featuresList.coverTemplates.title', descKey: 'about.featuresList.coverTemplates.desc' },
+  { icon: '🧲', titleKey: 'about.featuresList.rulerAlign.title', descKey: 'about.featuresList.rulerAlign.desc' },
+  { icon: '🖌️', titleKey: 'about.featuresList.creativeTools.title', descKey: 'about.featuresList.creativeTools.desc' },
+  { icon: '🛠️', titleKey: 'about.featuresList.organizeTools.title', descKey: 'about.featuresList.organizeTools.desc' },
   { icon: '💾', titleKey: 'about.featuresList.localFirst.title', descKey: 'about.featuresList.localFirst.desc' },
-  { icon: '📦', titleKey: 'about.featuresList.dataMigration.title', descKey: 'about.featuresList.dataMigration.desc' },
 ];
 
 const TECH_STACK = [
@@ -78,7 +80,7 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
   return (
     <>
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-surface-overlay)] backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-surface-overlay)] backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
@@ -196,14 +198,16 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
               {features.map((f) => (
                 <div
                   key={f.title}
-                  className="flex gap-3 p-3.5 rounded-xl bg-[var(--color-surface-raised)] border border-[var(--color-border)] hover:border-[var(--color-border-hover)] hover:shadow-sm transition-all"
+                  className="flex gap-3 p-3.5 rounded-xl bg-[var(--color-surface-raised)] border border-[var(--color-border)] hover:border-[var(--color-brand)]/40 hover:shadow-sm transition-all"
                 >
-                  <span className="text-2xl shrink-0">{f.icon}</span>
-                  <div>
+                  <div className="shrink-0 w-10 h-10 rounded-xl bg-[var(--color-primary-50)] text-[var(--color-brand)] flex items-center justify-center text-xl">
+                    {f.icon}
+                  </div>
+                  <div className="min-w-0">
                     <div className="text-[var(--text-body-sm)] font-[600] text-[var(--color-text-primary)]">
                       {f.title}
                     </div>
-                    <div className="text-[12px] text-[var(--color-text-secondary)] mt-1 leading-relaxed">
+                    <div className="text-[12px] text-[var(--color-text-secondary)] mt-1 leading-relaxed line-clamp-2">
                       {f.desc}
                     </div>
                   </div>
@@ -252,7 +256,7 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
     </div>
     {confirmClear && (
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        className="fixed inset-0 z-[calc(var(--z-modal)+1)] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
         onClick={() => setConfirmClear(false)}
       >
         <div

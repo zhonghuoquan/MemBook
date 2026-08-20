@@ -13,9 +13,10 @@ import { Group, Rect, Text, Circle, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import type { PageTextElement } from '../../../types';
+import type { AlignBounds } from '../../../engine/alignment-engine';
 
 function TextElementNodeImpl({
-  el, mmToPx, canvasZoom, isSelected, isEditing, interactive = true, onUpdate, onRemove: _onRemove, onClick, onDblClick,
+  el, mmToPx, canvasZoom, isSelected, isEditing, interactive = true, onUpdate, onRemove: _onRemove, onClick, onDblClick, alignDrag,
 }: {
   el: PageTextElement;
   mmToPx: number;
@@ -29,7 +30,21 @@ function TextElementNodeImpl({
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   /** 双击进入编辑：回调双击点在文本框本地坐标（左上角为原点，逻辑像素），供编辑浮层定位光标 */
   onDblClick: (localX: number, localY: number) => void;
+  /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
+  alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
+  // 对齐：el.x/y 为左上角，以候选左上角计算包围盒（左上角基准 px），叠加吸附偏移
+  const alignCandidate = (x: number, y: number) => {
+    if (!alignDrag) return { x, y };
+    const bounds: AlignBounds = {
+      x: x * mmToPx,
+      y: y * mmToPx,
+      width: el.width * mmToPx,
+      height: (el.height ?? 20) * mmToPx,
+    };
+    const { offsetX, offsetY } = alignDrag(bounds, el.id);
+    return { x: x + offsetX / mmToPx, y: y + offsetY / mmToPx };
+  };
   // el.x/y 为左上角；组件内部换算为中心坐标，与便利贴/贴纸保持一致
   const cx = el.x + el.width / 2;
   const cy = el.y + (el.height ?? 20) / 2;
@@ -267,7 +282,8 @@ function TextElementNodeImpl({
         if (!pos) return;
         const dx = (pos.x - startX) / mmToPx / canvasZoom;
         const dy = (pos.y - startY) / mmToPx / canvasZoom;
-        onUpdate({ x: startNx + dx, y: startNy + dy }, false);
+        const aligned = alignCandidate(startNx + dx, startNy + dy);
+        onUpdate({ x: aligned.x, y: aligned.y }, false);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;
@@ -278,8 +294,9 @@ function TextElementNodeImpl({
         if (pos) {
           const dx = (pos.x - startX) / mmToPx / canvasZoom;
           const dy = (pos.y - startY) / mmToPx / canvasZoom;
-          finalX = startNx + dx;
-          finalY = startNy + dy;
+          const aligned = alignCandidate(startNx + dx, startNy + dy);
+          finalX = aligned.x;
+          finalY = aligned.y;
         }
         onUpdate({ x: finalX, y: finalY }, true);
       }}

@@ -2,10 +2,9 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../../store';
 import {
-  STICKY_COLORS, TEXT_STYLE_PRESETS, SHAPE_TYPES,
-  DEFAULT_TEXT_LINE_HEIGHT, DEFAULT_TEXT_LETTER_SPACING,
+  STICKY_COLORS, SHAPE_TYPES,
 } from '../../types';
-import type { BrushType, PageTextElement, StickyNote, ShapeType } from '../../types';
+import type { BrushType, StickyNote, ShapeType } from '../../types';
 import { useScrollbarVisibility } from '../../hooks/useScrollbarVisibility';
 import { BrushPreview } from './tools/BrushPreview';
 import { ColorPicker } from './tools/ColorPicker';
@@ -41,7 +40,6 @@ export function ToolsPanel() {
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const updatePageBackground = useEditorStore((s) => s.updatePageBackground);
   const applyBackgroundByScope = useEditorStore((s) => s.applyBackgroundByScope);
-  const addTextElement = useEditorStore((s) => s.addTextElement);
   const sb = useScrollbarVisibility<HTMLDivElement>();
   const addStickyNote = useEditorStore((s) => s.addStickyNote);
   const setPendingTextEditId = useEditorStore((s) => s.setPendingTextEditId);
@@ -66,36 +64,6 @@ export function ToolsPanel() {
       recentColors: [color, ...(brushSettings.recentColors || []).filter((c) => c !== color)].slice(0, 8),
     });
   }, [brushSettings.recentColors, setBrushSettings]);
-
-  /* ── 添加文字（支持预设样式） ── */
-  const handleAddText = useCallback((preset?: typeof TEXT_STYLE_PRESETS[number]) => {
-    if (!currentPage) return;
-    const el: PageTextElement = {
-      id: `text-${Date.now()}`,
-      x: 30, y: 30,
-      width: 150,
-      // 高度与单行文字高度一致（与 fitTextSize 计算一致：fontSize*1.2 + 内边距），避免文本框远超文字高度
-      height: Math.round((preset?.fontSize ?? 20) * 1.2 + 4),
-      text: '',
-      fontSize: preset?.fontSize ?? 20,
-      fontFamily: '思源黑体',
-      color: preset?.color ?? '#212529',
-      align: 'left',
-      verticalAlign: 'center',
-      bold: preset?.bold ?? false,
-      italic: preset?.italic ?? false,
-      underline: false,
-      rotation: 0,
-      zIndex: 0,
-      lineHeight: DEFAULT_TEXT_LINE_HEIGHT,
-      letterSpacing: DEFAULT_TEXT_LETTER_SPACING,
-    };
-    addTextElement(currentPageIndex, el);
-    // 自动选中新文字并进入编辑模式
-    setSelectedStickyId(null);
-    setSelectedTextId(el.id);
-    setPendingTextEditId(el.id);
-  }, [currentPage, currentPageIndex, addTextElement, setPendingTextEditId, setSelectedTextId, setSelectedStickyId]);
 
   /* ── 添加便利贴 ── */
   const handleAddSticky = useCallback((color?: string) => {
@@ -269,7 +237,19 @@ export function ToolsPanel() {
           <SectionTitle>{t('editor.tools.elementsSection')}</SectionTitle>
           <div className="grid grid-cols-2 gap-1.5">
             <AddButton
-              onClick={() => handleAddText()}
+              active={activeTool === 'text'}
+              onClick={() => {
+                // 文字工具：进入"点击画布落点生成文本框"模式（一次性），再次点击取消
+                if (activeTool === 'text') {
+                  setActiveTool('none');
+                } else {
+                  setPendingShapeType(null);
+                  setSelectedTextId(null);
+                  setSelectedStickyId(null);
+                  setSelectedShapeId(null);
+                  setActiveTool('text');
+                }
+              }}
               label={t('editor.tools.addText')}
               icon={<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4"><path d="M4 3h8M8 3v10M5.5 13h5"/></svg>}
             />
@@ -280,6 +260,9 @@ export function ToolsPanel() {
             />
           </div>
           <div className="text-[11px] text-[var(--color-gray-400)] px-1 pt-1.5">{t('editor.tools.elementsHint')}</div>
+          {activeTool === 'text' && (
+            <div className="text-[11px] text-[var(--color-brand)] px-1 pt-1">{t('editor.tools.textModeHint')}</div>
+          )}
         </section>
 
         {/* ═══════════════════ 3. 形状 ═══════════════════ */}
@@ -330,11 +313,14 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /* ── 添加元素按钮 ── */
-function AddButton({ onClick, label, icon }: { onClick: () => void; label: string; icon: React.ReactNode }) {
+function AddButton({ onClick, label, icon, active }: { onClick: () => void; label: string; icon: React.ReactNode; active?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] border border-dashed border-[var(--color-primary-400)] bg-[var(--color-surface-selected)] text-[var(--color-primary-700)] hover:bg-[var(--color-primary-50)] cursor-pointer transition-colors"
+      className={`flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] border transition-colors cursor-pointer
+        ${active
+          ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
+          : 'border-dashed border-[var(--color-primary-400)] bg-[var(--color-surface-selected)] text-[var(--color-primary-700)] hover:bg-[var(--color-primary-50)]'}`}
     >
       {icon}
       <span className="text-[11px] font-[500]">{label}</span>

@@ -177,12 +177,10 @@ function TextDomNodeImpl({
   const hAlign = el.align ?? 'left';
   const vAlign = el.verticalAlign ?? 'center';
   // 横排：justify=垂直(vAlign)，items=stretch（水平由 textAlign 控制）
-  // 竖排（PPT 语义，随文字方向旋转）：justify=垂直 由 align 决定（左=顶,中=中,右=底）；items=水平 由 verticalAlign 决定（顶=左,中=中,底=右）
-  const justify = isVert
-    ? (hAlign === 'center' ? 'center' : hAlign === 'right' ? 'flex-end' : 'flex-start')
-    : (vAlign === 'center' ? 'center' : vAlign === 'bottom' ? 'flex-end' : 'flex-start');
+  // 竖排（与 buildTextLayout/封面预览同源，2026-08-19 统一）：justify=垂直 由 verticalAlign 决定（顶/中/底）；items=水平 由 align 决定（左/中/右）
+  const justify = vAlign === 'center' ? 'center' : vAlign === 'bottom' ? 'flex-end' : 'flex-start';
   const alignItems = isVert
-    ? (vAlign === 'center' ? 'center' : vAlign === 'bottom' ? 'flex-end' : 'flex-start')
+    ? (hAlign === 'center' ? 'center' : hAlign === 'right' ? 'flex-end' : 'flex-start')
     : 'stretch';
 
   // 竖排文字块几何（与 CSS vertical-rl 布局一致，公式与 fitTextSize 完全同源）：
@@ -252,6 +250,37 @@ function TextDomNodeImpl({
         pointerEvents: 'none', // 显示态穿透点击到 Konva 命中区；编辑态由内层 contentEditable 接管
       }}
     >
+      {/* 空文本占位提示（灰色）：有输入即自动消失（由 store 实时文本驱动，编辑/显示态均生效） */}
+      {!el.text && (
+        <div
+          style={{
+            position: 'absolute', inset: 0,
+            padding: `${textPad}px`,
+            display: 'flex', flexDirection: 'column',
+            justifyContent: justify, alignItems,
+            pointerEvents: 'none',
+          }}
+        >
+          <span
+            style={{
+              width: '100%',
+              fontSize: fs,
+              fontFamily: el.fontFamily,
+              color: '#999',
+              fontStyle: 'italic',
+              lineHeight: el.lineHeight ?? 1.2,
+              letterSpacing: (el.letterSpacing ?? 0) * canvasZoom,
+              textAlign: (isVert
+                ? (hAlign === 'center' ? 'center' : hAlign === 'right' ? 'end' : 'start')
+                : hAlign) as 'left' | 'center' | 'right' | 'start' | 'end',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {t('editor.textElement.placeholder')}
+          </span>
+        </div>
+      )}
       <div
         ref={divRef}
         contentEditable={isEditing}
@@ -309,7 +338,7 @@ function TextDomNodeImpl({
         // 编辑态 children 由 DOM 自管理（React 渲染 undefined 不触碰已有内容，避免光标跳动）；
         // 显示态由 React 渲染文本/占位。切换发生在 commit 后、绘制前的 effect 中，无闪烁。
       >
-        {isEditing ? undefined : (el.text || t('editor.textElement.placeholder'))}
+        {isEditing ? undefined : el.text}
       </div>
     </div>
   );

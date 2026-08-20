@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Logo } from '../common/Logo';
 import { AppHeader } from '../common/AppHeader';
+import { UpdateIndicator } from '../common/UpdateIndicator';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 import { ProjectGrid } from './../home/ProjectGrid';
 import { TemplateGallery } from './../home/TemplateGallery';
@@ -526,6 +527,9 @@ export function HomeView({ onNavigateToEditor }: HomeViewProps) {
             </svg>
           </IconBtn>
         </div>
+
+        {/* 自动更新指示器：后台下载 ring / 就绪「更新」按钮 */}
+        <UpdateIndicator />
       </AppHeader>
 
       {/* ── Body: Nav + Content ── */}

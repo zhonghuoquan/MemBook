@@ -1,4 +1,4 @@
-import type { AlbumSize, PageMarginSettings, AlbumPage, PageTextElement } from '../../types';
+import type { AlbumSize, PageMarginSettings, AlbumPage, PageTextElement, AlbumGuideLine } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, isCoverOrBackCoverPage } from '../../types';
 import { pageMarginService } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot } from './helpers';
@@ -8,7 +8,7 @@ import type { EditorSlice, AlbumMetaSlice } from './types';
 
 /**
  * 切换相册尺寸时，封面/封底页的文字/形状元素按新旧尺寸等比重映射，保证在不同尺寸页面上布局协调、文字不裁剪。
- * - 正文元素：x 先减去书脊偏移(spX)按 kx 缩放再加回（书脊宽度固定，不随页面缩放）；y/height 按 ky；fontSize 按 kx。
+ * - 正文元素：x 先减去书脊偏移锚点(spX = spineAnchorMm)按 kx 缩放再加回（折线位置固定，不随页面缩放）；y/height 按 ky；fontSize 按 kx。
  * - 书脊元素（spine-text-*）：书脊宽度固定，沿高度方向排列，x 保持、y/height/fontSize 按 ky。
  * - 形状：中心 x 含/不含偏移按上方规则处理，width/height 缩放。
  * - 文字重映射后重新 fitTextSize 撑高，避免切换尺寸后超框裁剪。
@@ -20,7 +20,7 @@ function rescaleCoverDecorations(
 ): AlbumPage {
   const kx = newSize.width / oldSize.width;
   const ky = newSize.height / oldSize.height;
-  const spX = page.spineWidth ? page.spineWidth : 0;
+  const spX = page.spineAnchorMm ?? page.spineWidth ?? 0;
   const textElements = (page.textElements || []).map((el) => {
     const isSpine = el.id.startsWith('spine-text-');
     const scaled: PageTextElement = {
@@ -71,6 +71,8 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
   showMarginGuide: false,
   slotGap: PAGE_GAP_DEFAULT,
   defaultSlotCornerRadius: DEFAULT_SLOT_CORNER_RADIUS,
+  /** 相册级参考线（编辑辅助，跨页共享，随项目持久化；不参与导出/缩略图/打印） */
+  guideLines: [],
 
   setProjectName: (name) => set({ projectName: name }),
   setAlbumType: (albumType) => set({ albumType }),
@@ -189,6 +191,8 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
         if (i !== currentPageIndex) dirtyMarginPageIds.add(i);
       }
     }
+    // 间距调整需记历史，否则 Ctrl+Z 撤销不生效（2026-08-19）
+    pushSnapshot(get);
   },
   setDefaultSlotCornerRadius: (r) => set({ defaultSlotCornerRadius: r }),
   /** 设置当前页的槽位圆角（按页独立，开启"应用到全部页面"时同步所有内容页，封面/封底不受影响） */
@@ -211,4 +215,5 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
   },
   setShowGuides: (v) => set({ showGuides: v }),
   setShowMarginGuide: (v) => set({ showMarginGuide: v }),
+  setGuideLines: (guides: AlbumGuideLine[]) => set({ guideLines: guides }),
 });

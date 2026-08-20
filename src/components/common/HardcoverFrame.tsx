@@ -35,6 +35,14 @@ export function HardcoverFrame({
   const ridgePos: CSSProperties = isBack ? { right: `calc(${HINGE_PCT}% - 2px)` } : { left: `calc(${HINGE_PCT}% - 2px)` };
   const groovePos: CSSProperties = isBack ? { right: `${HINGE_PCT}%` } : { left: `${HINGE_PCT}%` };
   const diffusePos: CSSProperties = isBack ? { right: `calc(${HINGE_PCT}% + 2px)` } : { left: `calc(${HINGE_PCT}% + 2px)` };
+  // 书脊边缘（最外侧书脊棱）：front 在左、back 镜像到右
+  const spineSide: CSSProperties = isBack ? { right: 0 } : { left: 0 };
+  // 靠外缘一侧的圆角（back 右、front 左）
+  const spineEdgeRadius = isBack ? '0 2px 2px 0' : '2px 0 0 2px';
+  // 从最外沿开始：细暗线（书板裁切边）→ 受光高光亮带 → 向内柔和淡出，模拟圆润书脊棱受光
+  const spineGrad = isBack
+    ? 'linear-gradient(270deg, rgba(0,0,0,0.30) 0%, rgba(255,255,255,0.18) 14%, rgba(255,255,255,0.05) 55%, rgba(255,255,255,0) 100%)'
+    : 'linear-gradient(90deg, rgba(0,0,0,0.30) 0%, rgba(255,255,255,0.18) 14%, rgba(255,255,255,0.05) 55%, rgba(255,255,255,0) 100%)';
 
   return (
     <div
@@ -73,6 +81,23 @@ export function HardcoverFrame({
               isBack ? 'inset -1px 0 0 0 rgba(255,255,255,0.20)' : 'inset 1px 0 0 0 rgba(255,255,255,0.20)',
               isBack ? 'inset 1px -1px 0 0 rgba(0,0,0,0.10)' : 'inset -1px -1px 0 0 rgba(0,0,0,0.10)',
               'inset 0 0 0 1px rgba(0,0,0,0.05)',
+            ].join(', '),
+          }}
+        />
+
+        {/* 书脊边缘：一点点厚度 + 高光 + 圆角（front 在左、back 镜像到右）——
+            最外沿细暗线 + 受光亮带向内淡出；顶/底端微暗体现圆角转折处离光 */}
+        <div
+          className="absolute top-0 bottom-0 pointer-events-none"
+          style={{
+            zIndex: 56,
+            width: '1.6cqw',
+            ...spineSide,
+            borderRadius: spineEdgeRadius,
+            background: spineGrad,
+            boxShadow: [
+              'inset 0 1.1cqw 0.7cqw -0.5cqw rgba(0,0,0,0.12)',
+              'inset 0 -1.1cqw 0.7cqw -0.5cqw rgba(0,0,0,0.12)',
             ].join(', '),
           }}
         />

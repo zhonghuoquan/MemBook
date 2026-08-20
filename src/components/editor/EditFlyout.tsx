@@ -274,12 +274,12 @@ function AdjustTab({ placement }: { placement: { adjustments?: PhotoAdjustments 
     });
   }, []);
 
-  const handleChange = useCallback((key: keyof PhotoAdjustments, value: number) => {
+  const handleChange = useCallback((key: keyof PhotoAdjustments, value: number, recordHistory = true) => {
     if (!selectedSlotId) return;
     updatePlacementAdjustments(currentPageIndex, selectedSlotId, {
       ...adj,
       [key]: value,
-    });
+    }, recordHistory);
   }, [currentPageIndex, selectedSlotId, updatePlacementAdjustments, adj]);
 
   // 自动增强
@@ -384,7 +384,8 @@ function AdjustTab({ placement }: { placement: { adjustments?: PhotoAdjustments 
                       min={param.min}
                       max={param.max}
                       value={adj[param.key]}
-                      onChange={(e) => handleChange(param.key, parseInt(e.target.value))}
+                      onChange={(e) => handleChange(param.key, parseInt(e.target.value), false)}
+                      onPointerUp={() => handleChange(param.key, adj[param.key], true)}
                       onDoubleClick={() => handleChange(param.key, DEFAULT_ADJ[param.key])}
                       className={`w-full h-1 rounded-full accent-[var(--color-primary-600)] appearance-none cursor-pointer
                         ${param.key === 'temperature'
@@ -433,9 +434,9 @@ function FilterTab({ placement }: { placement: { filter?: string | null; filterI
     updatePlacementFilter(currentPageIndex, selectedSlotId, name);
   }, [currentPageIndex, selectedSlotId, updatePlacementFilter]);
 
-  const handleIntensity = useCallback((v: number) => {
+  const handleIntensity = useCallback((v: number, recordHistory = true) => {
     if (!selectedSlotId) return;
-    updatePlacementFilterIntensity(currentPageIndex, selectedSlotId, v);
+    updatePlacementFilterIntensity(currentPageIndex, selectedSlotId, v, recordHistory);
   }, [currentPageIndex, selectedSlotId, updatePlacementFilterIntensity]);
 
   const activeName = activeFilter || '原图';
@@ -502,7 +503,8 @@ function FilterTab({ placement }: { placement: { filter?: string | null; filterI
             min={0}
             max={100}
             value={intensity}
-            onChange={(e) => handleIntensity(parseInt(e.target.value))}
+            onChange={(e) => handleIntensity(parseInt(e.target.value), false)}
+            onPointerUp={() => handleIntensity(intensity, true)}
             className="w-full h-1 rounded-full accent-[var(--color-primary-600)] appearance-none bg-[var(--color-gray-200)]
                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
                        [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
@@ -536,9 +538,9 @@ function RotateTab({ placement }: { placement: { rotation?: number; flipH?: bool
   const flipV = placement.flipV ?? false;
   const addToast = useUIStore((s) => s.addToast);
 
-  const handleChange = useCallback((value: number) => {
+  const handleChange = useCallback((value: number, recordHistory = true) => {
     if (!selectedSlotId) return;
-    slotEditService.updatePlacementPanRotation(currentPageIndex, selectedSlotId, value);
+    slotEditService.updatePlacementPanRotation(currentPageIndex, selectedSlotId, value, undefined, recordHistory);
   }, [currentPageIndex, selectedSlotId]);
 
   const handleQuickRotate = useCallback((dir: -90 | 90) => {
@@ -578,7 +580,7 @@ function RotateTab({ placement }: { placement: { rotation?: number; flipH?: bool
   }, [currentPageIndex, selectedSlotId, panRotation, addToast, t]);
 
   // 缩放滑块：以槽位中心为锚点缩放，保持照片相对位置
-  const handleScaleChange = useCallback((value: number) => {
+  const handleScaleChange = useCallback((value: number, recordHistory = true) => {
     if (!selectedSlotId || !currentPage || !albumSize) return;
     const template = resolveTemplate(currentPage);
     const slot = template?.slots.find((s) => s.id === selectedSlotId);
@@ -611,7 +613,7 @@ function RotateTab({ placement }: { placement: { rotation?: number; flipH?: bool
 
     const clamped = clampPhotoToSlotBounds(photo.width, photo.height, sw, sh, totalRot, newPanScale, newPanX, newPanY);
 
-    useEditorStore.getState().updatePlacementPan(currentPageIndex, selectedSlotId, clamped.panX, clamped.panY, newPanScale);
+    useEditorStore.getState().updatePlacementPan(currentPageIndex, selectedSlotId, clamped.panX, clamped.panY, newPanScale, recordHistory);
   }, [currentPageIndex, selectedSlotId, currentPage, albumSize, photos]);
 
   return (
@@ -659,7 +661,8 @@ function RotateTab({ placement }: { placement: { rotation?: number; flipH?: bool
           max={180}
           step={1}
           value={Math.round(panRotation)}
-          onChange={(e) => handleChange(parseInt(e.target.value))}
+          onChange={(e) => handleChange(parseInt(e.target.value), false)}
+          onPointerUp={() => handleChange(Math.round(panRotation), true)}
           className="w-full h-1 rounded-full accent-[var(--color-primary-600)] appearance-none bg-[var(--color-gray-200)]
                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
                      [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
@@ -680,7 +683,8 @@ function RotateTab({ placement }: { placement: { rotation?: number; flipH?: bool
           max={300}
           step={1}
           value={Math.round(panScale * 100)}
-          onChange={(e) => handleScaleChange(parseInt(e.target.value) / 100)}
+          onChange={(e) => handleScaleChange(parseInt(e.target.value) / 100, false)}
+          onPointerUp={() => handleScaleChange(panScale, true)}
           className="w-full h-1 rounded-full accent-[var(--color-primary-600)] appearance-none bg-[var(--color-gray-200)]
                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5
                      [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white

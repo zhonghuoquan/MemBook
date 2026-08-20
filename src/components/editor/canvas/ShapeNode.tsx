@@ -12,37 +12,75 @@
  * 坐标约定：shape.x/y 为页面内中心点（mm），width/height 为外形包围盒尺寸（mm）。
  * Group 无 offset，子元素以 -pw/2 绘于中心两侧，Konva 缩放/旋转以 Group 原点 = 形状中心为基准。
  */
-import { memo, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import { Group, Rect, Circle, Line, Text } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import { useUIStore } from '../../../store';
 import type { ShapeElement } from '../../../types';
+import type { AlignBounds } from '../../../engine/alignment-engine';
 import { ShapeGlyph } from './ShapeGlyph';
 import { isCornerAdjustable, isCutAdjustable } from '../../../utils/shapeGeometry';
 import { MIN_SHAPE_SIZE_MM } from './constants';
 
 function ShapeNodeImpl({
-  shape, mmToPx, isSelected, interactive = true, isMulti = false,
-  onSelect, onMove, onMoveEnd, onUpdate,
+  shape, id, mmToPx, isSelected, interactive = true, isMulti = false,
+  onSelect: onSelectRaw, onMove: onMoveRaw, onMoveEnd: onMoveEndRaw, onUpdate: onUpdateRaw, alignDrag,
 }: {
   shape: ShapeElement;
+  /** 元素唯一 id，回传到父级统一处理器（使回调引用稳定，配合 React.memo 生效） */
+  id: string;
   mmToPx: number;
   isSelected: boolean;
   /** 是否可交互（画笔/橡皮擦模式下设为 false，禁用选中/拖拽，让事件穿透到 Stage） */
   interactive?: boolean;
   /** 是否处于多选（多选时由多选包围盒统一控制，不渲染本元素独立 8 手柄） */
   isMulti?: boolean;
-  onSelect: (e: { evt: MouseEvent }) => void;
+  onSelect: (id: string, e: { evt: MouseEvent }) => void;
   /** 拖拽移动中实时回调（mm 坐标），用于悬浮工具栏跟随 */
-  onMove?: (x: number, y: number) => void;
+  onMove?: (id: string, x: number, y: number) => void;
   /** 拖拽结束回调（mm 坐标），提交历史快照 */
-  onMoveEnd?: (x: number, y: number) => void;
+  onMoveEnd?: (id: string, x: number, y: number) => void;
   /** 缩放/旋转实时更新（mm 坐标），recordHistory=false 时不入历史 */
-  onUpdate: (patch: Partial<ShapeElement>, recordHistory?: boolean) => void;
+  onUpdate: (id: string, patch: Partial<ShapeElement>, recordHistory?: boolean) => void;
+  /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
+  alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
   const px = shape.x * mmToPx;
   const py = shape.y * mmToPx;
+  // 本地包装：注入本元素 id，内部既有调用点签名不变；useCallback 保证引用稳定，
+  // 避免 effect 依赖（含 onUpdate/onSelect 等）每次渲染重建导致 Konva 事件反复重绑。
+  const onUpdate = useCallback(
+    (patch: Partial<ShapeElement>, recordHistory?: boolean) => onUpdateRaw(id, patch, recordHistory),
+    [onUpdateRaw, id],
+  );
+  const onSelect = useCallback(
+    (e: { evt: MouseEvent }) => onSelectRaw(id, e),
+    [onSelectRaw, id],
+  );
+  const onMove = useCallback(
+    (x: number, y: number) => onMoveRaw?.(id, x, y),
+    [onMoveRaw, id],
+  );
+  const onMoveEnd = useCallback(
+    (x: number, y: number) => onMoveEndRaw?.(id, x, y),
+    [onMoveEndRaw, id],
+  );
+  // 对齐：以候选中心点计算包围盒（左上角基准 px），调用 alignDrag 得吸附偏移并叠加到坐标
+  const alignCandidate = useCallback(
+    (cx: number, cy: number) => {
+      if (!alignDrag) return { x: cx, y: cy };
+      const bounds: AlignBounds = {
+        x: (cx - shape.width / 2) * mmToPx,
+        y: (cy - shape.height / 2) * mmToPx,
+        width: shape.width * mmToPx,
+        height: shape.height * mmToPx,
+      };
+      const { offsetX, offsetY } = alignDrag(bounds, id);
+      return { x: cx + offsetX / mmToPx, y: cy + offsetY / mmToPx };
+    },
+    [alignDrag, id, shape.width, shape.height, mmToPx],
+  );
   const isLine = shape.type === 'line';
   // 线段本体尺寸：直线宽度 = 线段长度(mm)，高度 = 描边粗细
   const drawPw = Math.max(shape.width * mmToPx, MIN_SHAPE_SIZE_MM * mmToPx);
@@ -374,7 +412,8 @@ function ShapeNodeImpl({
         if (!pos) return;
         const dx = (pos.x - startX) / mmToPx / canvasZoom;
         const dy = (pos.y - startY) / mmToPx / canvasZoom;
-        onMove?.(startNx + dx, startNy + dy);
+        const aligned = alignCandidate(startNx + dx, startNy + dy);
+        onMove(aligned.x, aligned.y);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;
@@ -385,8 +424,9 @@ function ShapeNodeImpl({
         if (pos) {
           const dx = (pos.x - startX) / mmToPx / canvasZoom;
           const dy = (pos.y - startY) / mmToPx / canvasZoom;
-          finalX = startNx + dx;
-          finalY = startNy + dy;
+          const aligned = alignCandidate(startNx + dx, startNy + dy);
+          finalX = aligned.x;
+          finalY = aligned.y;
         }
         onMoveEnd?.(finalX, finalY);
       }}

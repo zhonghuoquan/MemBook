@@ -81,7 +81,13 @@ export function useCanvasKeyboard({
           import('../../../db').then(({ loadProject, saveProject, savePhotos }) => {
             loadProject(projectId).then((existing) => {
               if (existing) {
-                saveProject({ ...existing, pages, size: albumSize!, updatedAt: new Date().toISOString() });
+                saveProject({
+                  ...existing,
+                  pages,
+                  size: albumSize!,
+                  guideLines: useEditorStore.getState().guideLines,
+                  updatedAt: new Date().toISOString(),
+                });
                 savePhotos(photos, projectId);
                 addToast({ type: 'success', message: i18n.t('hooks.canvasKeyboard.saved') });
               }
@@ -90,8 +96,24 @@ export function useCanvasKeyboard({
         }
         return;
       }
+      // 编辑态（文字/便利贴/水印等 contentEditable）下 Ctrl+Z/Ctrl+Y 交给浏览器原生文本撤销/重做：
+      // 应用级 undo 会恢复 store 但编辑浮层（非受控 div）不刷新，且原生撤销被 preventDefault 阻止 → 撤销无反应。
+      // 编辑中撤销刚输入的字符（PPT 行为），退出编辑后再 Ctrl+Z 才撤销整个编辑操作（2026-08-19）
+      // 仅当正在编辑的元素仍存在于当前页时才视为编辑态；切模板/撤销后元素已不存在时 editingTextId 是残留，
+      // 不应再拦截应用级撤销（否则 Ctrl+Z 卡死无反应）。
+      const page = useEditorStore.getState().pages[currentPageIndex];
+      const editingElExists =
+        !!editingTextId &&
+        (!!page?.textElements?.some((e) => e.id === editingTextId) ||
+         !!page?.stickyNotes?.some((n) => n.id === editingTextId));
+      const isTextEditing =
+        editingElExists ||
+        (document.activeElement as HTMLElement | null)?.isContentEditable === true;
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        if (isTextEditing) return;
         e.preventDefault();
+        // 撤销前清掉文字编辑态：避免恢复后编辑浮层残留/文字被隐藏渲染（isEditing opacity:0）
+        setEditingTextId(null);
         const entry = useHistoryStore.getState().undo();
         if (entry) {
           useEditorStore.getState().setPages(entry.pages);
@@ -101,7 +123,10 @@ export function useCanvasKeyboard({
         return;
       }
       if ((e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey)))) {
+        if (isTextEditing) return;
         e.preventDefault();
+        // 重做前清掉文字编辑态（同撤销）
+        setEditingTextId(null);
         const entry = useHistoryStore.getState().redo();
         if (entry) {
           useEditorStore.getState().setPages(entry.pages);

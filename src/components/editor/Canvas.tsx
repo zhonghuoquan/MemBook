@@ -3,14 +3,14 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Rect, Circle, Transformer, Group, Text, Line, Image } from 'react-konva';
 import Konva from 'konva';
 import logoLight from '../../assets/logo-light.png';
-import logoDark from '../../assets/logo-dark.png';
 import { useEditorStore, usePhotoStore, useUIStore, useHistoryStore } from '../../store';
-import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, DEFAULT_SHAPE_STYLE, DEFAULT_SHAPE_SIZE, isCoverPage } from '../../types';
+import { resolveTemplate, DEFAULT_SLOT_CORNER_RADIUS, getSlotZIndex, BRUSH_STYLE_MAP, DEFAULT_SHAPE_STYLE, DEFAULT_SHAPE_SIZE, isCoverPage, isCoverOrBackCoverPage, DEFAULT_TEXT_LINE_HEIGHT, DEFAULT_TEXT_LETTER_SPACING } from '../../types';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../../constants/templatePalette';
 import { useTheme } from '../../contexts/ThemeContext';
-import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement, ShapeElement } from '../../types';
+import type { Template, SlotLayout, PhotoPlacement, Photo, PageTextElement, StickyNote, StickerElement, ShapeElement, AlbumGuideLine } from '../../types';
 import type { GuideLine, GuideType, AlignBounds } from '../../engine/alignment-engine';
 import { findSnap } from '../../engine/alignment-engine';
+import { CanvasRulers } from './CanvasRulers';
 import { dragState } from '../../engine/drag-manager';
 import { onStickerDragStateChange, type StickerDragState } from '../../engine/sticker-drag';
 import { setKonvaStage } from '../../engine/stage-handle';
@@ -19,7 +19,7 @@ import { useMultiElementGroupSelect } from './canvas/useMultiElementGroupSelect'
 import { shouldShowWatermark, getWatermarkText, calcWatermarkFontSize, calcWatermarkPosition, calcPageSafeArea, WATERMARK_FONT_STACK } from '../../utils/watermarkRenderer';
 import { DEFAULT_WATERMARK_SETTINGS } from '../../types';
 import { calcCoverFitWithRotation, computePhotoBounds, computePanForResizedSlot, clampPhotoToSlotBounds } from '../../utils/photoGeometry';
-import { CANVAS_WORKSPACE_EXTRA } from '../../utils/sharedRender';
+import { CANVAS_WORKSPACE_EXTRA, SPINE_LOGO_TOP_MM, SPINE_DATE_BOTTOM_MM, resolveSpineLogoColor, tintMonochromeImage } from '../../utils/sharedRender';
 import { isActivated } from '../../license/licenseService';
 import { DEFAULT_W, DEFAULT_H, MM_TO_PX, MIN_SLOT_SIZE, MIN_SHAPE_SIZE_MM, applySlotResizeConstraints, isDarkBackground, getTextureBaseColor } from './canvas/constants';
 import { usePanZoom } from './canvas/usePanZoom';
@@ -118,16 +118,47 @@ export function Canvas() {
   // 只订阅当前页，避免其他页面改动触发整片 Canvas 重渲染
   const currentPage = useEditorStore((s) => s.pages[s.currentPageIndex]);
 
-  // 书脊 MemBook logo 水印图：按书脊背景色深浅自动选黑/白 logo（亮底用黑色 logo-light，深底用白色 logo-dark）
-  // 书脊背景色 = 用户设置的 bookspineColor，缺省回退到页面背景色
+  // 书脊 MemBook logo 水印：先加载单色位图（logo-light 为黑线版），再按书脊 logo 颜色重着色为任意色。
+  // 书脊底色 = 用户设置的 spineColor，缺省回退到页面背景色（独立色块覆盖书脊区域，与封面正面区分）。
+  // 封面设置右侧面板打开时，画布优先读取 coverPreview 预览覆盖（确认才写入页面数据）。
   const [spineLogoImg, setSpineLogoImg] = useState<HTMLImageElement | null>(null);
-  const spineBgColor = currentPage?.spineColor || currentPage?.background || '#FFFFFF';
+  const [spineTintedLogo, setSpineTintedLogo] = useState<HTMLCanvasElement | null>(null);
+  const coverPreview = useUIStore((s) => s.coverPreview);
+  const isCoverLike = currentPage ? isCoverPage(currentPage) : false;
+  const isCoverOrBackLike = currentPage ? isCoverOrBackCoverPage(currentPage) : false;
+  const previewSpine = isCoverLike && coverPreview ? coverPreview : null;
+  const previewCorners = isCoverOrBackLike && coverPreview ? coverPreview : null;
+  // 书脊宽度（mm）：封面页 书脊背面 + 封面正面 印刷一体，画布整体加宽（spine + page）；封底不显示书脊。
+  // 封面设置右侧面板打开时优先读取 coverPreview 预览覆盖（确认才写入页面数据）。
+  const spineWidthMm = isCoverLike ? (previewSpine?.spineWidth ?? currentPage?.spineWidth ?? 0) : 0;
+  // 书脊偏移锚点（mm）= 内容烘焙的书脊偏移量（折线位置）。书脊宽度变化时内容数据不再移动，
+  // 渲染统一按 (当前书脊宽 - 锚点) 偏移封面正面内容（x >= 锚点；书脊区域元素保持原位），
+  // 实现「书脊向左扩展、封面内容固定」。缺省回退 = 当前书脊宽（旧数据烘焙偏移即当前书脊宽）。
+  const spineAnchorMm = isCoverLike ? (currentPage?.spineAnchorMm ?? currentPage?.spineWidth ?? 0) : 0;
+  const spineDeltaMm = spineWidthMm - spineAnchorMm;
+  const spineDeltaPx = spineDeltaMm * MM_TO_PX;
+  // 书脊锚点（px）：稳定值（来自数据而非预览开始时刻），用于 groupOX 补偿使封面内容在视口中保持稳定
+  // （视觉上书脊向左凸出、封面内容不动），预览与确认后状态共用同一补偿逻辑。
+  const spineAnchorPx = isCoverLike ? spineAnchorMm * MM_TO_PX : null;
+  // 书脊偏移渲染辅助（书脊向左扩展、内容固定）：
+  // - shiftTextForSpine：渲染坐标 = 数据坐标 + delta，使文字（含书脊文字）绝对位置固定不移动；
+  //   文字 DOM 显示层 / Konva 选中框 / 编辑手柄 / 浮动工具栏共用同一套偏移（否则 DOM 文字会随 groupOX 左移）。
+  // - unshiftPatch：交互写回（onUpdate/onMove）时对 x 逆偏移，避免把渲染偏移写进页面数据。
+  const shiftTextForSpine = (el: PageTextElement): PageTextElement =>
+    spineDeltaMm ? { ...el, x: el.x + spineDeltaMm } : el;
+  const unshiftPatch = <T extends { x?: number }>(patch: T): T =>
+    spineDeltaMm && patch.x !== undefined ? { ...patch, x: patch.x - spineDeltaMm } : patch;
+  const spineBgColor = (previewSpine?.spineColor ?? currentPage?.spineColor) || currentPage?.background || '#FFFFFF';
+  const spineLogoColor = resolveSpineLogoColor(spineBgColor, previewSpine?.spineLogoColor ?? currentPage?.spineLogoColor);
   useEffect(() => {
     const img = new window.Image();
     img.onload = () => setSpineLogoImg(img);
-    img.src = isDarkBackground(spineBgColor) ? logoDark : logoLight;
+    img.src = logoLight;
     return () => { img.onload = null; };
-  }, [spineBgColor]);
+  }, []);
+  useEffect(() => {
+    if (spineLogoImg) setSpineTintedLogo(tintMonochromeImage(spineLogoImg, spineLogoColor));
+  }, [spineLogoImg, spineLogoColor]);
   const pagesLength = useEditorStore((s) => s.pages.length);
   const selectedSlotId = useEditorStore((s) => s.selectedSlotId);
   const clearSelection = useEditorStore((s) => s.clearSelection);
@@ -161,6 +192,10 @@ export function Canvas() {
       const stage = stageRef.current;
       if (stage) {
         try {
+          // 先释放 Transformer 绑定再销毁：若 Transformer 仍引用即将被销毁的节点，
+          // 后续 _fitNodesInto → node.getParent() 会拿到 undefined 触发
+          // "Cannot read properties of undefined (reading 'setAttrs')"（react-konva 19 + StrictMode 崩溃根因）。
+          transformerRef.current?.nodes([]);
           stage.destroy();
         } catch { /* ignore */ }
         (stageRef as React.MutableRefObject<Konva.Stage | null>).current = null;
@@ -170,6 +205,25 @@ export function Canvas() {
   }, []);
   const setSelectedSlot = useEditorStore((s) => s.setSelectedSlot);
   const albumSize = useEditorStore((s) => s.albumSize);
+  // 文字书脊偏移渲染（书脊向左扩展、内容固定）：
+  // - 书脊文字（spine-text-*）：预览时按当前书脊宽重新居中（居中于书脊、随书脊中心移动，与 logo 一致）；
+  //   确认后数据已由 applySpineSettings 居中，直接用数据。封面区文字固定不动（数据 + delta）。
+  // - 需在 albumSize 定义后声明（日期纵向重定位用到页高）。
+  const renderTextForSpine = (el: PageTextElement): PageTextElement => {
+    if (el.id.startsWith('spine-text-')) {
+      if (!previewSpine) return el;
+      const boxW = Math.min(el.width || el.fontSize + 6, spineWidthMm);
+      const next: PageTextElement = { ...el, x: spineWidthMm / 2 - boxW / 2 };
+      if (boxW !== el.width) next.width = boxW;
+      if (el.id.includes('date')) {
+        // 日期：底边距固定 SPINE_DATE_BOTTOM_MM（15mm，与 logo 顶边距镜像对称）。
+        // y 为盒顶坐标，故 y = 页高 − 底边距 − 盒高（与数据/确认公式一致，避免预览上下跳）
+        next.y = (albumSize?.height ?? 280) - SPINE_DATE_BOTTOM_MM - (el.height || 0);
+      }
+      return next;
+    }
+    return shiftTextForSpine(el);
+  };
   const photos = usePhotoStore((s) => s.photos);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const pageDisplayMode = useUIStore((s) => s.pageDisplayMode);
@@ -210,7 +264,7 @@ export function Canvas() {
   // 画笔/橡皮擦/形状工具模式下，所有页面内容元素禁用交互（listening=false），
   // 让点击事件穿透到 Stage，由 Stage 的 onMouseDown 统一处理绘制。
   // 笔迹在橡皮擦模式下单独保持 listening=true 以支持点击擦除。
-  const isToolMode = activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'shape';
+  const isToolMode = activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'shape' || activeTool === 'text';
   const removeStickyNote = useEditorStore((s) => s.removeStickyNote);
   const updateTextElement = useEditorStore((s) => s.updateTextElement);
   const removeTextElement = useEditorStore((s) => s.removeTextElement);
@@ -237,6 +291,7 @@ export function Canvas() {
 
   /* ── 形状绘制状态（PPT 式：选择形状后按住拖拽绘制） ── */
   const addShapeElement = useEditorStore((s) => s.addShapeElement);
+  const addTextElement = useEditorStore((s) => s.addTextElement);
   const pendingShapeType = useEditorStore((s) => s.pendingShapeType);
   const setPendingShapeType = useEditorStore((s) => s.setPendingShapeType);
   // 绘制起点（mm）与实时预览矩形（mm）
@@ -377,6 +432,10 @@ export function Canvas() {
   const defaultSlotCornerRadius = useEditorStore((s) => s.defaultSlotCornerRadius);
   const showGuides = useEditorStore((s) => s.showGuides);
   const showMarginGuide = useEditorStore((s) => s.showMarginGuide);
+  const alignEnabled = useUIStore((s) => s.alignEnabled);
+  const rulerEnabled = useUIStore((s) => s.rulerEnabled);
+  const guideLines = useEditorStore((s) => s.guideLines);
+  const setGuideLines = useEditorStore((s) => s.setGuideLines);
   const rawWatermarkSettings = useEditorStore((s) => s.watermarkSettings ?? DEFAULT_WATERMARK_SETTINGS);
   const watermarkSettings = useMemo(
     () => (isActivated() ? rawWatermarkSettings : { ...rawWatermarkSettings, enabled: false }),
@@ -394,8 +453,7 @@ export function Canvas() {
 
   // 画布尺寸：根据用户选择的相册尺寸（mm）换算为像素
   // 封面页：书脊背面 + 封面正面 印刷一体连续排布（无视觉间隙），画布整体加宽（spine + page）。封底不显示书脊。
-  const isCoverLike = currentPage ? isCoverPage(currentPage) : false;
-  const spineWidthMm = isCoverLike ? (currentPage?.spineWidth ?? 0) : 0;
+  // 封面设置预览覆盖：书脊宽度预览实时改变画布宽度（书脊为封面左侧物理扩展）
   const spinePx = spineWidthMm * MM_TO_PX;
   const CANVAS_W = albumSize ? (albumSize.width + spineWidthMm) * MM_TO_PX : DEFAULT_W;
   const CANVAS_H = albumSize ? albumSize.height * MM_TO_PX : DEFAULT_H;
@@ -406,7 +464,12 @@ export function Canvas() {
 
   // 缩放后的内容 Group 定位（Stage 空间）
   // 公式：Group 中心 = Stage 中心 → groupOX + CANVAS_W * canvasZoom / 2 = STAGE_W / 2
-  const groupOX = Math.round((STAGE_W - CANVAS_W * canvasZoom) / 2);
+  const baseGroupOX = Math.round((STAGE_W - CANVAS_W * canvasZoom) / 2);
+  // 书脊锚点补偿：交界线从 spinePx 移回锚点需抵消的位移，使封面内容视口位置稳定（视觉上书脊向左凸出、内容不动）。
+  // 锚点为稳定值（数据层），书脊宽未变时补偿为 0，预览与确认后状态共用同一逻辑。
+  const groupOX = spineAnchorPx !== null
+    ? Math.round(baseGroupOX + (spineAnchorPx - spinePx) * canvasZoom)
+    : baseGroupOX;
   const groupOY = Math.round((STAGE_H - CANVAS_H * canvasZoom) / 2);
   // 空格键拖拽平移画布（逻辑提取至 usePanZoom hook）
   usePanZoom({ containerRef, canvasW: CANVAS_W, canvasH: CANVAS_H, canvasZoom });
@@ -436,7 +499,10 @@ export function Canvas() {
     }
   }, [pendingTextEditId, currentPage, canvasZoom, updateTextElement, currentPageIndex, setPendingTextEditId, setSelectedTextId, setSelectedStickyId, setTextEditCursorIndex]);
 
-  const slotCornerRadius = currentPage?.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS;
+  // 封面/封底照片位圆角：封面设置面板预览时优先读预览覆盖
+  const slotCornerRadius = previewCorners
+    ? previewCorners.slotCornerRadius
+    : (currentPage?.slotCornerRadius ?? DEFAULT_SLOT_CORNER_RADIUS);
   const template: Template | undefined = currentPage
     ? resolveTemplate(currentPage)
     : undefined;
@@ -535,7 +601,12 @@ export function Canvas() {
         }
       };
       tryAttach(10);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+        // 依赖变化/卸载前先释放 Transformer 绑定，避免其仍引用将被销毁的节点
+        transformerRef.current?.nodes([]);
+        transformerRef.current?.getLayer()?.batchDraw();
+      };
     } else if (selectedSlotId) {
       // 普通选中：短重试确保首次渲染时 Konva 节点就绪
       let cancelled = false;
@@ -553,7 +624,12 @@ export function Canvas() {
         }
       };
       tryAttach(5); // 5 次 × 30ms = 150ms 足够
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+        // 依赖变化/卸载前先释放 Transformer 绑定，避免其仍引用将被销毁的节点
+        transformerRef.current?.nodes([]);
+        transformerRef.current?.getLayer()?.batchDraw();
+      };
     } else {
       transformerRef.current.nodes([]);
       transformerRef.current.getLayer()?.batchDraw();
@@ -571,10 +647,123 @@ export function Canvas() {
     resetTransientUI: () => { setGuides([]); clearGuideLines(); },
   });
 
+  // ── 收集对齐目标：当前页所有照片位 + 文字/便利贴/贴纸/形状（除指定 id 外的全部元素）──
+  // 元素 x/y 语义：text/sticky 为左上角、sticker/shape 为中心，统一转页面逻辑像素（左上角基准）
+  function buildAlignTargets(excludeIds: string | string[]): { id: string; bounds: AlignBounds }[] {
+    if (!template || !currentPage) return [];
+    const exclude = new Set<string>(Array.isArray(excludeIds) ? excludeIds : [excludeIds]);
+    const result: { id: string; bounds: AlignBounds }[] = [];
+    const push = (id: string, bounds: AlignBounds) => {
+      if (!exclude.has(id)) result.push({ id, bounds });
+    };
+    for (const s of template.slots) {
+      push(s.id, { x: slotX(s), y: slotY(s), width: slotWidth(s), height: slotHeight(s) });
+    }
+    for (const s of currentPage.extraSlots ?? []) {
+      push(s.id, { x: slotX(s), y: slotY(s), width: slotWidth(s), height: slotHeight(s) });
+    }
+    for (const el of currentPage.textElements ?? []) {
+      push(el.id, { x: el.x * MM_TO_PX, y: el.y * MM_TO_PX, width: (el.width ?? 20) * MM_TO_PX, height: (el.height ?? 20) * MM_TO_PX });
+    }
+    for (const note of currentPage.stickyNotes ?? []) {
+      push(note.id, { x: note.x * MM_TO_PX, y: note.y * MM_TO_PX, width: note.width * MM_TO_PX, height: note.height * MM_TO_PX });
+    }
+    for (const st of currentPage.stickerElements ?? []) {
+      push(st.id, { x: (st.x - st.width / 2) * MM_TO_PX, y: (st.y - st.height / 2) * MM_TO_PX, width: st.width * MM_TO_PX, height: st.height * MM_TO_PX });
+    }
+    for (const sh of currentPage.shapeElements ?? []) {
+      push(sh.id, { x: (sh.x - sh.width / 2) * MM_TO_PX, y: (sh.y - sh.height / 2) * MM_TO_PX, width: sh.width * MM_TO_PX, height: sh.height * MM_TO_PX });
+    }
+    // 参考线（相册级，跨页共享）：以零宽/零高的细长 bounds 表示，使 findSnap 识别为单轴对齐点。
+    // 仅标尺开启时参与吸附（否则吸附到隐藏参考线会造成困惑）
+    for (const gl of rulerEnabled ? guideLines : []) {
+      const p = gl.position * MM_TO_PX;
+      if (gl.orientation === 'vertical') {
+        push(`guide:${gl.id}`, { x: p, y: 0, width: 0, height: CANVAS_H });
+      } else {
+        push(`guide:${gl.id}`, { x: 0, y: p, width: CANVAS_W, height: 0 });
+      }
+    }
+    return result;
+  }
+
+  /** 元素拖拽/多选组移动时的对齐入口（供装饰节点/multiElementGroup 复用）。
+   *  对齐开关关闭：清引导线、返回零偏移；开启：findSnap + 更新引导线 + 返回吸附偏移（逻辑像素）。 */
+  const updateGuidesRef = useRef(updateGuideLines);
+  updateGuidesRef.current = updateGuideLines;
+  const clearGuidesRef = useRef(clearGuideLines);
+  clearGuidesRef.current = clearGuideLines;
+  const buildTargetsRef = useRef(buildAlignTargets);
+  buildTargetsRef.current = buildAlignTargets;
+  const alignDrag = useCallback(
+    (bounds: AlignBounds, excludeId: string | string[]): { offsetX: number; offsetY: number } => {
+      if (!alignEnabled) {
+        clearGuidesRef.current();
+        return { offsetX: 0, offsetY: 0 };
+      }
+      const targets = buildTargetsRef.current(excludeId);
+      const { guides, offsetX, offsetY } = findSnap(bounds, targets, CANVAS_W, CANVAS_H, {
+        zoom: canvasZoom,
+        disableSnap: altKeyRef.current,
+        margin: {
+          left: pageMargin.left * MM_TO_PX,
+          right: pageMargin.right * MM_TO_PX,
+          top: pageMargin.top * MM_TO_PX,
+          bottom: pageMargin.bottom * MM_TO_PX,
+        },
+      });
+      updateGuidesRef.current(guides);
+      return { offsetX, offsetY };
+    },
+    [alignEnabled, canvasZoom, pageMargin, CANVAS_W, CANVAS_H],
+  );
+
+  // 对齐开关关闭时清掉残留引导线（拖拽中切换开关的兜底）
+  useEffect(() => {
+    if (!alignEnabled) clearGuideLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alignEnabled]);
+
+  /* ── 参考线（PS 从标尺拖出）：相册级持久化，随项目保存；仅 rulerEnabled 时显示/可交互 ── */
+  const guideLinesLayerRef = useRef<Konva.Layer>(null);
+  // 从标尺拖出中的临时参考线（预览）
+  const pendingGuideRef = useRef<{ orientation: 'horizontal' | 'vertical'; positionPx: number } | null>(null);
+  const [pendingGuide, setPendingGuide] = useState<{ orientation: 'horizontal' | 'vertical'; positionPx: number } | null>(null);
+  const handleRulerGuideDrag = useCallback((orientation: 'horizontal' | 'vertical', positionPx: number) => {
+    const next = { orientation, positionPx };
+    pendingGuideRef.current = next;
+    setPendingGuide(next);
+  }, []);
+  const handleRulerGuideEnd = useCallback(() => {
+    const cur = pendingGuideRef.current;
+    pendingGuideRef.current = null;
+    setPendingGuide(null);
+    if (cur) {
+      // 页面逻辑 px → mm（存储随页面缩放保持相对位置）
+      const posMm = Math.round((cur.positionPx / MM_TO_PX) * 10) / 10;
+      const gl: AlbumGuideLine = {
+        id: `guide-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        orientation: cur.orientation,
+        position: posMm,
+      };
+      setGuideLines([...useEditorStore.getState().guideLines, gl]);
+    }
+  }, [setGuideLines]);
+  /** 拖拽参考线移动：Konva Stage 坐标 → 页面逻辑 px → mm */
+  const updateGuideLinePosition = useCallback((id: string, orientation: 'horizontal' | 'vertical', stagePos: number) => {
+    const pagePx = (stagePos - (orientation === 'vertical' ? groupOX : groupOY)) / canvasZoom;
+    const posMm = Math.round((pagePx / MM_TO_PX) * 10) / 10;
+    setGuideLines(useEditorStore.getState().guideLines.map((g) => (g.id === id ? { ...g, position: posMm } : g)));
+  }, [groupOX, groupOY, canvasZoom, setGuideLines]);
+  const removeGuideLine = useCallback((id: string) => {
+    setGuideLines(useEditorStore.getState().guideLines.filter((g) => g.id !== id));
+  }, [setGuideLines]);
+
   // ── 跨类型多选包围盒（multiSelectedElements：slot/text/sticky/sticker，统一处理包围盒/缩放/移动）──
   const multiElementGroup = useMultiElementGroupSelect({
     stageRef, template, currentPage, currentPageIndex, multiSelectedElements,
     canvasZoom, groupOX, groupOY, CANVAS_W, CANVAS_H,
+    alignDrag,
   });
   const { previewRectMap: multiPreviewRectMap } = multiElementGroup;
 
@@ -676,8 +865,8 @@ export function Canvas() {
             // 接受范围：整个 Stage 容器（包含页面 + 周围灰色区域）
             if (sx >= 0 && sx <= stageBox.width && sy >= 0 && sy <= stageBox.height) {
               const { groupOX: ox, groupOY: oy, canvasZoom: cz } = layoutParamsRef.current;
-              // 不 clamp：贴纸落在鼠标松开位置（含页面外灰色区域）
-              const lx = (sx - ox) / cz;
+              // 不 clamp：贴纸落在鼠标松开位置（含页面外灰色区域）；书脊偏移：放置坐标 - delta（渲染层再 +delta，落到点击处）
+              const lx = (sx - ox) / cz - spineDeltaMm * MM_TO_PX;
               const ly = (sy - oy) / cz;
               // 计算默认尺寸：宽度 60mm，保持图片宽高比
               const DEFAULT_STICKER_WIDTH_MM = 60;
@@ -1038,20 +1227,24 @@ export function Canvas() {
     // 只做命令式更新，不调用 setResizePreview —— 避免触发 React 重渲染覆盖命令式写的 imgNode 属性
     // 松手后 handleTransformEnd 提交 slotOverride → 自然重渲染 → 命令式残留被提交值同步覆盖
 
-    // ── 对齐引导线（逻辑坐标）──
-    const movingBounds: AlignBounds = { x: rlx, y: rly, width: rw, height: rh };
-    const targets = buildAlignTargets(sid);
-    const { guides } = findSnap(movingBounds, targets, CANVAS_W, CANVAS_H, {
-      zoom: canvasZoom,
-      disableSnap: altKeyRef.current,
-      margin: {
-        left: pageMargin.left * MM_TO_PX,
-        right: pageMargin.right * MM_TO_PX,
-        top: pageMargin.top * MM_TO_PX,
-        bottom: pageMargin.bottom * MM_TO_PX,
-      },
-    });
-    updateGuideLines(guides);
+    // ── 对齐引导线（逻辑坐标）：对齐开关关闭时清线、不检测 ──
+    if (alignEnabled) {
+      const movingBounds: AlignBounds = { x: rlx, y: rly, width: rw, height: rh };
+      const targets = buildAlignTargets(sid);
+      const { guides } = findSnap(movingBounds, targets, CANVAS_W, CANVAS_H, {
+        zoom: canvasZoom,
+        disableSnap: altKeyRef.current,
+        margin: {
+          left: pageMargin.left * MM_TO_PX,
+          right: pageMargin.right * MM_TO_PX,
+          top: pageMargin.top * MM_TO_PX,
+          bottom: pageMargin.bottom * MM_TO_PX,
+        },
+      });
+      updateGuideLines(guides);
+    } else {
+      clearGuideLines();
+    }
 
     // ── 实时更新照片位视觉内容（Group 内部坐标 = 逻辑坐标）──
     const slotGroup = stageRef.current.findOne(`#slot-${sid}`) as Konva.Group | null;
@@ -1266,7 +1459,8 @@ export function Canvas() {
   };
   const slotX = (s: SlotLayout) => {
     const ov = currentPage?.slotOverrides?.[s.id];
-    return ov ? ov.x : s.x * _scaleX + _offsetX;
+    // 预览书脊宽度变化时，封面槽位（含书脊偏移的 overrides）整体右移 deltaPx
+    return ov ? ov.x + spineDeltaPx : s.x * _scaleX + _offsetX;
   };
   const slotY = (s: SlotLayout) => {
     const ov = currentPage?.slotOverrides?.[s.id];
@@ -1363,16 +1557,18 @@ export function Canvas() {
       line.dash(dash);
       line.strokeWidth(LINE_W);
 
-      // 计算辅助线起止点（使用 rangeStart/rangeEnd 绘制短线段）
+      // 计算辅助线起止点（使用 rangeStart/rangeEnd 绘制短线段）。
+      // 引导线 Layer 位于 Stage 顶层：页面逻辑坐标需加 groupOX/groupOY 才是 Stage 空间（修复历史偏移 bug，
+      // 否则引导线整体偏离页面内容 groupOX/OY——与参考线/吸附点错位）。
       if (g.orientation === 'vertical') {
-        const x = g.position * zoom;
-        const yStart = (g.rangeStart ?? 0) * zoom;
-        const yEnd = (g.rangeEnd ?? CANVAS_H) * zoom;
+        const x = groupOX + g.position * zoom;
+        const yStart = groupOY + (g.rangeStart ?? 0) * zoom;
+        const yEnd = groupOY + (g.rangeEnd ?? CANVAS_H) * zoom;
         line.points([x, yStart, x, yEnd]);
       } else {
-        const y = g.position * zoom;
-        const xStart = (g.rangeStart ?? 0) * zoom;
-        const xEnd = (g.rangeEnd ?? CANVAS_W) * zoom;
+        const y = groupOY + g.position * zoom;
+        const xStart = groupOX + (g.rangeStart ?? 0) * zoom;
+        const xEnd = groupOX + (g.rangeEnd ?? CANVAS_W) * zoom;
         line.points([xStart, y, xEnd, y]);
       }
 
@@ -1397,22 +1593,6 @@ export function Canvas() {
     pool.clear();
     const layer = guidesLayerRef.current;
     layer?.batchDraw();
-  }
-
-  // ── 收集对齐目标（除当前拖拽照片位以外的所有照片位） ──
-  function buildAlignTargets(excludeSlotId: string): { id: string; bounds: AlignBounds }[] {
-    if (!template || !currentPage) return [];
-    return template.slots
-      .filter((s) => s.id !== excludeSlotId)
-      .map((s) => ({
-        id: s.id,
-        bounds: {
-          x: slotX(s),
-          y: slotY(s),
-          width: slotWidth(s),
-          height: slotHeight(s),
-        },
-      }));
   }
 
   /** 渲染单个槽位（含 slot-box 与视觉层 Group），供 globalLayerElements 统一排序使用 */
@@ -1512,29 +1692,36 @@ export function Canvas() {
             if (isEditing) return;
             const rawX = e.target.x();
             const rawY = e.target.y();
-            const movingBounds: AlignBounds = { x: rawX, y: rawY, width: sw, height: sh };
-            const targets = buildAlignTargets(slot.id);
-            const { guides: foundGuides, offsetX, offsetY } = findSnap(
-              movingBounds, targets, CANVAS_W, CANVAS_H,
-              {
-                zoom: canvasZoom,
-                disableSnap: altKeyRef.current,
-                margin: {
-                  left: pageMargin.left * MM_TO_PX,
-                  right: pageMargin.right * MM_TO_PX,
-                  top: pageMargin.top * MM_TO_PX,
-                  bottom: pageMargin.bottom * MM_TO_PX,
+            // 对齐吸附：开启时检测并应用偏移 + 显示引导线；关闭时清线
+            let snapX = rawX, snapY = rawY;
+            if (alignEnabled) {
+              const movingBounds: AlignBounds = { x: rawX, y: rawY, width: sw, height: sh };
+              const targets = buildAlignTargets(slot.id);
+              const { guides: foundGuides, offsetX, offsetY } = findSnap(
+                movingBounds, targets, CANVAS_W, CANVAS_H,
+                {
+                  zoom: canvasZoom,
+                  disableSnap: altKeyRef.current,
+                  margin: {
+                    left: pageMargin.left * MM_TO_PX,
+                    right: pageMargin.right * MM_TO_PX,
+                    top: pageMargin.top * MM_TO_PX,
+                    bottom: pageMargin.bottom * MM_TO_PX,
+                  },
                 },
-              },
-            );
-            const snapX = rawX + offsetX;
-            const snapY = rawY + offsetY;
-            e.target.x(snapX);
-            e.target.y(snapY);
-            const bbox = stageRef.current?.findOne(`#slot-box-${slot.id}`);
-            if (bbox) {
-              bbox.x(snapX);
-              bbox.y(snapY);
+              );
+              snapX = rawX + offsetX;
+              snapY = rawY + offsetY;
+              e.target.x(snapX);
+              e.target.y(snapY);
+              const bbox = stageRef.current?.findOne(`#slot-box-${slot.id}`);
+              if (bbox) {
+                bbox.x(snapX);
+                bbox.y(snapY);
+              }
+              updateGuideLines(foundGuides);
+            } else {
+              clearGuideLines();
             }
 
             // 单选拖动时同步更新 Transformer 和自定义 8 控制点，避免视觉不同步
@@ -1542,8 +1729,6 @@ export function Canvas() {
               transformerRef.current?.forceUpdate();
               updateCustomHandlePositions(snapX, snapY, sw, sh);
             }
-
-            updateGuideLines(foundGuides);
           }}
           onDragEnd={(e) => {
             if (isEditing) return;
@@ -1624,11 +1809,71 @@ export function Canvas() {
     );
   };
 
+  // ── 装饰元素统一回调：稳定引用（useCallback）让叶子 React.memo 真正生效 ──
+  // P2-fix: 此前这些 onUpdate/onSelect/onMove 等以内联箭头直接写在 globalLayerElements
+  //   的 forEach 里，每次渲染都是新引用，击穿 ShapeNode/StickerNode/StickyNoteNode 的
+  //   memo 浅比较 → 任意父级重渲染都连带全部装饰节点重渲染。改为叶子节点回传自身 id，
+  //   这里用 useCallback 定义一次稳定处理器；仅 currentPageIndex 变化时重建（页面切换必然全量重渲染）。
+  const handleShapeUpdate = useCallback(
+    (id: string, patch: Partial<ShapeElement>, rh?: boolean) => updateShapeElement(currentPageIndex, id, patch, rh),
+    [currentPageIndex, updateShapeElement],
+  );
+  const handleShapeMove = useCallback(
+    (id: string, x: number, y: number) => updateShapeElement(currentPageIndex, id, { x, y }, false),
+    [currentPageIndex, updateShapeElement],
+  );
+  const handleShapeMoveEnd = useCallback(
+    (id: string, x: number, y: number) => updateShapeElement(currentPageIndex, id, { x, y }, true),
+    [currentPageIndex, updateShapeElement],
+  );
+  const handleShapeSelect = useCallback(
+    (id: string, e: { evt: MouseEvent }) => {
+      if (e.evt.ctrlKey || e.evt.metaKey) toggleMultiSelect({ type: 'shape', id });
+      else setSelectedShapeId(id);
+    },
+    [toggleMultiSelect, setSelectedShapeId],
+  );
+  const handleStickerUpdate = useCallback(
+    (id: string, patch: Partial<StickerElement>, rh?: boolean) => updateStickerElement(currentPageIndex, id, patch, rh),
+    [currentPageIndex, updateStickerElement],
+  );
+  const handleStickerRemove = useCallback(
+    (id: string) => { removeStickerElement(currentPageIndex, id); setSelectedStickerId(null); },
+    [currentPageIndex, removeStickerElement, setSelectedStickerId],
+  );
+  const handleStickerSelect = useCallback(
+    (id: string, e: { evt: MouseEvent }) => {
+      if (e.evt.ctrlKey || e.evt.metaKey) toggleMultiSelect({ type: 'sticker', id });
+      else setSelectedStickerId(id);
+    },
+    [toggleMultiSelect, setSelectedStickerId],
+  );
+  const handleStickyUpdate = useCallback(
+    (id: string, patch: Partial<StickyNote>, rh?: boolean) => updateStickyNote(currentPageIndex, id, patch, rh),
+    [currentPageIndex, updateStickyNote],
+  );
+  const handleStickyRemove = useCallback(
+    (id: string) => { removeStickyNote(currentPageIndex, id); setSelectedStickyId(null); },
+    [currentPageIndex, removeStickyNote, setSelectedStickyId],
+  );
+  const handleStickyRequestEdit = useCallback(
+    (id: string, _text: string) => { setTextEditCursorIndex(null); setEditingTextId(id); },
+    [setTextEditCursorIndex, setEditingTextId],
+  );
+  const handleStickySelect = useCallback(
+    (id: string, e: { evt: MouseEvent }) => {
+      if (e.evt.ctrlKey || e.evt.metaKey) toggleMultiSelect({ type: 'sticky', id });
+      else setSelectedStickyId(id);
+    },
+    [toggleMultiSelect, setSelectedStickyId],
+  );
+
   // ── 全局图层：画笔/文字/便利贴/贴纸的合并排序结果 ──
   // P0-fix: 改回 IIFE（非常量 useMemo），因为此处在早返回之后，
   // 若用 useMemo 会导致空相册→添加页面时 hook 数量变化触发 React #310。
   // IIFE 仅在 currentPage 存在时（早返回已跳过）执行，无 hook 调用顺序问题。
-  // 注意：内联箭头函数仍是新引用，子组件的 React.memo 需配合 useCallback 才能完全生效。
+  // 注意：上方装饰回调已用 useCallback 稳定化，叶子 React.memo 生效；
+  //   TextElementNode 依赖 canvasZoom + 多选预览几何，缩放本就必须重渲染，故保留内联（稳定化无收益）。
   const globalLayerElements = (() => {
     if (!currentPage) return null;
     // typeOrder：z 相同时决定渲染先后，小的渲染在下方（槽位=0，装饰元素=1）
@@ -1644,12 +1889,16 @@ export function Canvas() {
     });
     (currentPage.brushStrokes || []).forEach((s) => {
       const bs = BRUSH_STYLE_MAP[s.brushType] || BRUSH_STYLE_MAP.pencil;
+      // 预览书脊宽度变化：笔触坐标整体右移 delta（偶索引 = x）
+      const shiftedPoints = spineDeltaMm
+        ? s.points.map((v, i) => (i % 2 === 0 ? v + spineDeltaMm : v))
+        : s.points;
       items.push({
         z: s.zIndex || 0,
         typeOrder: 1,
         render: <Line
           key={s.id}
-          points={s.points.map((v) => v * MM_TO_PX)}
+          points={shiftedPoints.map((v) => v * MM_TO_PX)}
           stroke={s.color} strokeWidth={s.strokeWidth * bs.widthMultiplier} opacity={s.opacity * bs.opacityMultiplier}
           tension={bs.tension} lineCap={s.lineCap} lineJoin="round"
           globalCompositeOperation={bs.blendMode}
@@ -1663,9 +1912,12 @@ export function Canvas() {
       const isMultiSelected = multiSelectedElements.some((m) => m.type === 'text' && m.id === el.id);
       // 多选包围盒拖拽/缩放预览：用 previewRect 覆盖几何
       const previewRect = multiPreviewRectMap.get(el.id);
+      // 书脊偏移（书脊向左扩展、内容固定）：封面区文字渲染右移 delta 固定不动；
+      // 书脊文字（spine-text-*）预览时按当前书脊宽重新居中（居中于书脊，与 logo 一致）
+      const elBase: PageTextElement = renderTextForSpine(el);
       const elWithPreview: PageTextElement = previewRect
-        ? { ...el, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
-        : el;
+        ? { ...elBase, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+        : elBase;
       items.push({
         z: el.zIndex || 0,
         typeOrder: 1,
@@ -1673,7 +1925,9 @@ export function Canvas() {
           key={el.id} el={elWithPreview} mmToPx={MM_TO_PX} canvasZoom={canvasZoom}
           isSelected={selectedTextId === el.id || isMultiSelected} isEditing={editingTextId === el.id}
           interactive={!isToolMode}
-          onUpdate={(p: Partial<PageTextElement>, rh?: boolean) => updateTextElement(currentPageIndex, el.id, p, rh)}
+          alignDrag={alignDrag}
+          onUpdate={(p: Partial<PageTextElement>, rh?: boolean) => updateTextElement(currentPageIndex, el.id,
+            !el.id.startsWith('spine-text-') && spineDeltaMm ? unshiftPatch(p) : p, rh)}
           onRemove={() => { removeTextElement(currentPageIndex, el.id); setSelectedTextId(null); setEditingTextId(null); }}
           onClick={(e) => {
             if (e.evt.ctrlKey || e.evt.metaKey) {
@@ -1694,83 +1948,84 @@ export function Canvas() {
     (currentPage.stickyNotes || []).forEach((note) => {
       const isMultiSelected = multiSelectedElements.some((m) => m.type === 'sticky' && m.id === note.id);
       const previewRect = multiPreviewRectMap.get(note.id);
-      const noteWithPreview: StickyNote = previewRect
-        ? { ...note, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+      // 预览书脊宽度变化：封面正面便利贴右移 delta（书脊区域便利贴保持）
+      const noteBase: StickyNote = spineDeltaMm && note.x >= spineAnchorMm
+        ? { ...note, x: note.x + spineDeltaMm }
         : note;
+      const noteWithPreview: StickyNote = previewRect
+        ? { ...noteBase, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+        : noteBase;
       items.push({
         z: note.zIndex || 0,
         typeOrder: 1,
         render: <StickyNoteNode
-          key={note.id} note={noteWithPreview} mmToPx={MM_TO_PX}
+          key={note.id} id={note.id} note={noteWithPreview} mmToPx={MM_TO_PX}
           canDrag={true}
           isSelected={selectedStickyId === note.id || isMultiSelected}
           interactive={!isToolMode}
-          onUpdate={(p: Partial<StickyNote>, rh?: boolean) => updateStickyNote(currentPageIndex, note.id, p, rh)}
-          onRemove={() => { removeStickyNote(currentPageIndex, note.id); setSelectedStickyId(null); }}
-          onRequestEdit={(_t: string) => { setTextEditCursorIndex(null); setEditingTextId(note.id); }}
-          onSelect={(e) => {
-            if (e.evt.ctrlKey || e.evt.metaKey) {
-              toggleMultiSelect({ type: 'sticky', id: note.id });
-            } else {
-              setSelectedStickyId(note.id);
-            }
-          }}
+          alignDrag={alignDrag}
+          onUpdate={(id, p, rh) => handleStickyUpdate(id,
+            spineDeltaMm && note.x >= spineAnchorMm ? unshiftPatch(p) : p, rh)}
+          onRemove={handleStickyRemove}
+          onRequestEdit={handleStickyRequestEdit}
+          onSelect={handleStickySelect}
         />,
       });
     });
     (currentPage.stickerElements || []).forEach((st) => {
       const isMultiSelected = multiSelectedElements.some((m) => m.type === 'sticker' && m.id === st.id);
       const previewRect = multiPreviewRectMap.get(st.id);
-      const stWithPreview: StickerElement = previewRect
-        ? { ...st, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+      // 预览书脊宽度变化：封面正面贴纸右移 delta（书脊区域贴纸保持）
+      const stBase: StickerElement = spineDeltaMm && st.x >= spineAnchorMm
+        ? { ...st, x: st.x + spineDeltaMm }
         : st;
+      const stWithPreview: StickerElement = previewRect
+        ? { ...stBase, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+        : stBase;
       // 多选模式下隐藏单独控制手柄（resize/旋转），由组包围盒统一控制
       const inMultiSelectMode = multiSelectedElements.length >= 2;
       items.push({
         z: st.zIndex || 0,
         typeOrder: 1,
         render: <StickerNode
-          key={st.id} sticker={stWithPreview} mmToPx={MM_TO_PX}
+          key={st.id} id={st.id} sticker={stWithPreview} mmToPx={MM_TO_PX}
           isSelected={selectedStickerId === st.id || isMultiSelected}
           showHandles={!inMultiSelectMode}
           interactive={!isToolMode}
-          onUpdate={(p: Partial<StickerElement>, rh?: boolean) => updateStickerElement(currentPageIndex, st.id, p, rh)}
-          onRemove={() => { removeStickerElement(currentPageIndex, st.id); setSelectedStickerId(null); }}
-          onSelect={(e) => {
-            if (e.evt.ctrlKey || e.evt.metaKey) {
-              toggleMultiSelect({ type: 'sticker', id: st.id });
-            } else {
-              setSelectedStickerId(st.id);
-            }
-          }}
+          alignDrag={alignDrag}
+          onUpdate={(id, p, rh) => handleStickerUpdate(id,
+            spineDeltaMm && st.x >= spineAnchorMm ? unshiftPatch(p) : p, rh)}
+          onRemove={handleStickerRemove}
+          onSelect={handleStickerSelect}
         />,
       });
     });
     (currentPage.shapeElements || []).forEach((sh) => {
       const isMultiSelected = multiSelectedElements.some((m) => m.type === 'shape' && m.id === sh.id);
       const previewRect = multiPreviewRectMap.get(sh.id);
-      const shWithPreview: ShapeElement = previewRect
-        ? { ...sh, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+      // 预览书脊宽度变化：封面正面形状右移 delta（书脊区域形状保持）
+      const shBase: ShapeElement = spineDeltaMm && sh.x >= spineAnchorMm
+        ? { ...sh, x: sh.x + spineDeltaMm }
         : sh;
+      const shWithPreview: ShapeElement = previewRect
+        ? { ...shBase, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+        : shBase;
+      const shShift = spineDeltaMm && sh.x >= spineAnchorMm;
+      const unshiftX = (x: number) => (shShift ? x - spineDeltaMm : x);
       items.push({
         z: sh.zIndex || 0,
         typeOrder: 1,
         render: <ShapeNode
-          key={sh.id} shape={shWithPreview} mmToPx={MM_TO_PX}
+          key={sh.id} id={sh.id} shape={shWithPreview} mmToPx={MM_TO_PX}
           isSelected={selectedShapeId === sh.id || isMultiSelected}
           // 形状在形状工具模式下也保持可交互（可点击选中），仅画笔/橡皮擦禁用，避免点击穿透到 Stage 误触发绘制
           interactive={activeTool !== 'brush' && activeTool !== 'eraser'}
           isMulti={isMultiSelected}
-          onSelect={(e) => {
-            if (e.evt.ctrlKey || e.evt.metaKey) {
-              toggleMultiSelect({ type: 'shape', id: sh.id });
-            } else {
-              setSelectedShapeId(sh.id);
-            }
-          }}
-          onMove={(x, y) => updateShapeElement(currentPageIndex, sh.id, { x, y }, false)}
-          onMoveEnd={(x, y) => updateShapeElement(currentPageIndex, sh.id, { x, y }, true)}
-          onUpdate={(p, rh) => updateShapeElement(currentPageIndex, sh.id, p, rh)}
+          alignDrag={alignDrag}
+          onSelect={handleShapeSelect}
+          onMove={(id, x, y) => handleShapeMove(id, unshiftX(x), y)}
+          onMoveEnd={(id, x, y) => handleShapeMoveEnd(id, unshiftX(x), y)}
+          onUpdate={(id, p, rh) => handleShapeUpdate(id, shShift ? unshiftPatch(p) : p, rh)}
         />,
       });
     });
@@ -1784,9 +2039,10 @@ export function Canvas() {
   })();
 
   return (
+    <div className="relative w-full h-full overflow-hidden pointer-events-none">
       <div
         data-canvas-container
-        className={`w-full h-full overflow-auto relative bg-[var(--color-gray-100)] transition-colors duration-150 ps-scroll ${canvasScroll.className}`}
+        className={`absolute inset-0 overflow-auto pointer-events-auto bg-[var(--color-gray-100)] transition-colors duration-150 ps-scroll ${canvasScroll.className}`}
         ref={canvasScroll.ref}
         {...canvasScroll.handlers}
         style={{
@@ -1794,7 +2050,9 @@ export function Canvas() {
             ? 'none'
             : activeTool === 'shape'
               ? 'crosshair'
-              : undefined,
+              : activeTool === 'text'
+                ? 'text'
+                : undefined,
         }}
       >
       {/* 拖拽提示：仅在页面外时显示，顶部居中 */}
@@ -1995,7 +2253,7 @@ export function Canvas() {
             if (activeTool === 'brush' && e.evt.button === 0) {
               isDrawingRef.current = true;
               const pos = stage.getPointerPosition()!;
-              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX - spineDeltaMm;
               const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
               brushPointsRef.current = [lx, ly, lx, ly];
               setDraggingElementId(null);
@@ -2003,6 +2261,48 @@ export function Canvas() {
             }
             if (activeTool === 'eraser') {
               // 橡皮擦由 Line onClick 处理，这里不做其他操作
+              return;
+            }
+
+            /* ── 文字工具：点击落点生成文本框（I 形光标，一次性：落点后退出文字模式） ── */
+            if (activeTool === 'text' && e.evt.button === 0) {
+              // 阻止 mousedown 默认行为（把焦点交给 canvas），否则 TextDomNode div.focus() 会被
+              // 浏览器默认焦点抢走 → onBlur → 编辑态立即取消，表现为"放置后未进入编辑"
+              e.evt.preventDefault();
+              const pos = stage.getPointerPosition()!;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX - spineDeltaMm;
+              const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
+              // 点击处为文本框左上角，宽 150、高随字号（沿用 handleAddText 默认值）
+              const fontSize = 20;
+              const el: PageTextElement = {
+                id: `text-${Date.now()}`,
+                x: lx, y: ly,
+                width: 150,
+                height: Math.round(fontSize * 1.2 + 4),
+                text: '',
+                fontSize,
+                fontFamily: '思源黑体',
+                color: '#212529',
+                align: 'left',
+                verticalAlign: 'center',
+                bold: false,
+                italic: false,
+                underline: false,
+                rotation: 0,
+                zIndex: 0,
+                lineHeight: DEFAULT_TEXT_LINE_HEIGHT,
+                letterSpacing: DEFAULT_TEXT_LETTER_SPACING,
+              };
+              addTextElement(currentPageIndexRef.current, el);
+              setSelectedTextId(el.id);
+              setSelectedStickyId(null);
+              setSelectedShapeId(null);
+              setTextEditCursorIndex(null);
+              clearMultiSelect();
+              // 立即进入编辑态（同步设置 editingTextId，TextDomNode 随之聚焦），并退出文字模式（一次性）
+              setEditingTextId(el.id);
+              setPendingTextEditId(null);
+              setActiveTool('none');
               return;
             }
 
@@ -2026,7 +2326,7 @@ export function Canvas() {
                 }
               }
               const pos = stage.getPointerPosition()!;
-              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX - spineDeltaMm;
               const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
               shapeStartRef.current = { x: lx, y: ly };
               shapeEndRef.current = { x: lx, y: ly };
@@ -2073,7 +2373,7 @@ export function Canvas() {
             /* ── 画笔绘制 ── */
             if (isDrawingRef.current && activeTool === 'brush') {
               const pos = stage.getPointerPosition()!;
-              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX - spineDeltaMm;
               const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
               brushPointsRef.current = [...brushPointsRef.current, lx, ly];
               // 更新实时显示的笔迹点（逻辑 px 坐标）
@@ -2085,7 +2385,7 @@ export function Canvas() {
             /* ── 形状绘制（拖拽实时预览，支持 PPT 修饰键：Shift 正形 / Alt 中心对称 / Shift+Alt 中心正形） ── */
             if (shapeStartRef.current && activeTool === 'shape') {
               const pos = stage.getPointerPosition()!;
-              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX;
+              const lx = (pos.x - groupOX) / canvasZoom / MM_TO_PX - spineDeltaMm;
               const ly = (pos.y - groupOY) / canvasZoom / MM_TO_PX;
               const start = shapeStartRef.current;
               shapeEndRef.current = { x: lx, y: ly };
@@ -2260,6 +2560,8 @@ export function Canvas() {
                 <>
                   {/* 印刷一体：书脊背面 + 封面正面 一整块连续背景 */}
                   <PageBackgroundRect bg={currentPage.background} backgroundImage={currentPage.backgroundImage} backgroundImageFit={currentPage.backgroundImageFit} w={CANVAS_W} h={CANVAS_H} />
+                  {/* 书脊底色：独立色块覆盖书脊区域（0..spinePx），与封面正面背景区分 */}
+                  <Rect x={0} y={0} width={spinePx} height={CANVAS_H} fill={spineBgColor} listening={false} />
                   <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} stroke={(!currentPage.background || currentPage.background === '#FFFFFF') ? '#E9ECEF' : 'rgba(0,0,0,0.06)'} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
                   {/* 折叠线：书脊与封面正面交界（印刷一体，仅视觉标记，不占宽度） */}
                   <Line
@@ -2268,18 +2570,24 @@ export function Canvas() {
                     strokeWidth={1} dash={[4, 3]} strokeScaleEnabled={false} listening={false}
                   />
 
-                  {/* 书脊 MemBook logo 水印（书脊背面顶部，半透明） */}
-                  {spineLogoImg && (
-                    <Image
-                      image={spineLogoImg}
-                      x={(spinePx - spinePx * 0.6) / 2}
-                      y={spinePx * 0.7}
-                      width={spinePx * 0.6}
-                      height={spinePx * 0.6 * (spineLogoImg.height / spineLogoImg.width)}
-                      opacity={0.8}
-                      listening={false}
-                    />
-                  )}
+                  {/* 书脊 MemBook logo 水印（书脊背面顶部，半透明，颜色可自定义）。
+                      logo 居中于书脊（书脊变宽时随书脊中心居中移动）、尺寸随书脊自适应（min(书脊宽×0.6,12) 封顶），
+                      顶部距页面顶边固定 SPINE_LOGO_TOP_MM=15mm。 */}
+                  {spineTintedLogo && (() => {
+                    const logoWmm = Math.min(spineWidthMm * 0.6, 12);
+                    const logoW = logoWmm * MM_TO_PX;
+                    return (
+                      <Image
+                        image={spineTintedLogo}
+                        x={((spineWidthMm - logoWmm) / 2) * MM_TO_PX}
+                        y={SPINE_LOGO_TOP_MM * MM_TO_PX}
+                        width={logoW}
+                        height={logoW * (spineTintedLogo.height / spineTintedLogo.width)}
+                        opacity={0.8}
+                        listening={false}
+                      />
+                    );
+                  })()}
                 </>
               ) : (
                 <>
@@ -2288,14 +2596,17 @@ export function Canvas() {
                 </>
               )}
 
-              {/* 边距虚线 —— 安全区边界（strokeScaleEnabled=false 保持所有缩放级别下线条一致） */}
+              {/* 边距虚线 —— 安全区边界（strokeScaleEnabled=false 保持所有缩放级别下线条一致）。
+                  封面页书脊为左侧物理扩展区，辅助线需排除书脊、按页面实际尺寸定位（与普通页一致） */}
               {showMarginGuide && albumSize && (() => {
-                const ml = (pageMargin.left / albumSize.width) * CANVAS_W;
-                const mr = (pageMargin.right / albumSize.width) * CANVAS_W;
+                const contentX = isCoverLike ? spinePx : 0;
+                const contentW = isCoverLike ? CANVAS_W - spinePx : CANVAS_W;
+                const ml = contentX + (pageMargin.left / albumSize.width) * contentW;
+                const mr = contentX + contentW - (pageMargin.right / albumSize.width) * contentW;
                 const mt = (pageMargin.top / albumSize.height) * CANVAS_H;
-                const mb = (pageMargin.bottom / albumSize.height) * CANVAS_H;
-                const mw = CANVAS_W - ml - mr;
-                const mh = CANVAS_H - mt - mb;
+                const mb = CANVAS_H - (pageMargin.bottom / albumSize.height) * CANVAS_H;
+                const mw = mr - ml;
+                const mh = mb - mt;
                 if (mw <= 0 || mh <= 0) return null;
                 return (
                   <Rect x={ml} y={mt} width={mw} height={mh}
@@ -2306,19 +2617,24 @@ export function Canvas() {
                 );
               })()}
 
-              {/* G - 辅助线（中线+三分线，strokeScaleEnabled=false 保持所有缩放级别下线条一致） */}
-              {showGuides && (
-                <>
-                  {[CANVAS_W / 3, CANVAS_W * 2 / 3].map((x) => (
-                    <Line key={`gv${x}`} points={[x, 0, x, CANVAS_H]} stroke="#94a3b8" strokeWidth={0.5} dash={[4, 6]} strokeScaleEnabled={false} listening={false} />
-                  ))}
-                  {[CANVAS_H / 3, CANVAS_H * 2 / 3].map((y) => (
-                    <Line key={`gh${y}`} points={[0, y, CANVAS_W, y]} stroke="#94a3b8" strokeWidth={0.5} dash={[4, 6]} strokeScaleEnabled={false} listening={false} />
-                  ))}
-                  <Line points={[CANVAS_W / 2, 0, CANVAS_W / 2, CANVAS_H]} stroke="#cbd5e1" strokeWidth={0.5} strokeScaleEnabled={false} listening={false} />
-                  <Line points={[0, CANVAS_H / 2, CANVAS_W, CANVAS_H / 2]} stroke="#cbd5e1" strokeWidth={0.5} strokeScaleEnabled={false} listening={false} />
-                </>
-              )}
+              {/* G - 辅助线（中线+三分线，strokeScaleEnabled=false 保持所有缩放级别下线条一致）。
+                  封面页按页面实际尺寸（排除书脊）定位，竖线落在内容区、横线不穿书脊 */}
+              {showGuides && (() => {
+                const contentX = isCoverLike ? spinePx : 0;
+                const contentW = isCoverLike ? CANVAS_W - spinePx : CANVAS_W;
+                return (
+                  <>
+                    {[contentX + contentW / 3, contentX + contentW * 2 / 3].map((x) => (
+                      <Line key={`gv${x}`} points={[x, 0, x, CANVAS_H]} stroke="#94a3b8" strokeWidth={0.5} dash={[4, 6]} strokeScaleEnabled={false} listening={false} />
+                    ))}
+                    {[CANVAS_H / 3, CANVAS_H * 2 / 3].map((y) => (
+                      <Line key={`gh${y}`} points={[contentX, y, contentX + contentW, y]} stroke="#94a3b8" strokeWidth={0.5} dash={[4, 6]} strokeScaleEnabled={false} listening={false} />
+                    ))}
+                    <Line points={[contentX + contentW / 2, 0, contentX + contentW / 2, CANVAS_H]} stroke="#cbd5e1" strokeWidth={0.5} strokeScaleEnabled={false} listening={false} />
+                    <Line points={[contentX, CANVAS_H / 2, contentX + contentW, CANVAS_H / 2]} stroke="#cbd5e1" strokeWidth={0.5} strokeScaleEnabled={false} listening={false} />
+                  </>
+                );
+              })()}
 
               {/* ── 全局图层：三种元素合并按 zIndex 排序渲染（在槽位之上） ── */}
               {/* useMemo 缓存：避免 Canvas 每次重渲染都重建元素数组+排序+map。
@@ -2700,6 +3016,49 @@ export function Canvas() {
             </Group>
           </Layer>
 
+          {/* ── 参考线 Layer（PS 从标尺拖出的参考线；Stage 空间正确坐标 = groupOX/OY + 逻辑px×zoom） ──
+              仅标尺开启时显示/可交互；双击删除、拖拽移动 */}
+          <Layer ref={guideLinesLayerRef} listening={rulerEnabled}>
+            {rulerEnabled && guideLines.map((g) => {
+              if (g.orientation === 'vertical') {
+                const sx = groupOX + g.position * MM_TO_PX * canvasZoom;
+                return (
+                  <Line
+                    key={g.id}
+                    x={sx} y={0}
+                    points={[0, 0, 0, scaledH]}
+                    stroke="#FF6B8B" strokeWidth={1} dash={[6, 4]}
+                    listening={true} draggable
+                    hitStrokeWidth={12 / canvasZoom}
+                    onDragEnd={(e) => updateGuideLinePosition(g.id, 'vertical', e.target.x())}
+                    onDblClick={(e) => { e.cancelBubble = true; removeGuideLine(g.id); }}
+                  />
+                );
+              }
+              const sy = groupOY + g.position * MM_TO_PX * canvasZoom;
+              return (
+                <Line
+                  key={g.id}
+                  x={0} y={sy}
+                  points={[0, 0, scaledW, 0]}
+                  stroke="#FF6B8B" strokeWidth={1} dash={[6, 4]}
+                  listening={true} draggable
+                  hitStrokeWidth={12 / canvasZoom}
+                  onDragEnd={(e) => updateGuideLinePosition(g.id, 'horizontal', e.target.y())}
+                  onDblClick={(e) => { e.cancelBubble = true; removeGuideLine(g.id); }}
+                />
+              );
+            })}
+            {/* 从标尺拖出中的临时参考线（预览，不参与交互） */}
+            {pendingGuide && (
+              pendingGuide.orientation === 'vertical' ? (
+                <Line x={groupOX + pendingGuide.positionPx * canvasZoom} y={0} points={[0, 0, 0, scaledH]} stroke="#FF6B8B" strokeWidth={1} dash={[6, 4]} opacity={0.7} listening={false} />
+              ) : (
+                <Line x={0} y={groupOY + pendingGuide.positionPx * canvasZoom} points={[0, 0, scaledW, 0]} stroke="#FF6B8B" strokeWidth={1} dash={[6, 4]} opacity={0.7} listening={false} />
+              )
+            )}
+          </Layer>
+
           {/* ── 对齐引导线 Layer（Stage 空间，坐标 × canvasZoom） ── */}
           <Layer ref={guidesLayerRef} listening={false} />
         </Stage>
@@ -2724,9 +3083,13 @@ export function Canvas() {
               .map(({ el }) => {
                 // 多选拖拽/缩放预览：与 Konva 层使用同一份预览几何
                 const previewRect = multiPreviewRectMap.get(el.id);
+                // 书脊偏移：显示文字（DOM 层）与 Konva 选中框使用同一渲染坐标（数据 + delta），
+                // 否则文字会随 groupOX 补偿往左移动（照片/形状固定而文字左移的根因）；
+                // 书脊文字（spine-text-*）由 renderTextForSpine 预览时按当前书脊宽重新居中（与 Konva 层一致）
+                const elBase = renderTextForSpine(el);
                 const elWithPreview: PageTextElement = previewRect
-                  ? { ...el, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
-                  : el;
+                  ? { ...elBase, x: previewRect.x / MM_TO_PX, y: previewRect.y / MM_TO_PX, width: previewRect.width / MM_TO_PX, height: previewRect.height / MM_TO_PX }
+                  : elBase;
                 return (
                   <TextDomNode
                     key={el.id}
@@ -2750,6 +3113,9 @@ export function Canvas() {
         {currentPage && editingTextId && (() => {
           const editingEl = currentPage.textElements?.find((e) => e.id === editingTextId);
           if (!editingEl) return null;
+          // 编辑手柄用渲染坐标（renderTextForSpine：书脊文字不偏移/用数据居中，封面区文字 + delta），
+          // 与显示文字/选中框一致；写回时仅封面区文字逆偏移（书脊文字不逆偏移）
+          const editEl = renderTextForSpine(editingEl);
           return (
             <div
               style={{
@@ -2758,9 +3124,10 @@ export function Canvas() {
               }}
             >
               <TextEditHandles
-                el={editingEl}
+                el={editEl}
                 canvasZoom={canvasZoom}
-                onUpdate={(p, rh) => updateTextElement(currentPageIndex, editingEl.id, p, rh)}
+                onUpdate={(p, rh) => updateTextElement(currentPageIndex, editingEl.id,
+                  !editingEl.id.startsWith('spine-text-') && spineDeltaMm ? unshiftPatch(p) : p, rh)}
               />
             </div>
           );
@@ -2770,12 +3137,15 @@ export function Canvas() {
         {selectedTextId && (() => {
           const el = currentPage?.textElements?.find((e) => e.id === selectedTextId);
           if (!el) return null;
+          // 工具栏用渲染坐标（renderTextForSpine：书脊文字不偏移/用数据居中，封面区文字 + delta），
+          // 与显示文字/选中框一致；el.id 用于动作
+          const renderEl = renderTextForSpine(el);
           // AABB 包围盒定位（与便利贴工具栏一致）：旋转后始终在视觉上方
-          const elRot = el.rotation ?? 0;
-          const elW = el.width;
-          const elH = el.height ?? 20;
-          const centerX = el.x + elW / 2;
-          const centerY = el.y + elH / 2;
+          const elRot = renderEl.rotation ?? 0;
+          const elW = renderEl.width;
+          const elH = renderEl.height ?? 20;
+          const centerX = renderEl.x + elW / 2;
+          const centerY = renderEl.y + elH / 2;
           const rad = elRot * Math.PI / 180;
           const bboxTopMm = centerY - (Math.abs(elW / 2 * Math.sin(rad)) + Math.abs(elH / 2 * Math.cos(rad)));
           const bboxBottomMm = centerY + (Math.abs(elW / 2 * Math.sin(rad)) + Math.abs(elH / 2 * Math.cos(rad)));
@@ -2837,7 +3207,9 @@ export function Canvas() {
           const boxH = Math.max(el.height * MM_TO_PX, 40) * canvasZoom;
           const textPad = 8 * canvasZoom;
           const elRotation = el.rotation ?? 0;
-          const tlX = el.x * MM_TO_PX * canvasZoom + groupOX;
+          // 书脊偏移：编辑浮层用渲染坐标（封面正面 + delta，与 Konva StickyNoteNode 一致）
+          const sx = spineDeltaMm && el.x >= spineAnchorMm ? el.x + spineDeltaMm : el.x;
+          const tlX = sx * MM_TO_PX * canvasZoom + groupOX;
           const tlY = el.y * MM_TO_PX * canvasZoom + groupOY;
           const saveText = () => {
             const val = editTextRef.current?.innerText?.replace(/\u200b/g, '') || '';
@@ -2900,7 +3272,9 @@ export function Canvas() {
           const rad = (note.rotation ?? 0) * Math.PI / 180;
           const halfW = note.width / 2;
           const halfH = note.height / 2;
-          const centerX = note.x + note.width / 2;
+          // 书脊偏移：工具栏用渲染坐标（封面正面 + delta，与 Konva StickyNoteNode 一致）
+          const nx = spineDeltaMm && note.x >= spineAnchorMm ? note.x + spineDeltaMm : note.x;
+          const centerX = nx + note.width / 2;
           const centerY = note.y + note.height / 2;
           // 包围盒顶部（mm）：旋转后便利贴最高点
           const bboxTopMm = centerY - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
@@ -2964,8 +3338,9 @@ export function Canvas() {
           const bboxTopMm = st.y - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
           // 48px 偏移转换为 mm（屏幕固定像素，不随缩放变化）
           const offsetMm = 48 / (MM_TO_PX * canvasZoom);
-          // 工具栏 X = 贴纸中心 X（水平居中，旋转中心不变）
-          const toolX = st.x * MM_TO_PX * canvasZoom + groupOX;
+          // 工具栏 X = 贴纸中心 X（水平居中，旋转中心不变）；封面正面 + delta 与 Konva StickerNode 一致
+          const stx = spineDeltaMm && st.x >= spineAnchorMm ? st.x + spineDeltaMm : st.x;
+          const toolX = stx * MM_TO_PX * canvasZoom + groupOX;
           // 工具栏 Y = 包围盒顶部 - 偏移（始终在贴纸视觉上方，不遮挡图案）
           const toolY = (bboxTopMm - offsetMm) * MM_TO_PX * canvasZoom + groupOY;
           return (
@@ -3019,7 +3394,8 @@ export function Canvas() {
           const rad = (sh.rotation ?? 0) * Math.PI / 180;
           const halfW = sh.width / 2;
           const halfH = sh.height / 2;
-          const centerX = sh.x;
+          // 书脊偏移：工具栏用渲染坐标（封面正面 + delta，与 Konva ShapeNode 一致）；sh.x 为中心点
+          const centerX = spineDeltaMm && sh.x >= spineAnchorMm ? sh.x + spineDeltaMm : sh.x;
           const centerY = sh.y;
           // AABB 包围盒顶部/底部（旋转后）
           const bboxTopMm = centerY - (Math.abs(halfW * Math.sin(rad)) + Math.abs(halfH * Math.cos(rad)));
@@ -3247,24 +3623,30 @@ export function Canvas() {
             } else if (m.type === 'text') {
               const el = currentPage?.textElements?.find((e) => e.id === m.id);
               if (!el) continue;
-              x = el.x * MM_TO_PX; y = el.y * MM_TO_PX; w = el.width * MM_TO_PX; h = el.height * MM_TO_PX;
+              // 书脊偏移：renderTextForSpine（封面区文字 + delta；书脊文字不偏移/用数据居中，与显示一致）
+              const renderEl = renderTextForSpine(el);
+              x = renderEl.x * MM_TO_PX; y = renderEl.y * MM_TO_PX; w = renderEl.width * MM_TO_PX; h = renderEl.height * MM_TO_PX;
             } else if (m.type === 'sticky') {
               const note = currentPage?.stickyNotes?.find((n) => n.id === m.id);
               if (!note) continue;
-              x = note.x * MM_TO_PX; y = note.y * MM_TO_PX; w = note.width * MM_TO_PX; h = note.height * MM_TO_PX;
+              // 书脊偏移：封面正面便利贴渲染坐标 + delta
+              const nx = spineDeltaMm && note.x >= spineAnchorMm ? note.x + spineDeltaMm : note.x;
+              x = nx * MM_TO_PX; y = note.y * MM_TO_PX; w = note.width * MM_TO_PX; h = note.height * MM_TO_PX;
             } else if (m.type === 'sticker') {
               const st = currentPage?.stickerElements?.find((s) => s.id === m.id);
               if (!st) continue;
-              // StickerElement.x/y 是中心点，需转换为左上角
-              x = (st.x - st.width / 2) * MM_TO_PX;
+              // StickerElement.x/y 是中心点，需转换为左上角；封面正面 + delta
+              const stx = spineDeltaMm && st.x >= spineAnchorMm ? st.x + spineDeltaMm : st.x;
+              x = (stx - st.width / 2) * MM_TO_PX;
               y = (st.y - st.height / 2) * MM_TO_PX;
               w = st.width * MM_TO_PX;
               h = st.height * MM_TO_PX;
             } else if (m.type === 'shape') {
               const sh = currentPage?.shapeElements?.find((s) => s.id === m.id);
               if (!sh) continue;
-              // ShapeElement.x/y 是中心点，需转换为左上角
-              x = (sh.x - sh.width / 2) * MM_TO_PX;
+              // ShapeElement.x/y 是中心点，需转换为左上角；封面正面 + delta
+              const shx = spineDeltaMm && sh.x >= spineAnchorMm ? sh.x + spineDeltaMm : sh.x;
+              x = (shx - sh.width / 2) * MM_TO_PX;
               y = (sh.y - sh.height / 2) * MM_TO_PX;
               w = sh.width * MM_TO_PX;
               h = sh.height * MM_TO_PX;
@@ -3370,6 +3752,21 @@ export function Canvas() {
         })()}
       </div>
 
+    </div>
+
+      {/* ── 标尺（视口固定，覆盖于滚动容器之上；仅标尺条可交互） ── */}
+      {rulerEnabled && (
+        <CanvasRulers
+          scrollEl={containerRef.current}
+          groupOX={groupOX}
+          groupOY={groupOY}
+          zoom={canvasZoom}
+          canvasW={CANVAS_W}
+          canvasH={CANVAS_H}
+          onGuideDrag={handleRulerGuideDrag}
+          onGuideEnd={handleRulerGuideEnd}
+        />
+      )}
     </div>
   );
 }

@@ -285,6 +285,8 @@
       "backCoverBadge": "📗 Back cover",
       "use": "Use",
       "defaultAlbumName": "My Album",
+      "previewBtn": "Click to view cover / back cover",
+      "previewTitle": "Cover preview",
       "hint": "Click \"Use\" to create an album with this cover and open the editor. Every cover comes with a matching back cover that is applied automatically, so cover and back cover stay one integrated design. You can then freely change photos, double-click text to edit, or use the Tools panel to add shapes and adjust fonts and colors."
     },
     "emptyState": {
@@ -361,6 +363,8 @@
         "morePhotos": "{{count}} more photos",
         "autoRecognized": "Auto-detected",
         "notRecognized": "Not detected",
+        "copyNameHint": "Click to copy file name",
+        "copyNameToast": "Copied file name: {{name}}",
         "singleDatePlaceholder": "YYYY-MM-DD HH:MM:SS",
         "modify": "Modify",
         "modifying": "Modifying...",
@@ -1139,6 +1143,18 @@
       "hideThumbnails": "Hide page thumbnails",
       "showThumbnails": "Show page thumbnails",
       "pages": "Pages",
+      "align": "Align",
+      "enableAlign": "Enable alignment snapping and guides",
+      "disableAlign": "Disable alignment snapping and guides",
+      "ruler": "Ruler",
+      "enableRuler": "Show rulers",
+      "disableRuler": "Hide rulers",
+      "marginGuide": "Margin",
+      "enableMarginGuide": "Show margin guides (safe area)",
+      "disableMarginGuide": "Hide margin guides",
+      "guides": "Guides",
+      "enableGuides": "Show page guides (thirds/center)",
+      "disableGuides": "Hide page guides",
       "pageCount": "/{{count}} pages",
       "clickToJump": "Click to enter page number",
       "collapsedPageLabel": "Page {{current}}/{{total}}",
@@ -1205,16 +1221,22 @@
       "elementsHint": "After adding, select on canvas to edit properties in the right panel",
       "stickySection": "Sticky Notes",
       "addText": "Add Text",
+      "textModeHint": "Click \"Add Text\", then click on the canvas to place a text box at that position",
       "quickStyles": "Quick Styles",
       "textProperties": "Text Properties",
       "textTabBasic": "Basic",
       "textTabColor": "Color",
       "fontFamily": "Font",
+      "fontGroupBundled": "Bundled Art",
+      "fontGroupSystem": "System",
+      "fontGroupLocal": "Local",
+      "fontSearchPlaceholder": "Search fonts…",
+      "fontNoMatch": "No matching fonts",
       "fontSize": "Size",
       "bold": "Bold",
       "italic": "Italic",
       "textColor": "Text Color",
-      "align": "Align",
+      "align": "Horizontal Align",
       "alignLeft": "Left",
       "alignCenter": "Center",
       "alignRight": "Right",
@@ -1479,6 +1501,7 @@
     "bookPreview": {
       "title": "Realistic Preview",
       "rendering": "Generating flip preview…",
+      "generatingPages": "Generating preview pages {{current}}/{{total}}",
       "page": "Page {{current}} / {{total}}",
       "prev": "Previous",
       "next": "Next",
@@ -1994,9 +2017,13 @@
     },
     "coverSettings": {
       "title": "Cover Settings",
+      "coverSection": "Cover / Back",
       "coverSlotRadius": "Cover Photo Corner Radius",
       "spine": "Spine",
       "spineColor": "Spine Color",
+      "spineLogoColor": "Logo Color",
+      "spineLogoAuto": "Auto",
+      "spineWidth": "Spine Width",
       "uniform": "Uniform",
       "perCorner": "Per Corner",
       "cornerTL": "TL",
@@ -2117,29 +2144,37 @@
     "author": "Author",
     "authorName": "Daishi de Xiezi",
     "featuresList": {
-      "customSize": {
-        "title": "Custom Size",
-        "desc": "Built-in square, portrait, landscape, mini, print and paper standards, with custom mm size support"
+      "spineCover": {
+        "title": "Spine & Hardcover",
+        "desc": "Adjustable spine width/color/logo, matching cover & back templates, live canvas preview"
+      },
+      "flipPreview": {
+        "title": "Page-Flip Preview",
+        "desc": "Real hardcover flipbook, progressive rendering opens instantly"
       },
       "smartLayout": {
         "title": "One-Click Album",
         "desc": "Auto-layout after importing photos, no manual dragging needed"
       },
-      "filterAdjust": {
-        "title": "Filter & Color",
-        "desc": "Light, color, vignette adjustments + one-click filters"
+      "coverTemplates": {
+        "title": "Cover Template Library",
+        "desc": "8+8 matching cover & back templates + custom template creator"
       },
-      "brushStickyText": {
-        "title": "Brush / Sticky / Text",
-        "desc": "Sketch, sticky notes, titles — tell your album's story"
+      "rulerAlign": {
+        "title": "Ruler & Alignment",
+        "desc": "PS-style rulers & guide lines, snapping and guides for precise layout"
+      },
+      "creativeTools": {
+        "title": "Creative Tools",
+        "desc": "Brush, sticky notes, text, shapes and stickers for decoration"
+      },
+      "organizeTools": {
+        "title": "Photo Organizing Toolkit",
+        "desc": "Dedupe, EXIF, convert, faces, similar, timeline and calendar"
       },
       "localFirst": {
         "title": "Local First",
-        "desc": "All data is kept on your device, nothing uploaded"
-      },
-      "dataMigration": {
-        "title": "Data Migration",
-        "desc": "Export the entire album project as a zip for sharing / backup / cross-device"
+        "desc": "Dual-mode storage + HEIC decoding, all data stays on your device"
       }
     },
     "clearActivationTitle": "Clear Activation",
@@ -2185,16 +2220,18 @@
     "releaseDate": "Release Date",
     "releaseNotes": "Release Notes",
     "noNotes": "No release notes available",
+    "update": "Update",
     "downloadNow": "Update Now",
-    "remindLater": "Remind Me Later",
+    "remindLater": "Cancel",
     "downloading": "Downloading update...",
     "installing": "Installing update...",
     "downloadProgress": "Downloaded {{downloaded}} / {{total}}",
-    "installAndRestart": "Install and Restart",
+    "installAndRestart": "Update Now",
     "updateComplete": "Download complete. Click the button below to install and restart.",
     "updateFailed": "Update failed: {{message}}",
     "alreadyLatest": "You're on the latest version",
-    "checkingForUpdates": "Checking for updates..."
+    "checkingForUpdates": "Checking for updates...",
+    "autoDownloading": "Downloading v{{version}} in the background"
   },
   "hooks": {
     "photoImport": {

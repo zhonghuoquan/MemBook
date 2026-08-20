@@ -10,31 +10,62 @@
  * - 点击选中、拖拽移动
  * - 选中态虚线边框
  */
-import { memo, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import { Group, Rect, Image as KonvaImage, Circle, Line, Text } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import { useUIStore } from '../../../store';
 import { useStickerImage } from '../../../hooks/useStickerSrc';
 import type { StickerElement } from '../../../types';
+import type { AlignBounds } from '../../../engine/alignment-engine';
 
 function StickerNodeImpl({
-  sticker, mmToPx, isSelected, showHandles = true, interactive = true,
-  onUpdate, onRemove: _onRemove, onSelect,
+  sticker, id, mmToPx, isSelected, showHandles = true, interactive = true,
+  onUpdate: onUpdateRaw, onSelect: onSelectRaw, alignDrag,
 }: {
   sticker: StickerElement;
+  /** 元素唯一 id，回传到父级统一处理器（使回调引用稳定，配合 React.memo 生效） */
+  id: string;
   mmToPx: number;
   isSelected: boolean;
   /** 是否显示 resize/旋转等单独控制手柄。多选模式下应设为 false，由组包围盒统一控制 */
   showHandles?: boolean;
   /** 是否可交互（画笔/橡皮擦模式下设为 false，禁用选中/拖拽，让事件穿透到 Stage） */
   interactive?: boolean;
-  onUpdate: (patch: Partial<StickerElement>, recordHistory?: boolean) => void;
-  onRemove: () => void;
-  onSelect: (e: KonvaEventObject<MouseEvent>) => void;
+  onUpdate: (id: string, patch: Partial<StickerElement>, recordHistory?: boolean) => void;
+  onRemove: (id: string) => void;
+  onSelect: (id: string, e: KonvaEventObject<MouseEvent>) => void;
+  /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
+  alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
   const px = sticker.x * mmToPx;
   const py = sticker.y * mmToPx;
+  // 本地包装：注入本元素 id，内部既有调用点签名不变；useCallback 保证引用稳定，
+  // 避免 effect 依赖（含 onUpdate/onSelect）每次渲染重建导致 Konva 事件反复重绑。
+  const onUpdate = useCallback(
+    (patch: Partial<StickerElement>, recordHistory?: boolean) => onUpdateRaw(id, patch, recordHistory),
+    [onUpdateRaw, id],
+  );
+  const onSelect = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => onSelectRaw(id, e),
+    [onSelectRaw, id],
+  );
+  // 拖拽对齐：记录起始指针 + 起始中心（mm），每帧叠加吸附偏移写回节点位置
+  const dragRef = useRef({ startX: 0, startY: 0, startNx: 0, startNy: 0 });
+  const alignCandidate = useCallback(
+    (cx: number, cy: number) => {
+      if (!alignDrag) return { x: cx, y: cy };
+      const bounds: AlignBounds = {
+        x: (cx - sticker.width / 2) * mmToPx,
+        y: (cy - sticker.height / 2) * mmToPx,
+        width: sticker.width * mmToPx,
+        height: sticker.height * mmToPx,
+      };
+      const { offsetX, offsetY } = alignDrag(bounds, id);
+      return { x: cx + offsetX / mmToPx, y: cy + offsetY / mmToPx };
+    },
+    [alignDrag, id, sticker.width, sticker.height, mmToPx],
+  );
   const pw = Math.max(sticker.width * mmToPx, 20);
   const ph = Math.max(sticker.height * mmToPx, 20);
   const canvasZoom = useUIStore((s) => s.canvasZoom);
@@ -252,10 +283,23 @@ function StickerNodeImpl({
       onMouseLeave={() => setHovered(false)}
       onDragStart={(e) => {
         e.cancelBubble = true;
+        const stage = e.target.getStage()!;
+        const sp = stage.getPointerPosition()!;
+        dragRef.current = { startX: sp.x, startY: sp.y, startNx: sticker.x, startNy: sticker.y };
       }}
       onDragMove={(e) => {
-        // 不调用 onUpdate，避免 Konva 拖拽位置与 React state 重新渲染冲突导致闪烁放大
+        // 不调用 onUpdate，避免 Konva 拖拽位置与 React state 重新渲染冲突导致闪烁放大；
+        // 对齐吸附直接写节点位置（konva 下一帧会按指针重算，与照片位拖拽行为一致）
         e.cancelBubble = true;
+        const { startX, startY, startNx, startNy } = dragRef.current;
+        const stage = e.target.getStage()!;
+        const pos = stage.getPointerPosition();
+        if (!pos) return;
+        const dx = (pos.x - startX) / mmToPx / canvasZoom;
+        const dy = (pos.y - startY) / mmToPx / canvasZoom;
+        const aligned = alignCandidate(startNx + dx, startNy + dy);
+        e.target.x(aligned.x * mmToPx);
+        e.target.y(aligned.y * mmToPx);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;

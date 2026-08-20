@@ -16,6 +16,7 @@ import { LRUCache } from '../../../utils/lruCache';
 import { isImageBitmapSupported } from '../../../utils/imageBitmapLoader';
 import { logger } from '../../../utils/logger';
 import { getCachedContentInfo, ensurePhotoAnalyzed, computeSmartObjectPosition } from '../../../engine/content-aware';
+import { consumePhotoJustPlaced, hasPhotoJustPlaced } from './photoJustPlaced';
 
 // ── 模块级图像缓存：避免进入编辑模式时照片闪烁/漂移 ──
 // 非编辑和编辑模式使用不同的 CanvasPhotoRenderer 实例，
@@ -53,20 +54,9 @@ function evictImage(_key: string, img: CachedImage) {
 }
 export const imageCache = new LRUCache<string, CachedImage>(IMAGE_CACHE_CAPACITY, evictImage);
 
-// ── 拖拽放置动效：跟踪"刚放置"的照片 ──
-// 用模块级 Set 而非 placement 字段，避免污染历史快照和类型定义。
-// key = `${slotId}-${photoId}`，drop 成功后标记，动画完成后消费。
-const justPlacedKeys = new Set<string>();
-
-/** 标记刚通过拖拽放置的照片（由 useDragDrop 调用） */
-export function markPhotoJustPlaced(slotId: string, photoId: string): void {
-  justPlacedKeys.add(`${slotId}-${photoId}`);
-}
-
-/** 消费标记（动画完成后调用，避免重复触发） */
-function consumePhotoJustPlaced(key: string): void {
-  justPlacedKeys.delete(key);
-}
+// ── 拖拽放置动效：抽到 photoJustPlaced.ts（零依赖），
+// 被 useDragDrop（照片列表拖入槽位）与重排服务（pageLayoutService）共用。
+export { markPhotoJustPlaced } from './photoJustPlaced';
 
 /** 统一的图像就绪检查：HTMLImageElement 看 complete+naturalWidth，ImageBitmap 看 width
  *  P0-fix: ImageBitmap close() 后 width 返回 0，某些实现访问属性可能抛异常，用 try-catch 兜底 */
@@ -608,7 +598,7 @@ export function CanvasPhotoRenderer({
   useLayoutEffect(() => {
     if (!loaded || !placement?.slotId) return;
     const key = `${placement.slotId}-${photo.id}`;
-    if (!justPlacedKeys.has(key)) return;
+    if (!hasPhotoJustPlaced(placement.slotId, photo.id)) return;
 
     const node = internalRef.current;
     if (!node) return;

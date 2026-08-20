@@ -3,7 +3,7 @@
  * 基于 Dexie.js 实现项目保存/加载/列表
  */
 import Dexie, { type Table } from 'dexie';
-import type { AlbumProject, AlbumPage, Photo, CustomTemplate, SlotLayout, PageMargin } from '../types';
+import type { AlbumProject, AlbumPage, Photo, CustomTemplate, SlotLayout, PageMargin, AlbumGuideLine } from '../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, isCoverPage } from '../types';
 import { SPINE_GAP_MM, MM_TO_PX } from '../components/editor/canvas/constants';
 import { logger } from '../utils/logger';
@@ -692,6 +692,8 @@ let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 type AutoSaveDataProvider = () => {
   pages: AlbumProject['pages'];
   photos: Photo[];
+  /** 相册级参考线（随自动保存持久化） */
+  guideLines: AlbumGuideLine[];
   /** 待持久化的脏照片 ID（增量保存，避免每次全量写 photos 表） */
   dirtyPhotoIds: string[];
   /** 保存成功后清除已持久化的脏标记（仅清除本次快照的 ID） */
@@ -751,13 +753,13 @@ export function scheduleAutoSave(delayMs = 5000): void {
   autoSaveTimer = setTimeout(async () => {
     try {
       if (!autoSaveProvider) return;
-      const { pages, photos, dirtyPhotoIds, clearDirtyPhotoIds } = autoSaveProvider();
+      const { pages, photos, guideLines, dirtyPhotoIds, clearDirtyPhotoIds } = autoSaveProvider();
       if (pages.length > 0) {
         const projectId = getCurrentProjectId();
         if (projectId) {
           const existing = await loadProject(projectId);
           const updated: AlbumProject | null = existing
-            ? { ...existing, pages, updatedAt: new Date().toISOString() }
+            ? { ...existing, pages, guideLines, updatedAt: new Date().toISOString() }
             : null;
           if (updated) {
             await saveProject(updated);

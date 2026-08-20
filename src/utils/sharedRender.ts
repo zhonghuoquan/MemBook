@@ -14,6 +14,60 @@ import { getCachedContentInfo, computeSmartObjectPosition, type PhotoContentInfo
 /** 编辑器内部使用的 mm→px 转换系数 */
 export const MM_TO_PX = 2;
 
+/** 判断十六进制颜色是否为深色背景（亮度感知加权） */
+export function isDarkBackground(hex: string): boolean {
+  const c = hex.replace('#', '');
+  if (c.length < 6) return false;
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
+}
+
+/* ══════════════════════════ 书脊 logo 水印 ══════════════════════════ */
+
+/** 书脊 MemBook logo 距页面顶边固定距离（mm）：用户要求 logo 固定不动，始终位于顶边向下 15mm。画布/导出一致。 */
+export const SPINE_LOGO_TOP_MM = 15;
+
+/** 书脊日期文字距页面底边固定距离（mm）：与顶部 logo 顶边距 SPINE_LOGO_TOP_MM 镜像对称，均固定 15mm。
+ * 三处（新建 buildSpineElements / 画布预览 renderTextForSpine / 确认 applySpineSettings）必须共用，禁止各自硬编码。 */
+export const SPINE_DATE_BOTTOM_MM = 15;
+
+/**
+ * 书脊 MemBook logo 水印颜色：
+ * 用户设置了 spineLogoColor 用其值；否则按书脊底色深浅自动黑/白（深底白、浅底黑）。
+ * 画布与导出引擎共用，保证两端一致。
+ */
+export function resolveSpineLogoColor(
+  spineColor: string | undefined,
+  spineLogoColor: string | undefined,
+): string {
+  if (spineLogoColor) return spineLogoColor;
+  return isDarkBackground(spineColor || '#FFFFFF') ? '#FFFFFF' : '#000000';
+}
+
+/**
+ * 将单色 logo 位图重着色为指定颜色（source-in 合成），返回同尺寸 HTMLCanvasElement。
+ * 仅主线程使用（画布 Konva Image / 导出 ctx.drawImage）；缩略图不渲染书脊故不调用。
+ * 函数体用到 document，仅在调用时执行，Worker 模块导入不受影响。
+ */
+export function tintMonochromeImage(
+  img: HTMLImageElement | ImageBitmap,
+  color: string,
+): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = img.width;
+  c.height = img.height;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    ctx.drawImage(img, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  return c;
+}
+
 /* ══════════════════════════ 纹理背景 tile 绘制 ══════════════════════════ */
 
 /** 纹理背景基础色（与画布/导出一致） */

@@ -3,11 +3,11 @@
 > 一款运行在桌面的电子相册制作工具，所有数据保存在你的设备上，不上传服务器。支持自定义尺寸、一键成册、模板套用、滤镜调色、HEIC 解码、PDF 导出、直连打印等完整工作流。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.9-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
-- **版本**：1.0.0
+- **版本**：1.0.9
 - **标识符**：`app.membook.desktop`
 - **技术栈**：Tauri 2 + React 19 + TypeScript + Konva 10 + Zustand 5 + Tailwind 4 + Dexie 4 (IndexedDB) + Rust
 - **平台**：Windows（主要）/ macOS 10.15+ / Linux
@@ -17,7 +17,7 @@
 ## 产品主页
 
 - 产品官网与下载：<https://zhonghuoquan.github.io/membook-home/>
-- 桌面安装包：`download/MemBook_1.0.0_x64-setup.exe`（约 13MB，NSIS）
+- 桌面安装包：`download/MemBook_1.0.9_x64-setup.exe`（约 13MB，NSIS）
 
 ---
 
@@ -68,7 +68,7 @@ git remote add cnb     https://cnb.cool/MemBook-Flash/MemBook.git   # cnb.cool
 
 - **Canvas 画布**：基于 Konva 的高性能 2D 渲染，支持缩放/平移/键盘快捷键
 - **模板系统**：184 种版式（120 内置 + 64 生成，1-12 图，覆盖留白/胶片/杂志英雄/瀑布流/中心环绕/L 型/网格阵列等有呼吸感版式）、自定义模板创建器（拖拽/缩放槽位）、自定义模板分组筛选（首页与编辑模式均可用）、智能切换、模板内置照片位可删除至空白
-- **封面/封底设计系统**：8 款封面 + 8 款配套封底成套模板（全英文衬线文案、真实照片占位、Mixbook 风格），一键应用封面自动同步生成配套封底；封面页左侧**书脊**为物理扩展区（宽度/底色可调，可自由添加文字/形状）；独立「封面设置」弹窗管理封面/封底照片位圆角与书脊底色；共享 `CoverPreview` 组件在主页与编辑器呈现铰链折痕/落地投影实物效果
+- **封面/封底设计系统**：8 款封面 + 8 款配套封底成套模板（全英文衬线文案、真实照片占位、Mixbook 风格），一键应用封面自动同步生成配套封底；封面页左侧**书脊**为物理扩展区（宽度/底色/Logo 颜色可调，可自由添加文字/形状）；「封面设置」右侧面板管理封面/封底照片位圆角、书脊底色、书脊 Logo 颜色与书脊宽度，修改时**画布实时预览、确认才生效**；共享 `CoverPreview` 组件在主页与编辑器呈现铰链折痕/落地投影实物效果
 - **形状工具**：矩形/圆形/线条/箭头等形状绘制（以点击点为原点、拖拽实时预览、一次性使用），支持线性/径向透明渐变填充
 - **主题系统**：背景色 / 装饰元素 / 水印（时间地点水印，自动逆地理编码）
 - **照片操作**：拖拽填充、旋转、缩放、平移、移除、批量操作
@@ -317,7 +317,7 @@ npm run desktop:build:debug # 调试版桌面端
 
 - **前端**：`dist/`（Vite 构建）
 - **桌面安装包**（NSIS，跳过 WiX/MSI 减少依赖）：
-  - `src-tauri/target/release/bundle/nsis/MemBook_1.0.0_x64-setup.exe`（约 13MB）
+  - `src-tauri/target/release/bundle/nsis/MemBook_1.0.9_x64-setup.exe`（约 13MB）
 - **签名**：`.sig` 文件用于自动更新校验
 
 ### 测试
@@ -357,7 +357,8 @@ npm run desktop:build:debug # 调试版桌面端
 - 私钥（`.tauri/membook-updater.key`）绝不提交，仅提交公钥
 - 激活码生成器（`tools/license-generator/`）含 RSA 私钥，不提交
 - Canvas 2D 渲染需 `ensureCanvasSafeUrl` 转换非同源 URL，避免 canvas 污染
-- Tauri 自动更新需 CSP 允许 `updates.membook.app` 和 GitHub 域名
+- 自动更新清单由 CI（`release.yml`）生成，随版本发布到 GitHub Releases，更新源指向 `releases/latest/download/update-<target>-<arch>.json`
+- CSP `connect-src` 需允许 GitHub 下载域（`https://github.com`、`https://*.githubusercontent.com`），updater 下载才不中断
 - CSP `connect-src` 必须包含 `blob:`，否则 `fetch(blob:url)` 加载 ImageBitmap 会被拦截导致页面崩溃
 - `tauri.conf.json` 的 bundle targets 必须为 `["nsis"]`，跳过 WiX/MSI 减少依赖
 - 入口 `main.tsx` 不使用 `<StrictMode>`：react-konva 19.x 的 `<Transformer>` 在 React 19 开发期 StrictMode 双挂载下会抛 `setAttrs` 崩溃，导致 Konva 画布不渲染（形状/槽位不显示）

@@ -8,29 +8,64 @@
  * - 旋转手柄（白色圆底 + ↻ 图标，以中心点旋转，单击旋转 90°）
  * - 点击选中、拖拽移动、双击编辑
  */
-import { memo, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Group, Rect, Text, Circle, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import { useUIStore } from '../../../store';
 import type { StickyNote } from '../../../types';
+import type { AlignBounds } from '../../../engine/alignment-engine';
 
 function StickyNoteNodeImpl({
-  note, mmToPx, isSelected, interactive = true, onUpdate, onRemove: _onRemove, onRequestEdit, onSelect,
+  note, id, mmToPx, isSelected, interactive = true,
+  onUpdate: onUpdateRaw, onRequestEdit: onRequestEditRaw, onSelect: onSelectRaw, alignDrag,
 }: {
   note: StickyNote;
+  /** 元素唯一 id，回传到父级统一处理器（使回调引用稳定，配合 React.memo 生效） */
+  id: string;
   mmToPx: number;
   canDrag: boolean;
   isSelected: boolean;
   /** 是否可交互（画笔/橡皮擦模式下设为 false，禁用选中/拖拽，让事件穿透到 Stage） */
   interactive?: boolean;
-  onUpdate: (patch: Partial<StickyNote>, recordHistory?: boolean) => void;
-  onRemove: () => void;
-  onRequestEdit: (text: string) => void;
-  onSelect: (e: KonvaEventObject<MouseEvent>) => void;
+  onUpdate: (id: string, patch: Partial<StickyNote>, recordHistory?: boolean) => void;
+  onRemove: (id: string) => void;
+  onRequestEdit: (id: string, text: string) => void;
+  onSelect: (id: string, e: KonvaEventObject<MouseEvent>) => void;
+  /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
+  alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
   const { t } = useTranslation();
+  // 本地包装：注入本元素 id，内部既有调用点签名不变；useCallback 保证引用稳定，
+  // 避免 effect 依赖（含 onUpdate/onSelect）每次渲染重建导致 Konva 事件反复重绑。
+  const onUpdate = useCallback(
+    (patch: Partial<StickyNote>, recordHistory?: boolean) => onUpdateRaw(id, patch, recordHistory),
+    [onUpdateRaw, id],
+  );
+  const onSelect = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => onSelectRaw(id, e),
+    [onSelectRaw, id],
+  );
+  const onRequestEdit = useCallback(
+    (text: string) => onRequestEditRaw(id, text),
+    [onRequestEditRaw, id],
+  );
+  // 对齐：note.x/y 为左上角，以候选左上角计算包围盒（左上角基准 px），叠加吸附偏移
+  const alignCandidate = useCallback(
+    (x: number, y: number) => {
+      if (!alignDrag) return { x, y };
+      const bounds: AlignBounds = {
+        x: x * mmToPx,
+        y: y * mmToPx,
+        width: note.width * mmToPx,
+        height: note.height * mmToPx,
+      };
+      const { offsetX, offsetY } = alignDrag(bounds, id);
+      return { x: x + offsetX / mmToPx, y: y + offsetY / mmToPx };
+    },
+    [alignDrag, id, note.width, note.height, mmToPx],
+  );
   // note.x/y 为左上角；组件内部换算为中心坐标，与贴纸保持一致
   const cx = note.x + note.width / 2;
   const cy = note.y + note.height / 2;
@@ -266,7 +301,8 @@ function StickyNoteNodeImpl({
         if (!pos) return;
         const dx = (pos.x - startX) / mmToPx / canvasZoom;
         const dy = (pos.y - startY) / mmToPx / canvasZoom;
-        onUpdate({ x: startNx + dx, y: startNy + dy }, false);
+        const aligned = alignCandidate(startNx + dx, startNy + dy);
+        onUpdate({ x: aligned.x, y: aligned.y }, false);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;
@@ -277,8 +313,9 @@ function StickyNoteNodeImpl({
         if (pos) {
           const dx = (pos.x - startX) / mmToPx / canvasZoom;
           const dy = (pos.y - startY) / mmToPx / canvasZoom;
-          finalX = startNx + dx;
-          finalY = startNy + dy;
+          const aligned = alignCandidate(startNx + dx, startNy + dy);
+          finalX = aligned.x;
+          finalY = aligned.y;
         }
         onUpdate({ x: finalX, y: finalY }, true);
       }}

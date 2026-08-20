@@ -6,6 +6,7 @@ import { Canvas } from '../editor/Canvas';
 import { EditorEmptyState } from '../editor/EditorEmptyState';
 import { EditFlyout } from '../editor/EditFlyout';
 import { ObjectPropertiesPanel } from '../editor/ObjectPropertiesPanel';
+import { CoverSettings } from '../editor/CoverSettings';
 import { PageToolbar } from '../editor/PageToolbar';
 import { PageDisplayModeToggle } from '../editor/PageDisplayModeToggle';
 import { BottomNav } from '../editor/BottomNav';
@@ -250,6 +251,8 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
               right: pm.margin,
             });
             useEditorStore.getState().setSlotGap(pm.gap);
+            // 恢复相册级参考线（编辑辅助，跨页共享）
+            useEditorStore.getState().setGuideLines(project.guideLines ?? []);
 
             if (project.pages.length > 0) {
               setPages(project.pages);
@@ -334,6 +337,7 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
     setAutoSaveProvider(() => ({
       pages: useEditorStore.getState().pages,
       photos: usePhotoStore.getState().photos,
+      guideLines: useEditorStore.getState().guideLines,
       dirtyPhotoIds: usePhotoStore.getState().dirtyIds,
       clearDirtyPhotoIds: (ids) => usePhotoStore.getState().clearDirtyIds(ids),
     }));
@@ -390,7 +394,13 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
       try {
         const existing = await loadProject(projectId);
         if (existing) {
-          await saveProject({ ...existing, pages: currentPages, size: albumSize!, updatedAt: new Date().toISOString() });
+          await saveProject({
+            ...existing,
+            pages: currentPages,
+            size: albumSize!,
+            guideLines: useEditorStore.getState().guideLines,
+            updatedAt: new Date().toISOString(),
+          });
         }
         await savePhotos(currentPhotos, projectId);
       } catch (e) {
@@ -484,6 +494,7 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
             <PageDisplayModeToggle />
             <EditFlyout />
             <ObjectPropertiesPanel />
+            <CoverSettings />
           </div>
           <BottomNav />
         </div>

@@ -281,6 +281,9 @@ interface RenderOptions {
    *  主页相册封面需要渲染不同项目的缩略图，全局 store 只有一个 albumSize，
    *  从编辑器返回主页时全局 albumSize 可能不匹配当前相册，导致渲染返回 null。 */
   albumSize?: { width: number; height: number } | null;
+  /** 绘制时间水印时使用的相册页数组（需与 pageIndex 对应）。
+   *  默认用全局 store 的 pages；探索：预览/主页渲染非 store 相册时显式传入以保证水印日期地点正确。 */
+  watermarkPages?: AlbumPage[];
 }
 
 /**
@@ -352,7 +355,8 @@ export function renderPageThumbnail(
   // 水印依赖 useEditorStore（pages/pageMargin）与 license，仅主线程绘制，Worker 不支持。
   if (options?.pageIndex !== undefined) {
     const state = useEditorStore.getState();
-    const pages = state.pages;
+    // 水印判定用传入的相册页（预览/主页渲染非 store 相册时必需），否则回退全局 store pages
+    const pages = options?.watermarkPages ?? state.pages;
     const ws = getWatermarkSettings();
     if (shouldShowWatermark(options.pageIndex, pages, photos, ws)) {
       const text = getWatermarkText(options.pageIndex, pages, photos, ws);

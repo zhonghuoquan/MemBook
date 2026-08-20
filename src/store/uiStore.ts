@@ -8,6 +8,16 @@ import type { TierPattern, GooglePhotosDensity, GooglePhotosLayoutRhythm, Google
 import { MIN_PANEL_WIDTH, MAX_PANEL_WIDTH, STORAGE_KEYS } from '../config/appConfig';
 // editorStore 在 setActivePanel 中按需引用，避免顶部循环依赖
 import { useEditorStore } from './editorStore';
+import type { UpdateInfo } from '../utils/updater';
+
+/** 自动更新指示器状态：后台下载中（ring 展示进度）或下载完成（变为「更新」按钮） */
+export interface AutoDownloadStatus {
+  phase: 'downloading' | 'ready';
+  /** 目标新版本号 */
+  version: string;
+  /** 下载进度（byte），未开始/未知为 null */
+  progress: { downloaded: number; total: number } | null;
+}
 
 /* ── 智能编排持久化设置 ── */
 export interface SmartLayoutSettings {
@@ -32,6 +42,19 @@ export interface SmartLayoutPerPageOverrides {
 }
 
 /* ── UI Store (视图切换、面板、toast、缩放、存储模式、多选) ── */
+
+/** 封面设置实时预览覆盖：打开「封面设置」右侧面板时，画布上的封面优先读取该值渲染（确认才写入页面数据） */
+export interface CoverSettingsPreview {
+  /** 封面/封底照片位圆角（统一值或四角数组） */
+  slotCornerRadius: number | [number, number, number, number];
+  /** 书脊底色 */
+  spineColor: string;
+  /** 书脊宽度（mm） */
+  spineWidth: number;
+  /** 书脊 Logo 颜色；undefined = 自动黑/白 */
+  spineLogoColor?: string;
+}
+
 interface UIState {
   viewMode: ViewMode;
   activePanel: PanelTab;
@@ -77,6 +100,24 @@ interface UIState {
 
   /* 页面显示模式：'full' = 全显（显示页面外内容），'page' = 页面模式（裁剪到页面边界） */
   pageDisplayMode: 'full' | 'page';
+
+  /* 对齐系统开关（动态吸附 + 对齐引导线），默认开启；持久化记住用户偏好 */
+  alignEnabled: boolean;
+
+  /* 标尺开关（顶部/左侧刻度尺 + 参考线），默认关闭；持久化记住用户偏好 */
+  rulerEnabled: boolean;
+
+  /* 封面设置右侧面板打开状态（非持久化） */
+  coverSettingsOpen: boolean;
+  /* 封面设置实时预览覆盖（画布封面优先读取；确认才写入页面数据） */
+  coverPreview: CoverSettingsPreview | null;
+
+  /* 自动更新指示器（主页顶栏右上角）：null = 无更新在流程中 */
+  autoUpdate: AutoDownloadStatus | null;
+  /* 已后台下载完成、待点击「更新」的版本信息 */
+  readyUpdate: UpdateInfo | null;
+  /* 更新弹窗打开时的信息（点击「更新」按钮才打开） */
+  updateDialog: UpdateInfo | null;
 
   /* 存储模式选择提示（首次导入或重置后让用户选择 import/direct） */
   isStorageModePromptOpen: boolean;
@@ -130,6 +171,14 @@ interface UIState {
   setPanelWidth: (width: number) => void;
   setPersistWarning: (msg: string | null) => void;
   setPageDisplayMode: (mode: 'full' | 'page') => void;
+  setAlignEnabled: (v: boolean) => void;
+  setRulerEnabled: (v: boolean) => void;
+  setCoverSettingsOpen: (open: boolean) => void;
+  setCoverPreview: (preview: CoverSettingsPreview | null) => void;
+  setAutoUpdate: (status: AutoDownloadStatus | null) => void;
+  setAutoUpdateProgress: (progress: { downloaded: number; total: number } | null) => void;
+  setReadyUpdate: (info: UpdateInfo | null) => void;
+  setUpdateDialog: (info: UpdateInfo | null) => void;
 }
 
 /* 从 localStorage 恢复存储偏好 */
@@ -186,6 +235,13 @@ export const useUIStore = create<UIState>((set) => ({
   })(),
   persistWarning: null,
   pageDisplayMode: 'full',
+  alignEnabled: (() => { try { return localStorage.getItem('membook_align_enabled') !== 'false'; } catch { return true; } })(),
+  rulerEnabled: (() => { try { return localStorage.getItem('membook_ruler_enabled') === 'true'; } catch { return false; } })(),
+  coverSettingsOpen: false,
+  coverPreview: null,
+  autoUpdate: null,
+  readyUpdate: null,
+  updateDialog: null,
   isStorageModePromptOpen: false,
   pendingImportFiles: null,
   pendingImportOptions: null,
@@ -197,7 +253,7 @@ export const useUIStore = create<UIState>((set) => ({
     // 切换离开「工具」面板时自动取消画笔/橡皮擦，避免干扰其他面板操作
     if (panel !== 'tools') {
       const { activeTool, setActiveTool } = useEditorStore.getState();
-      if (activeTool === 'brush' || activeTool === 'eraser') {
+      if (activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'text') {
         setActiveTool('none');
       }
     }
@@ -314,4 +370,19 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setPersistWarning: (msg) => set({ persistWarning: msg }),
   setPageDisplayMode: (mode) => set({ pageDisplayMode: mode }),
+  setAlignEnabled: (v) => {
+    set({ alignEnabled: v });
+    try { localStorage.setItem('membook_align_enabled', String(v)); } catch { /* ignore */ }
+  },
+  setRulerEnabled: (v) => {
+    set({ rulerEnabled: v });
+    try { localStorage.setItem('membook_ruler_enabled', String(v)); } catch { /* ignore */ }
+  },
+  setCoverSettingsOpen: (open) => set({ coverSettingsOpen: open }),
+  setCoverPreview: (preview) => set({ coverPreview: preview }),
+  setAutoUpdate: (status) => set({ autoUpdate: status }),
+  setAutoUpdateProgress: (progress) =>
+    set((s) => s.autoUpdate ? { autoUpdate: { ...s.autoUpdate, progress } } : {}),
+  setReadyUpdate: (info) => set({ readyUpdate: info }),
+  setUpdateDialog: (info) => set({ updateDialog: info }),
 }));

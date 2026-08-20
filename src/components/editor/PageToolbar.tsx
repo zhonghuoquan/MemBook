@@ -4,6 +4,7 @@ import { useEditorStore, useUIStore } from '../../store';
 import { LayoutAdjustPanel } from './LayoutAdjustPanel';
 import { LayoutSwitchDialog } from './LayoutSwitchDialog';
 import { PhotoReorderDialog } from './PhotoReorderDialog';
+import { RULER_SIZE } from './CanvasRulers';
 import { useLicenseStore } from '../../license';
 
 /* ═══════════════════════════════════════════
@@ -19,6 +20,8 @@ export function PageToolbar() {
   const removePage = useEditorStore((s) => s.removePage);
   const addPhotoSlot = useEditorStore((s) => s.addPhotoSlot);
   const addToast = useUIStore((s) => s.addToast);
+  // 标尺开启时工具栏下移，避免遮挡顶部标尺
+  const rulerEnabled = useUIStore((s) => s.rulerEnabled);
 
   const [collapsed, setCollapsed] = useState(false);
   const isLayoutAdjustOpen = useUIStore((s) => s.layoutAdjustOpen);
@@ -86,7 +89,7 @@ export function PageToolbar() {
 
   return (
     <>
-      <div data-page-toolbar className="absolute top-3 left-1/2 -translate-x-1/2 z-[var(--z-dropdown)] pointer-events-none">
+      <div data-page-toolbar className="absolute left-1/2 -translate-x-1/2 z-[var(--z-dropdown)] pointer-events-none" style={{ top: rulerEnabled ? RULER_SIZE + 12 : 12 }}>
         <div data-onboarding="page-toolbar" className="flex items-center gap-1 px-2 py-1 bg-white/85 backdrop-blur-sm rounded-[var(--radius-lg)]
                         shadow-[var(--shadow-md)] border border-[var(--color-border)] pointer-events-auto
                         select-none transition-all duration-200 whitespace-nowrap">

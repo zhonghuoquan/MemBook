@@ -285,6 +285,8 @@
       "backCoverBadge": "📗 封底",
       "use": "使用",
       "defaultAlbumName": "我的相册",
+      "previewBtn": "点击查看封面 / 封底",
+      "previewTitle": "封面预览",
       "hint": "点击「使用」即以该封面新建相册并进入编辑器。每款封面都内置配套封底，应用时自动同步生成，封面与封底整体成套。进入后可自由修改照片、双击文字编辑，或使用「工具」面板添加形状、调整字体颜色。"
     },
     "emptyState": {
@@ -361,6 +363,8 @@
         "morePhotos": "还有 {{count}} 张照片",
         "autoRecognized": "自动识别",
         "notRecognized": "未识别",
+        "copyNameHint": "点击复制文件名",
+        "copyNameToast": "已复制文件名：{{name}}",
         "singleDatePlaceholder": "YYYY-MM-DD HH:MM:SS",
         "modify": "修改",
         "modifying": "修改中...",
@@ -1140,6 +1144,18 @@
       "hideThumbnails": "隐藏页面缩略图",
       "showThumbnails": "显示页面缩略图",
       "pages": "页面",
+      "align": "对齐",
+      "enableAlign": "开启对齐吸附与参考线",
+      "disableAlign": "关闭对齐吸附与参考线",
+      "ruler": "标尺",
+      "enableRuler": "显示标尺",
+      "disableRuler": "隐藏标尺",
+      "marginGuide": "边距",
+      "enableMarginGuide": "显示边距辅助线（安全区）",
+      "disableMarginGuide": "隐藏边距辅助线",
+      "guides": "辅助线",
+      "enableGuides": "显示页面辅助线（中线/三分线）",
+      "disableGuides": "隐藏页面辅助线",
       "pageCount": "/{{count}} 页",
       "clickToJump": "点击输入页码跳转",
       "collapsedPageLabel": "页面 {{current}}/{{total}}",
@@ -1206,16 +1222,22 @@
       "elementsHint": "添加后在画布上选中，可在右侧面板调整属性",
       "stickySection": "便利贴",
       "addText": "添加文字",
+      "textModeHint": "点击「添加文字」后，在画布上单击即可在对应位置生成文本框",
       "quickStyles": "快速样式",
       "textProperties": "文字属性",
       "textTabBasic": "基础设置",
       "textTabColor": "颜色",
       "fontFamily": "字体",
+      "fontGroupBundled": "内置艺术字体",
+      "fontGroupSystem": "系统可用字体",
+      "fontGroupLocal": "本机字体",
+      "fontSearchPlaceholder": "搜索字体…",
+      "fontNoMatch": "没有匹配的字体",
       "fontSize": "字号",
       "bold": "加粗",
       "italic": "斜体",
       "textColor": "文字颜色",
-      "align": "对齐",
+      "align": "水平对齐",
       "alignLeft": "左对齐",
       "alignCenter": "居中",
       "alignRight": "右对齐",
@@ -1480,6 +1502,7 @@
     "bookPreview": {
       "title": "真实效果预览",
       "rendering": "正在生成翻页预览…",
+      "generatingPages": "正在生成预览页面 {{current}}/{{total}}",
       "page": "第 {{current}} / {{total}} 页",
       "prev": "上一页",
       "next": "下一页",
@@ -1995,9 +2018,13 @@
     },
     "coverSettings": {
       "title": "封面设置",
+      "coverSection": "封面 / 封底",
       "coverSlotRadius": "封面照片位圆角",
       "spine": "书脊",
       "spineColor": "书脊底色",
+      "spineLogoColor": "Logo 颜色",
+      "spineLogoAuto": "自动",
+      "spineWidth": "书脊宽度",
       "uniform": "统一",
       "perCorner": "每角单独",
       "cornerTL": "左上",
@@ -2117,29 +2144,37 @@
     "author": "作者署名",
     "authorName": "带屎的鞋子",
     "featuresList": {
-      "customSize": {
-        "title": "自定义尺寸",
-        "desc": "内置方册、竖版、横版、迷你、冲印与纸张标准，支持自定义 mm 尺寸"
+      "spineCover": {
+        "title": "书脊精装设计",
+        "desc": "书脊宽度/底色/Logo 颜色可调，封面封底成套模板，画布实时预览"
+      },
+      "flipPreview": {
+        "title": "翻页书预览",
+        "desc": "硬壳精装真实翻页，渐进式渲染秒开"
       },
       "smartLayout": {
         "title": "一键成册",
         "desc": "导入照片后自动排版，省去手动拖拽调整的麻烦"
       },
-      "filterAdjust": {
-        "title": "滤镜调色",
-        "desc": "光效、色彩、晕影多种调整 + 一键滤镜"
+      "coverTemplates": {
+        "title": "封面模板库",
+        "desc": "8+8 套成套封面封底模板 + 自定义模板创建器"
       },
-      "brushStickyText": {
-        "title": "画笔 / 便利贴 / 文字",
-        "desc": "随手涂鸦、贴便签、加标题，让相册更有故事"
+      "rulerAlign": {
+        "title": "标尺与对齐",
+        "desc": "PS 风格标尺参考线，拖拽 / 吸附 / 引导线精准排版"
+      },
+      "creativeTools": {
+        "title": "创作工具",
+        "desc": "画笔、便利贴、文字、形状、贴纸自由装饰"
+      },
+      "organizeTools": {
+        "title": "照片整理工具集",
+        "desc": "去重、EXIF、格式转换、人脸、相似、时间线、日历"
       },
       "localFirst": {
         "title": "本地优先",
-        "desc": "所有数据保存在你的设备上，不上传服务器"
-      },
-      "dataMigration": {
-        "title": "数据迁移",
-        "desc": "支持把整个相册项目导出为压缩包，分享 / 备份 / 跨设备"
+        "desc": "双轨存储 + HEIC 解码，所有数据保存在你的设备上"
       }
     },
     "clearActivationTitle": "清除激活状态",
@@ -2185,16 +2220,18 @@
     "releaseDate": "发布日期",
     "releaseNotes": "更新内容",
     "noNotes": "暂无更新说明",
+    "update": "更新",
     "downloadNow": "立即更新",
-    "remindLater": "稍后提醒",
+    "remindLater": "取消",
     "downloading": "正在下载更新...",
     "installing": "正在安装更新...",
     "downloadProgress": "已下载 {{downloaded}} / {{total}}",
-    "installAndRestart": "安装并重启",
+    "installAndRestart": "立即更新",
     "updateComplete": "更新下载完成，点击下方按钮安装并重启。",
     "updateFailed": "更新失败: {{message}}",
     "alreadyLatest": "当前已是最新版本",
-    "checkingForUpdates": "正在检查更新..."
+    "checkingForUpdates": "正在检查更新...",
+    "autoDownloading": "正在后台下载新版 v{{version}}"
   },
   "hooks": {
     "photoImport": {

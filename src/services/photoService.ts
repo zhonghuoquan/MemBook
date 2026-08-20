@@ -10,6 +10,8 @@ import { clearThumbnailMemoryCache } from '../utils/gridThumbnailRenderer';
 import { clearBitmapCache } from '../utils/imageBitmapLoader';
 import { terminateWorkerPool } from '../engine/storage/image-compressor';
 import { deletePhotos as deletePhotosFromDB } from '../db';
+import { invalidatePhotoContentCache, clearPhotoContentCache } from '../engine/content-aware';
+import { clearThumbCache, evictFromCache } from '../components/home/organize/thumbCache';
 
 function cleanupPhotoBlobs(photo: Photo): void {
   // P1-1: 补全 thumbBlobId，并清理 blobUrlCache（之前仅删 IndexedDB，缓存残留导致内存泄漏）
@@ -38,6 +40,11 @@ function cleanupPhotoBlobs(photo: Photo): void {
   if (photo.storageMode === 'direct' && photo.relativePath) {
     evictDirectPhotoUrl(photo.relativePath);
   }
+  //   3. 内容感知缓存（photoContentCache/pendingAnalysis/failedAnalysisCache）：按照片 ID 失效，
+  //      否则被删照片的 contentInfo/分析中间态永久驻留（此前无任何删除路径清理，属泄漏）
+  invalidatePhotoContentCache(photo.id);
+  //   4. 整理工具缩略图缓存：同时清掉普通 + 人脸裁剪前缀条目，释放 blob URL
+  evictFromCache(photo.id);
 }
 
 function removePhotoFromPages(id: string): boolean {
@@ -135,6 +142,10 @@ export const photoService = {
     clearBitmapCache();
     // 7. 终止压缩 Worker 池（8 个 Worker 常驻 160-400MB，导入完成后不再需要）
     terminateWorkerPool();
+    // 8. 内容感知分析缓存（photoContentCache 仅在主内存，跨项目无保留价值）
+    clearPhotoContentCache();
+    // 9. 整理工具缩略图缓存（含 HEIC 转换缓存）
+    clearThumbCache();
   },
 
   /** 轻量缓存清理：不 revoke blob URL，清 imageCache。

@@ -62,6 +62,14 @@ export function BottomNav() {
   const canvasZoom = useUIStore((s) => s.canvasZoom);
   const setCanvasZoom = useUIStore((s) => s.setCanvasZoom);
   const viewMode = useUIStore((s) => s.viewMode);
+  const alignEnabled = useUIStore((s) => s.alignEnabled);
+  const setAlignEnabled = useUIStore((s) => s.setAlignEnabled);
+  const rulerEnabled = useUIStore((s) => s.rulerEnabled);
+  const setRulerEnabled = useUIStore((s) => s.setRulerEnabled);
+  const showGuides = useEditorStore((s) => s.showGuides);
+  const setShowGuides = useEditorStore((s) => s.setShowGuides);
+  const showMarginGuide = useEditorStore((s) => s.showMarginGuide);
+  const setShowMarginGuide = useEditorStore((s) => s.setShowMarginGuide);
   const addToast = useUIStore((s) => s.addToast);
   const setDraggingLayout = useUIStore((s) => s.setDraggingLayout);
 
@@ -902,7 +910,83 @@ export function BottomNav() {
 
       {/* ══════════ Tool Bar（始终固定，不受折叠影响）══ */}
       {!collapsed && (
-        <div className="flex items-center justify-end gap-4 px-3 py-2 shrink-0">
+        <div className="flex items-center justify-between gap-4 px-3 py-2 shrink-0">
+          {/* 左侧功能区：对齐 + 标尺（成组紧挨，避免容器 gap 拉开间距） */}
+          <div className="flex items-center gap-1.5">
+          {/* 对齐系统开关（左对齐）：动态吸附 + 对齐引导线 总开关 */}
+          <Tooltip text={alignEnabled ? t('editor.bottomNav.disableAlign') : t('editor.bottomNav.enableAlign')}>
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-xs)] border cursor-pointer transition-colors ${
+                alignEnabled
+                  ? 'border-[var(--color-brand)] bg-[var(--color-primary-50)] text-[var(--color-brand)]'
+                  : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              onClick={() => setAlignEnabled(!alignEnabled)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <rect x="2" y="3" width="10" height="8" rx="1" />
+                <line x1="7" y1="1.5" x2="7" y2="12.5" />
+                <line x1="0.5" y1="7" x2="13.5" y2="7" />
+              </svg>
+              <span className="text-[var(--text-caption)] font-[500]">{t('editor.bottomNav.align')}</span>
+            </button>
+          </Tooltip>
+
+          {/* 标尺开关：顶部/左侧刻度尺 + 参考线（PS 风格） */}
+          <Tooltip text={rulerEnabled ? t('editor.bottomNav.disableRuler') : t('editor.bottomNav.enableRuler')}>
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-xs)] border cursor-pointer transition-colors ${
+                rulerEnabled
+                  ? 'border-[var(--color-brand)] bg-[var(--color-primary-50)] text-[var(--color-brand)]'
+                  : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              onClick={() => setRulerEnabled(!rulerEnabled)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <rect x="1" y="8.5" width="12" height="4" rx="0.8" />
+                <path d="M3.5 8.5v1.6M6 8.5v2.4M8.5 8.5v1.6M11 8.5v2.4" />
+              </svg>
+              <span className="text-[var(--text-caption)] font-[500]">{t('editor.bottomNav.ruler')}</span>
+            </button>
+          </Tooltip>
+
+          {/* 边距辅助线开关（安全区虚线） */}
+          <Tooltip text={showMarginGuide ? t('editor.bottomNav.disableMarginGuide') : t('editor.bottomNav.enableMarginGuide')}>
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-xs)] border cursor-pointer transition-colors ${
+                showMarginGuide
+                  ? 'border-[var(--color-brand)] bg-[var(--color-primary-50)] text-[var(--color-brand)]'
+                  : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              onClick={() => setShowMarginGuide(!showMarginGuide)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <rect x="2" y="2" width="10" height="10" rx="0.8" strokeDasharray="2.5 2" />
+              </svg>
+              <span className="text-[var(--text-caption)] font-[500]">{t('editor.bottomNav.marginGuide')}</span>
+            </button>
+          </Tooltip>
+
+          {/* 页面辅助线开关（中线/三分线） */}
+          <Tooltip text={showGuides ? t('editor.bottomNav.disableGuides') : t('editor.bottomNav.enableGuides')}>
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-xs)] border cursor-pointer transition-colors ${
+                showGuides
+                  ? 'border-[var(--color-brand)] bg-[var(--color-primary-50)] text-[var(--color-brand)]'
+                  : 'border-[var(--color-border)] bg-white text-[var(--color-gray-600)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              onClick={() => setShowGuides(!showGuides)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="w-3.5 h-3.5">
+                <path d="M2 4.6h10M2 9.3h10M4.6 2v10M9.3 2v10" />
+              </svg>
+              <span className="text-[var(--text-caption)] font-[500]">{t('editor.bottomNav.guides')}</span>
+            </button>
+          </Tooltip>
+          </div>
+
+          {/* 右侧功能区（保持原右对齐位置，与对齐开关左右分布） */}
+          <div className="flex items-center gap-4">
           {/* Zoom slider — 对数映射，低倍率区精度更高 */}
           <div className="flex items-center gap-2">
             <Tooltip text={t('editor.bottomNav.zoomLevel', { percent: formatPercent(canvasZoom) })}>
@@ -1045,6 +1129,7 @@ export function BottomNav() {
               <span className="text-[var(--text-caption)] font-[500]">{t('editor.viewModes.fullscreen')}</span>
             </button>
           </Tooltip>
+          </div>
         </div>
       )}
 

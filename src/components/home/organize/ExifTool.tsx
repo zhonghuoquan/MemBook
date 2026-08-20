@@ -16,7 +16,7 @@ import {
   type ToolProgress,
   type PhotoFileInfo,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, EXIF_WRITABLE_EXTS, downloadBlob, ThumbImage, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, EXIF_WRITABLE_EXTS, downloadBlob, ThumbImage, useLazyList, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 
 /** 智能解析日期输入，支持多种格式：
@@ -109,6 +109,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     typeof p.gpsLat === 'number' && typeof p.gpsLon === 'number';
   const photosWithGps = writablePhotos.filter(hasGps);
   const photosWithoutGps = writablePhotos.filter((p) => !hasGps(p));
+
+  // 无日期 / 无 GPS 列表懒加载（初始一批 200，滚动到底自动追加，最终全部可展示）
+  const noDateList = useLazyList(photosWithoutDate.length, 200);
+  const noGpsList = useLazyList(photosWithoutGps.length, 200);
 
   // 根据勾选范围筛选实际要处理的照片（日期模式按拍摄日期、GPS 模式按是否已有 GPS）
   const effectivePhotos =
@@ -417,23 +421,23 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                       {showNoDateList ? t('home.organize.exif.hideNoDateList') : t('home.organize.exif.showNoDateList', { count: photosWithoutDate.length })}
                     </button>
                     {showNoDateList && (
-                      <div className="mt-2 max-h-[360px] overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 custom-scrollbar">
-                        {photosWithoutDate.slice(0, 200).map((p) => (
-                          <NoDatePhotoRow
-                            key={p.id}
-                            photo={p}
-                            sourceMode={sourceMode}
-                            readPhotoData={readPhotoData}
-                            addToast={addToast}
-                            onDateUpdated={(newDate) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, dateTaken: newDate } : item)))}
-                            onPhotoConverted={(updated) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? updated : item)))}
-                          />
-                        ))}
-                        {photosWithoutDate.length > 200 && (
-                          <div className="text-xs text-center text-[var(--color-gray-400)] py-1">
-                            {t('home.organize.exif.morePhotos', { count: photosWithoutDate.length - 200 })}
-                          </div>
-                        )}
+                      <div className="mt-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar">
+                        {/* 自适应网格：面板越宽列数越多（典型宽度下约 3~4 列），缩略图加大便于查看 */}
+                        <div className="grid gap-1.5 grid-cols-[repeat(auto-fill,minmax(205px,1fr))]">
+                          {photosWithoutDate.slice(0, noDateList.visibleCount).map((p) => (
+                            <NoDatePhotoRow
+                              key={p.id}
+                              photo={p}
+                              sourceMode={sourceMode}
+                              readPhotoData={readPhotoData}
+                              addToast={addToast}
+                              onDateUpdated={(newDate) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, dateTaken: newDate } : item)))}
+                              onPhotoConverted={(updated) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? updated : item)))}
+                            />
+                          ))}
+                        </div>
+                        {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
+                        {noDateList.visibleCount < photosWithoutDate.length && <div ref={noDateList.sentinelRef} className="h-1" />}
                       </div>
                     )}
                     {/* 两个批量操作按钮：全部转换（转 JPEG）+ 全部修改（写入日期） */}
@@ -565,7 +569,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                     </button>
                     {showNoGpsList && (
                       <div className="mt-2 max-h-[360px] overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 custom-scrollbar">
-                        {photosWithoutGps.slice(0, 200).map((p) => (
+                        {photosWithoutGps.slice(0, noGpsList.visibleCount).map((p) => (
                           <NoGpsPhotoRow
                             key={p.id}
                             photo={p}
@@ -575,11 +579,8 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                             onGpsUpdated={(newLon, newLat) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, gpsLon: newLon, gpsLat: newLat } : item)))}
                           />
                         ))}
-                        {photosWithoutGps.length > 200 && (
-                          <div className="text-xs text-center text-[var(--color-gray-400)] py-1">
-                            {t('home.organize.exif.morePhotos', { count: photosWithoutGps.length - 200 })}
-                          </div>
-                        )}
+                        {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
+                        {noGpsList.visibleCount < photosWithoutGps.length && <div ref={noGpsList.sentinelRef} className="h-1" />}
                       </div>
                     )}
                   </div>
@@ -718,89 +719,110 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onDateUpda
   if (done) {
     // 修改成功后显示简洁的成功状态（照片会被父组件移出无日期列表，但有动画过渡）
     return (
-      <div className="text-xs px-2.5 py-1.5 rounded bg-green-50 text-green-700 flex items-center gap-1.5">
-        <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2 6l3 3 5-6" />
-        </svg>
-        <span className="truncate">{photo.name}</span>
-        <span className="shrink-0 text-green-600 font-mono">{dateInput}</span>
+      <div className="px-2.5 py-2 rounded bg-green-50 text-green-700 flex flex-col gap-1 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 6l3 3 5-6" />
+          </svg>
+          <span className="truncate">{photo.name}</span>
+        </div>
+        <span className="text-green-600 font-mono text-[10px]">{dateInput}</span>
       </div>
     );
   }
 
+  // 点击文件名复制到剪贴板
+  const handleCopyName = useCallback(async () => {
+    const name = photo.name;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(name);
+      } else {
+        // 降级：隐藏 textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = name;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch { /* ignore */ }
+        document.body.removeChild(ta);
+      }
+    } catch { /* 剪贴板不可用时不报错，仍提示 */ }
+    addToast({ type: 'info', message: t('home.organize.exif.copyNameToast', { name }) });
+  }, [photo.name, addToast, t]);
+
   return (
-    <div className="px-2.5 py-2 rounded bg-white/80 border border-[var(--color-border)]/50 space-y-1.5">
-      {/* 第一行：缩略图 + 文件名 + 自动识别日期标记 */}
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="shrink-0 w-10 h-10 overflow-hidden rounded border border-[var(--color-border)]/50">
-          <ThumbImage
-            photo={photo}
-            readPhotoData={readPhotoData}
-            size="small"
-          />
-        </div>
-        <span className="text-xs text-[var(--color-gray-700)] truncate flex-1" title={photo.relativePath || photo.name}>
-          {photo.name}
+    <div className="px-2.5 py-2 rounded bg-white/80 border border-[var(--color-border)]/50 flex gap-2 min-w-0">
+      {/* 缩略图（拉伸到与右侧信息区等高，object-cover 铺满）；底部条标注识别状态 */}
+      <div className="relative shrink-0 w-14 self-stretch overflow-hidden rounded border border-[var(--color-border)]/50">
+        <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" aspect="fill" />
+        <span
+          className={`absolute left-0 right-0 bottom-0 text-[9px] leading-[13px] text-center font-medium ${
+            recognizedDate ? 'bg-green-600/85 text-white' : 'bg-black/40 text-white/90'
+          }`}
+        >
+          {recognizedDate ? t('home.organize.exif.autoRecognized') : t('home.organize.exif.notRecognized')}
         </span>
-        {recognizedDate ? (
-          <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-            <svg viewBox="0 0 10 10" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="5" cy="5" r="3.5" />
-              <path d="M5 3v2l1.5 1" />
-            </svg>
-            {t('home.organize.exif.autoRecognized')}
-          </span>
-        ) : (
-          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-gray-100)] text-[var(--color-gray-400)]">
-            {t('home.organize.exif.notRecognized')}
-          </span>
-        )}
       </div>
-      {/* 修改失败提示 */}
-      {modifyFailed && (
-        <p className="text-[10px] text-orange-600 leading-relaxed">
-          {t('home.organize.exif.fixAllHint')}
-        </p>
-      )}
-      {/* 第二行：日期输入框 + 修改按钮 + 转格式按钮 */}
-      <div className="flex items-center gap-1.5">
+      {/* 右侧信息区 */}
+      <div className="flex-1 min-w-0 space-y-1">
+        {/* 文件名字：点击快捷复制 */}
+        <button
+          type="button"
+          onClick={handleCopyName}
+          title={t('home.organize.exif.copyNameHint')}
+          className="flex items-center gap-1 min-w-0 w-full text-left group cursor-pointer"
+        >
+          <span className="text-xs text-[var(--color-gray-700)] truncate group-hover:text-[var(--color-brand)]">{photo.name}</span>
+          <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 shrink-0 text-[var(--color-gray-400)] group-hover:text-[var(--color-brand)]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="2.5" width="6" height="7" rx="1" />
+            <path d="M8 2.5v-.5a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
+          </svg>
+        </button>
+        {/* 日期输入框 */}
         <input
           type="text"
           placeholder={t('home.organize.exif.singleDatePlaceholder')}
           value={dateInput}
           onChange={(e) => setDateInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && canModify) handleModify(); }}
-          className={`flex-1 min-w-0 px-2 py-1 rounded text-xs border focus:outline-none transition-colors ${
+          className={`w-full min-w-0 px-2 py-1 rounded text-xs border focus:outline-none transition-colors ${
             dateInput && !parsedDate
               ? 'border-red-300 text-red-600'
               : 'border-[var(--color-border)] text-[var(--color-gray-700)] focus:border-[var(--color-brand)]'
           }`}
         />
-        <button
-          onClick={handleModify}
-          disabled={!canModify}
-          className="shrink-0 px-2.5 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
-                     bg-[var(--color-brand)] text-white hover:opacity-90
-                     disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {modifying ? t('home.organize.exif.modifying') : t('home.organize.exif.modify')}
-        </button>
-        {showConvertBtn && (
-          <button
-            onClick={handleConvert}
-            disabled={converting || modifying}
-            className="shrink-0 px-2 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
-                       bg-orange-500 text-white hover:opacity-90
-                       disabled:opacity-40 disabled:cursor-not-allowed"
-            title={t('home.organize.exif.convertFormat')}
-          >
-            {converting ? t('home.organize.exif.converting') : t('home.organize.exif.convertFormat')}
-          </button>
+        {/* 无效日期 / 修改失败提示 */}
+        {dateInput && !parsedDate && (
+          <p className="text-[10px] text-red-500">{t('home.organize.exif.invalidDateFormat')}</p>
         )}
+        {modifyFailed && (
+          <p className="text-[10px] text-orange-600 leading-relaxed">{t('home.organize.exif.fixAllHint')}</p>
+        )}
+        {/* 按钮行 */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={handleModify}
+            disabled={!canModify}
+            className="shrink-0 px-2.5 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
+                       bg-[var(--color-brand)] text-white hover:opacity-90
+                       disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {modifying ? t('home.organize.exif.modifying') : t('home.organize.exif.modify')}
+          </button>
+          {showConvertBtn && (
+            <button
+              onClick={handleConvert}
+              disabled={converting || modifying}
+              className="shrink-0 px-2 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
+                         bg-orange-500 text-white hover:opacity-90
+                         disabled:opacity-40 disabled:cursor-not-allowed"
+              title={t('home.organize.exif.convertFormat')}
+            >
+              {converting ? t('home.organize.exif.converting') : t('home.organize.exif.convertFormat')}
+            </button>
+          )}
+        </div>
       </div>
-      {dateInput && !parsedDate && (
-        <p className="text-[10px] text-red-500">{t('home.organize.exif.invalidDateFormat')}</p>
-      )}
     </div>
   );
 }

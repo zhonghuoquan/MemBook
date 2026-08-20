@@ -22,6 +22,12 @@
 
 import type { Photo } from '../types';
 import { logger } from '../utils/logger';
+import { createConcurrencyLimiter } from '../utils/concurrency';
+
+/** 人脸/能量分析并发上限：face-api 检测是主线程重活，一次批量触发大量照片时
+ *  排队执行，避免同时 N 张全分辨率图检测导致内存飙升与主线程卡顿。 */
+const FACE_ANALYSIS_CONCURRENCY = 3;
+const faceAnalysisLimiter = createConcurrencyLimiter(FACE_ANALYSIS_CONCURRENCY);
 
 /** 照片内容信息：主体位置 / 人脸 / 主色 / 清晰度 */
 export interface PhotoContentInfo {
@@ -132,7 +138,8 @@ export function ensurePhotoAnalyzed(photo: Photo): Promise<PhotoContentInfo | un
   // 4. 启动新分析，存入 pendingAnalysis 供其他调用者共享
   const promise = (async (): Promise<PhotoContentInfo | undefined> => {
     try {
-      const info = await analyzePhotoWithFaces(photo);
+      // 经并发限制器排队执行：批量触发大量照片时最多 FACE_ANALYSIS_CONCURRENCY 张同时分析
+      const info = await faceAnalysisLimiter(() => analyzePhotoWithFaces(photo));
       // 有效结果：face-api 检测（含无人脸）或能量分析 → 缓存
       if (info.source === 'face' || info.source === 'energy') {
         photoContentCache.set(photo.id, info);
@@ -244,10 +251,18 @@ async function tryLoadFaceApi(): Promise<FaceApiModule | null> {
  * 性能：单张 ~8-28ms，可在导入或进入智能编排时批量预处理
  */
 export async function analyzePhotoContent(photo: Photo): Promise<PhotoContentInfo> {
-  try {
-    const img = await loadImageSafely(photo);
-    if (!img) return { ...DEFAULT_CONTENT_INFO };
+  const img = await loadImageSafely(photo);
+  return analyzePhotoContentFromImage(img);
+}
 
+/**
+ * 从已加载的图像做同步轻量分析（主色 + 清晰度 + 默认焦点）。
+ * 抽取自 analyzePhotoContent，供 analyzePhotoWithFaces 复用同一张已加载图，
+ * 避免对同一照片二次全分辨率解码。
+ */
+function analyzePhotoContentFromImage(img: HTMLImageElement | null): PhotoContentInfo {
+  if (!img) return { ...DEFAULT_CONTENT_INFO };
+  try {
     // 降采样到 32×32 提取主色
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -274,7 +289,7 @@ export async function analyzePhotoContent(photo: Photo): Promise<PhotoContentInf
     const min = Math.min(r, g, b);
     const saturation = max > 0 ? (max - min) / max : 0;
 
-    // P1-1 清晰度：复用已加载的 img，避免二次加载
+    // 清晰度：复用已加载的 img，避免二次加载
     const clarityScore = computeClarityFromImage(img);
 
     return {
@@ -307,11 +322,13 @@ export async function analyzePhotoContent(photo: Photo): Promise<PhotoContentInf
  *      （风景/建筑/宠物），用 Sobel 梯度+8×8 网格质心估算主体位置
  */
 export async function analyzePhotoWithFaces(photo: Photo): Promise<PhotoContentInfo> {
-  const syncResult = await analyzePhotoContent(photo);
+  // P2：只加载一次图像，主色/清晰度分析与后续人脸/能量检测复用同一张图，
+  // 避免对同一照片多次全分辨率解码（此前 analyzePhotoContent + detectAllFaces 各解码一次）。
+  const img = await loadImageSafely(photo);
+  const syncResult = analyzePhotoContentFromImage(img);
   const faceApi = await tryLoadFaceApi();
   if (!faceApi || !faceModelLoaded) {
     // face-api 不可用 → 能量分析回退（不返回 syncResult，避免被 ensurePhotoAnalyzed 当作失败）
-    const img = await loadImageSafely(photo);
     if (img) {
       const energyFocus = computeSubjectFocusByEnergy(img);
       if (energyFocus) {
@@ -328,11 +345,9 @@ export async function analyzePhotoWithFaces(photo: Photo): Promise<PhotoContentI
     }
     return syncResult;
   }
+  if (!img) return syncResult;
 
   try {
-    const img = await loadImageSafely(photo);
-    if (!img) return syncResult;
-
     const imgW = img.width || img.naturalWidth;
     const imgH = img.height || img.naturalHeight;
 
@@ -414,8 +429,7 @@ export async function analyzePhotoWithFaces(photo: Photo): Promise<PhotoContentI
     };
   } catch (err) {
     logger.warn(`[content-aware] 人脸检测异常: ${photo.name}`, err);
-    // 异常 → 能量分析回退
-    const img = await loadImageSafely(photo);
+    // 异常 → 能量分析回退（复用已加载的 img，不再二次解码）
     if (img) {
       const energyFocus = computeSubjectFocusByEnergy(img);
       if (energyFocus) {

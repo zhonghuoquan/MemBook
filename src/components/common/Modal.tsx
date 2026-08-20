@@ -9,12 +9,18 @@ interface ModalProps {
   /** 确认按钮是否可用（disabled 时不响应 Enter），默认 true */
   confirmDisabled?: boolean;
   title?: string;
+  /** 标题右侧操作区（如尺寸切换器），与标题同一行、右对齐 */
+  headerRight?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
   maxWidth?: string;
+  /** 弹窗固定高度（如 'min(86vh, 720px)'）。不传时沿用默认 max-h-[90vh] 随内容自适应 */
+  height?: string;
+  /** 内容在展示区内垂直居中（内容较矮时上下居中；内容超高仍可滚动） */
+  centerContent?: boolean;
 }
 
-export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title, footer, children, maxWidth = '640px' }: ModalProps) {
+export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title, headerRight, footer, children, maxWidth = '640px', height, centerContent }: ModalProps) {
   const sb = useScrollbarVisibility<HTMLDivElement>();
   useEffect(() => {
     if (!open) return;
@@ -58,7 +64,7 @@ export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title
       {/* Dialog */}
       <div
         className="relative bg-[var(--color-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-md)] w-[90vw] max-h-[90vh] grid grid-rows-[auto_1fr_auto] overflow-hidden animate-[modalFadeIn_0.2s_ease-out]"
-        style={{ maxWidth }}
+        style={{ maxWidth, ...(height ? { height, maxHeight: height } : {}) }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 关闭按钮 */}
@@ -69,15 +75,18 @@ export function Modal({ open, onClose, onConfirm, confirmDisabled = false, title
           </svg>
         </button>
         {title && (
-          <h2 className="text-[var(--text-h2)] font-[600] text-[var(--color-text-primary)] mb-3 px-8 pt-8">
-            {title}
-          </h2>
+          <div className="relative flex items-center justify-between gap-4 pl-8 pr-14 pt-8 mb-3">
+            <h2 className="text-[var(--text-h2)] font-[600] text-[var(--color-text-primary)]">{title}</h2>
+            {headerRight && (
+              <div className="absolute left-1/2" style={{ top: '50%', transform: 'translate(-50%, calc(-50% + 16px))' }}>{headerRight}</div>
+            )}
+          </div>
         )}
         {/* 内容区：贴边滚动条 —— 滚动条容器紧贴 Dialog 右边缘（webkit 始终占 6px 透明轨道）。
             几何：内容右沿距 Dialog 边缘 32px，其中 6px 滚动条 + 26px 真实 padding。
             内层 content 用 pl-8(32px) + pr-[26px]，footer 同样 32px/26px。 */}
-        <div ref={sb.ref} className={`overflow-y-auto min-h-0 ps-scroll ${sb.className}`} {...sb.handlers}>
-          <div className="pl-8 pr-[26px] pb-2">
+        <div ref={sb.ref} className={`overflow-y-auto min-h-0 ps-scroll ${centerContent ? 'flex' : ''} ${sb.className}`} {...sb.handlers}>
+          <div className={`pl-8 pr-[26px] pb-2 ${centerContent ? 'm-auto w-full' : ''}`}>
             {children}
           </div>
         </div>

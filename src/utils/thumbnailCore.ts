@@ -213,14 +213,14 @@ export function drawPageToCanvas(
   backgroundImageBitmap?: HTMLImageElement | ImageBitmap,
 ): number {
   // 封面页在缩略图/全屏中只展示封面正面内容（不含书脊）：
-  // 封面文字/形状在数据层整体右移了书脊宽（印刷一体，无视觉间隙），槽位经 slotOverrides 也含该偏移。
-  // 在此构造"去书脊偏移"的页面副本（文字/形状减 mm 偏移、槽位减 px 偏移；无 slotOverrides 时
-  // 槽位用模板默认坐标，本就在 [0,pageW]），使所有元素坐标统一到逻辑宽 logicalW（页面宽）内，
+  // 封面文字/形状在数据层整体右移了书脊偏移锚点（spineAnchorMm，印刷一体无视觉间隙；缺省回退当前书脊宽），
+  // 槽位经 slotOverrides 也含该偏移。在此构造"去书脊偏移"的页面副本（文字/形状减 mm 偏移、槽位减 px 偏移；
+  // 无 slotOverrides 时槽位用模板默认坐标，本就在 [0,pageW]），使所有元素坐标统一到逻辑宽 logicalW（页面宽）内，
   // 封面正面恰好填满缩略图；书脊 logo 不再绘制。spineWidth 置 0 避免后续逻辑重复加偏移。
   if (isCoverPage(page) && (page.spineWidth ?? 0) > 0) {
-    // 封面正面内容在数据层整体右移书脊宽（印刷一体，无视觉间隙），缩略图只显示封面正面（不含书脊）：
-    // 整体左移书脊宽，使封面正面填满逻辑宽 logicalW（页面宽）。
-    const offsetMm = (page.spineWidth ?? 0);
+    // 封面正面内容在数据层整体右移书脊偏移锚点（折线位置），缩略图只显示封面正面（不含书脊）：
+    // 整体左移锚点，使封面正面填满逻辑宽 logicalW（页面宽）。
+    const offsetMm = (page.spineAnchorMm ?? page.spineWidth ?? 0);
     const offsetPx = offsetMm * MM_TO_PX;
     page = {
       ...page,
@@ -247,14 +247,11 @@ export function drawPageToCanvas(
     drawBackgroundImageOn(ctx, backgroundImageBitmap, logicalW, logicalH, (page.backgroundImageFit ?? 'cover') as 'cover' | 'contain');
   }
 
-  // ── 收集照片映射 ──
-  const photoMap = new Map(photos.map((p) => [p.id, p]));
-  let drawnPhotoCount = 0;
-
   // ── 槽位圆角 ──（缩略图不支持每角单独圆角，归一化为平均值）
   const slotCornerRadius = normalizeSlotCornerRadius(page.slotCornerRadius);
   const template = resolveTemplate(page);
   const slots = template?.slots ?? [];
+  let drawnPhotoCount = 0;
 
   // 收集已填充照片的槽位 ID，绘制背景时跳过
   const filledSlotIds = new Set(
@@ -275,42 +272,18 @@ export function drawPageToCanvas(
   const items: RenderItem[] = [];
 
   // 2.1 照片槽位（typeOrder=0）
-  // slotOrder 优先；未定义时回退到模板 slots 数组顺序（与 Canvas.tsx 一致）
-  // 这对 overlay 模板至关重要：slots 数组顺序 = 渲染层级（后者覆盖前者）
-  const orderMap = new Map<string, number>();
-  const effectiveSlotOrder = page.slotOrder ?? template?.slots.map((s) => s.id) ?? [];
-  effectiveSlotOrder.forEach((id, i) => orderMap.set(id, i));
-  const photoPlacements = page.placements
-    .filter((pl) => pl.photoId)
-    .sort((a, b) => {
-      const ia = orderMap.has(a.slotId) ? orderMap.get(a.slotId)! : 999;
-      const ib = orderMap.has(b.slotId) ? orderMap.get(b.slotId)! : 999;
-      return ia - ib;
-    });
-
-  for (const placement of photoPlacements) {
-    const photo = photoMap.get(placement.photoId!);
-    if (!photo) continue;
-    const img = photoImages?.get(placement.photoId!) ?? null;
+  // 渲染顺序/坐标/层级由纯函数 buildPhotoPlacementPlan 统一计算（与导出/预览/画布同源），
+  // 此处仅做"取图 + 入列绘制"，顺序与行为与原先内联计算完全一致。
+  for (const plan of buildPhotoPlacementPlan(page, photos, logicalW, logicalH, margin, contentInfoMap)) {
+    const img = photoImages?.get(plan.photoId) ?? null;
     if (!img) continue;
     const imgW = img instanceof ImageBitmap ? img.width : img.naturalWidth;
     if (imgW <= 0) continue;
-
-    const slot = getSlotRect(placement.slotId, page, logicalW, logicalH, margin);
-    if (!slot) continue;
-    const params = calcPhotoRenderParams(
-      photo, placement, slot.width, slot.height,
-      // P1-fix: Worker 路径从 contentInfoMap 取，主线程不传则返回 undefined（calcPhotoRenderParams 自己查全局缓存）
-      contentInfoMap ? contentInfoMap.get(photo.id) ?? null : undefined,
-    );
-    if (!params) continue;
-
-    const z = getSlotZIndex(page, placement.slotId);
     items.push({
-      z,
+      z: plan.z,
       typeOrder: 0,
       draw: () => {
-        drawPlacement(ctx, placement, img, slot, params, slotCornerRadius);
+        drawPlacement(ctx, plan.placement, img, plan.slot, plan.params, slotCornerRadius);
         drawnPhotoCount++;
       },
     });
@@ -383,6 +356,241 @@ export function drawPageToCanvas(
   ctx.restore();
 
   return drawnPhotoCount;
+}
+
+/** 照片槽位渲染计划项：一张已定位好的照片（不含图片本身，绘制时再按 photoId 取图） */
+export interface PhotoPlanItem {
+  placement: PhotoPlacement;
+  photoId: string;
+  slot: SlotRect;
+  /** calcPhotoRenderParams 结果（drawW/H/X/Y + rotation + offset），已保证覆盖槽位不露白 */
+  params: ReturnType<typeof calcPhotoRenderParams>;
+  /** 该槽位在页面的渲染层级（默认 0） */
+  z: number;
+}
+
+/**
+ * 纯函数：生成照片槽位的确定性渲染计划（不依赖 ctx / 图片 / store）。
+ * - 槽位坐标 getSlotRect（含 slotOverrides / 边距 / 等比缩放 / 封面偏移）
+ * - 照片摆放 calcPhotoRenderParams（cover-fit 铺满不露白 / 旋转 / pan）
+ * - 层级 getSlotZIndex（slotZIndices，默认 0）
+ * - 渲染顺序 slotOrder（未定义时回退模板 slots 数组顺序，对 overlay 模板至关重要）
+ * 供画布 / 导出 / 缩略图 / 预览四端共用同一套照片布局判定，杜绝一端改错漏改其余。
+ */
+export function buildPhotoPlacementPlan(
+  page: AlbumPage,
+  photos: Photo[],
+  logicalW: number,
+  logicalH: number,
+  margin?: { left: number; right: number; top: number; bottom: number },
+  /** Worker 路径传入的内容感知信息（photoId → contentInfo）；主线程不传则 calcPhotoRenderParams 查全局缓存 */
+  contentInfoMap?: Map<string, PhotoContentInfo>,
+): PhotoPlanItem[] {
+  const photoMap = new Map(photos.map((p) => [p.id, p]));
+
+  // 渲染顺序：slotOrder 优先；未定义时回退到模板 slots 数组顺序（后者覆盖前者）
+  const orderMap = new Map<string, number>();
+  const effectiveSlotOrder = page.slotOrder ?? resolveTemplate(page)?.slots.map((s) => s.id) ?? [];
+  effectiveSlotOrder.forEach((id, i) => orderMap.set(id, i));
+
+  const placements = page.placements
+    .filter((pl) => pl.photoId)
+    .sort((a, b) => {
+      const ia = orderMap.has(a.slotId) ? orderMap.get(a.slotId)! : 999;
+      const ib = orderMap.has(b.slotId) ? orderMap.get(b.slotId)! : 999;
+      return ia - ib;
+    });
+
+  const plan: PhotoPlanItem[] = [];
+  for (const placement of placements) {
+    const photo = photoMap.get(placement.photoId!);
+    if (!photo) continue;
+    const slot = getSlotRect(placement.slotId, page, logicalW, logicalH, margin);
+    if (!slot) continue;
+    const params = calcPhotoRenderParams(
+      photo, placement, slot.width, slot.height,
+      contentInfoMap ? contentInfoMap.get(photo.id) ?? null : undefined,
+    );
+    if (!params) continue;
+    plan.push({
+      placement,
+      photoId: photo.id,
+      slot,
+      params,
+      z: getSlotZIndex(page, placement.slotId),
+    });
+  }
+  return plan;
+}
+
+/** 文字排版写出指令：一个待绘制的文本片段及其锚点坐标 */
+export interface TextLayoutWrite {
+  text: string;
+  x: number;
+  y: number;
+  textAlign: 'left' | 'center' | 'right';
+}
+
+/**
+ * 纯函数：计算文字元素的确定性排版写出指令（不含 ctx / 渐变 / 颜色等样式）。
+ * - 横排：断行 wrapTextLines（与 DOM 文字层同源）、垂直对齐（top/center/bottom）、水平对齐锚点；
+ * - 竖排：逐字节点列 + 水平/垂直对齐平移。
+ * 供画布 / 导出 / 缩略图 / 预览共用同一套文字定位判定。
+ * @param measure 测量单个字符串宽度的回调（draw 端传 ctx.measureText(s).width）
+ */
+export function buildTextLayout(
+  te: PageTextElement,
+  measure: (s: string) => number,
+): TextLayoutWrite[] {
+  const tx = te.x * MM_TO_PX;
+  const ty = te.y * MM_TO_PX;
+  const tw = te.width * MM_TO_PX;
+  const th = (te.height ?? 0) * MM_TO_PX;
+  const fs = te.fontSize;
+  const pad = 4;
+  const writes: TextLayoutWrite[] = [];
+
+  // 竖排（春联）模式：逐字竖排，从右到左
+  if (te.isVertical) {
+    const stepY = fs + (te.letterSpacing ?? 0);
+    const stepX = fs + ((te.lineHeight ?? 1.2) - 1) * fs;
+    const top = ty + pad;
+    const bottom = ty + th - pad;
+    let colX = tx + tw - fs - pad; // 从最右侧开始
+    let cy = top;
+    const nodes: { ch: string; x: number; y: number }[] = [];
+    for (const ch of te.text || '') {
+      if (ch === '\n') { colX -= stepX; cy = top; continue; }
+      if (cy + fs > bottom) { colX -= stepX; cy = top; }
+      nodes.push({ ch, x: colX, y: cy });
+      cy += stepY;
+    }
+    // 水平对齐（左/居/右）
+    if (nodes.length > 0) {
+      const xs = nodes.map((n) => n.x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs) + fs;
+      let shift: number;
+      if (te.align === 'left') shift = tx + pad - minX;
+      // 右对齐：块右缘贴盒内容右缘（tx + tw − pad，与左对齐对称；此前多减 fs 会左移——2026-08-19 修复）
+      else if (te.align === 'right') shift = tx + tw - pad - maxX;
+      else shift = tx + tw / 2 - (minX + maxX) / 2;
+      for (const n of nodes) n.x += shift;
+      // 垂直对齐：竖排整块内容在框内 top/center/bottom
+      const ys = nodes.map((n) => n.y);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys) + fs;
+      const contentH = th - pad * 2;
+      const blockH = maxY - minY;
+      const valign = te.verticalAlign ?? 'center';
+      let vshift = 0;
+      if (valign === 'center') vshift = (contentH - blockH) / 2;
+      else if (valign === 'bottom') vshift = contentH - blockH;
+      if (vshift > 0) for (const n of nodes) n.y += vshift;
+    }
+    for (const n of nodes) writes.push({ text: n.ch, x: n.x, y: n.y, textAlign: 'left' });
+    return writes;
+  }
+
+  // 横排模式
+  const hLs = te.letterSpacing ?? 0;
+  const lines = wrapTextLines({ measureText: (s) => ({ width: measure(s) }) }, te.text || '', tw - pad * 2 - hLs, hLs);
+  const lineHeight = fs * (te.lineHeight ?? 1.2);
+  const totalH = lines.length * lineHeight;
+  const verticalAlign = te.verticalAlign ?? 'center';
+  let y = ty + pad;
+  if (verticalAlign === 'center') y += Math.max(0, (th - pad * 2 - totalH) / 2);
+  else if (verticalAlign === 'bottom') y = Math.max(ty + pad, ty + th - pad - totalH);
+  const align = (te.align ?? 'left') as 'left' | 'center' | 'right';
+  for (const line of lines) {
+    let x = tx + pad;
+    if (align === 'center') x = tx + tw / 2;
+    else if (align === 'right') x = tx + tw - pad;
+    writes.push({ text: line, x, y, textAlign: align });
+    y += lineHeight;
+  }
+  return writes;
+}
+
+/** 形状渐变描画笔：线性/径向梯度（stops 已解析为 [offset,color,...]） */
+export interface ShapeGradientSpec {
+  kind: 'linear' | 'radial';
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  radius: number;
+  stops: (string | number)[];
+}
+
+/** 形状绘制 spec：只描述"画什么/用什么画"，不含 ctx 路径构造 */
+export interface ShapePaintSpec {
+  /** 以 mm×MM_TO_PX 换算的位置 */
+  x: number;
+  y: number;
+  rotation: number;
+  opacity: number;
+  /** 最小尺寸下限后的宽高（px）与描边宽 */
+  pw: number;
+  ph: number;
+  lineWidth: number;
+  /** 填充：纯色 / 线性 / 径向 梯度；无填充为 null */
+  fill: { kind: 'solid'; color: string } | ShapeGradientSpec | null;
+  /** 描边：纯色 / 线性梯度；无描边为 null */
+  stroke: { kind: 'solid'; color: string } | ShapeGradientSpec | null;
+}
+
+/** 解析渐变 stop 为扁平数组（alpha<1 用 toRgba，与画布/导出一致） */
+function resolveGradientStops(stops: { offset: number; color: string; alpha?: number }[]): (string | number)[] {
+  const out: (string | number)[] = [];
+  for (const s of stops) {
+    out.push(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+  }
+  return out;
+}
+
+/**
+ * 纯函数：解析形状的确定性"绘制 spec"（不含 ctx）。
+ * - 尺寸下限 MIN_SHAPE_SIZE_MM、描边宽下限 MIN_STROKE_WIDTH、透明度/旋转；
+ * - 填充：纯色或用 linearGradientEndpoints + 渐变 stop 解析的线/径向梯度；
+ * - 描边：纯色或线性渐变。
+ * 供画布 / 导出 / 缩略图 / 预览共用同一套形状画刷判定。
+ */
+export function buildShapePaintSpec(sh: ShapeElement): ShapePaintSpec {
+  const pw = Math.max(sh.width * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
+  const ph = Math.max(sh.height * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
+  const lineWidth = Math.max(MIN_STROKE_WIDTH, sh.strokeWidth || 0);
+
+  let fill: ShapePaintSpec['fill'] = null;
+  if (sh.gradient && sh.gradient.length >= 2) {
+    const stops = resolveGradientStops(sh.gradient);
+    if (sh.gradientType === 'radial') {
+      fill = { kind: 'radial', start: { x: 0, y: 0 }, end: { x: 0, y: 0 }, radius: Math.min(pw, ph) / 2, stops };
+    } else {
+      const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.gradientAngle ?? 45);
+      fill = { kind: 'linear', start: { x: startX, y: startY }, end: { x: endX, y: endY }, radius: 0, stops };
+    }
+  } else if (sh.fill) {
+    fill = { kind: 'solid', color: sh.fill };
+  }
+
+  let stroke: ShapePaintSpec['stroke'] = null;
+  if (sh.strokeGradient && sh.strokeGradient.length >= 2) {
+    const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.strokeGradientAngle ?? 45);
+    stroke = { kind: 'linear', start: { x: startX, y: startY }, end: { x: endX, y: endY }, radius: 0, stops: resolveGradientStops(sh.strokeGradient) };
+  } else if (sh.stroke) {
+    stroke = { kind: 'solid', color: sh.stroke };
+  }
+
+  return {
+    x: sh.x * MM_TO_PX,
+    y: sh.y * MM_TO_PX,
+    rotation: sh.rotation || 0,
+    opacity: typeof sh.opacity === 'number' ? sh.opacity : 1,
+    pw,
+    ph,
+    lineWidth,
+    fill,
+    stroke,
+  };
 }
 
 /* ══════════════════════════ 各元素类型独立绘制函数 ══════════════════════════ */
@@ -484,7 +692,6 @@ function drawTextElement(ctx: AnyCtx2D, te: PageTextElement): void {
   const tw = te.width * MM_TO_PX;
   const th = (te.height ?? 0) * MM_TO_PX;
   const fs = te.fontSize;
-  const pad = 4;
 
   // 空文本处理（与 TextElementNode.tsx 一致：灰色斜体占位文字）
   const hasText = te.text && te.text.length > 0;
@@ -513,75 +720,13 @@ function drawTextElement(ctx: AnyCtx2D, te: PageTextElement): void {
   }
   ctx.fillStyle = fillValue;
 
-  // 竖排（春联）模式：isVertical 标志为 true 时逐字竖排，从右到左
-  if (te.isVertical) {
-    ctx.textAlign = 'left';
-    const text = te.text || '';
-    const stepY = fs + (te.letterSpacing ?? 0);
-    const stepX = fs + ((te.lineHeight ?? 1.2) - 1) * fs;
-    const top = ty + pad;
-    const bottom = ty + th - pad;
-    let colX = tx + tw - fs - pad; // 从最右侧开始
-    let cy = top;
-    const nodes: { ch: string; x: number; y: number }[] = [];
-    for (const ch of text) {
-      if (ch === '\n') {
-        colX -= stepX;
-        cy = top;
-        continue;
-      }
-      if (cy + fs > bottom) {
-        colX -= stepX;
-        cy = top;
-      }
-      nodes.push({ ch, x: colX, y: cy });
-      cy += stepY;
-    }
-    // 对齐：根据 align 水平定位整块列（左/居/右对齐）
-    if (nodes.length > 0) {
-      const xs = nodes.map((n) => n.x);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs) + fs;
-      let shift: number;
-      if (te.align === 'left') shift = tx + pad - minX;
-      else if (te.align === 'right') shift = tx + tw - fs - pad - maxX;
-      else shift = tx + tw / 2 - (minX + maxX) / 2; // 居中
-      for (const n of nodes) n.x += shift;
-      // 垂直对齐：竖排整块内容在框内按 verticalAlign（top/center/bottom）定位
-      const ys = nodes.map((n) => n.y);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys) + fs;
-      const contentH = th - pad * 2;
-      const blockH = maxY - minY;
-      const valign = te.verticalAlign ?? 'center';
-      let vshift = 0;
-      if (valign === 'center') vshift = (contentH - blockH) / 2;
-      else if (valign === 'bottom') vshift = contentH - blockH;
-      if (vshift > 0) for (const n of nodes) n.y += vshift;
-    }
-    for (const n of nodes) ctx.fillText(n.ch, n.x, n.y);
-    return;
-  }
-
-  // 横排模式（断行与编辑器 DOM 文字层 TextDomNode 同源：CJK 逐字可断、Latin 按空格断行，
-  // 测量计入字距；内容宽 = 盒宽 − 左右内边距 − 末尾一字距，与 fitTextSize 同口径）
-  ctx.textAlign = (te.align as CanvasTextAlign) || 'left';
-  const hLs = te.letterSpacing ?? 0;
-  ctx.letterSpacing = `${hLs}px`;
-  const lines = wrapTextLines(ctx, te.text || '', tw - pad * 2 - hLs, hLs);
-  const lineHeight = fs * (te.lineHeight ?? 1.2);
-  // 垂直对齐：顶/居中/底（与编辑器 TextElementNode / exportEngine 一致，默认居中）
-  const totalH = lines.length * lineHeight;
-  const verticalAlign = te.verticalAlign ?? 'center';
-  let y = ty + pad;
-  if (verticalAlign === 'center') y += Math.max(0, (th - pad * 2 - totalH) / 2);
-  else if (verticalAlign === 'bottom') y = Math.max(ty + pad, ty + th - pad - totalH);
-  for (const line of lines) {
-    let x = tx + pad;
-    if (te.align === 'center') x = tx + tw / 2;
-    else if (te.align === 'right') x = tx + tw - pad;
-    ctx.fillText(line, x, y);
-    y += lineHeight;
+  // 排版指令由纯函数 buildTextLayout 计算（横排断行/对齐/垂直对齐 + 竖排逐字），
+  // 与编辑器 DOM 文字层 / exportEngine 同源；此处仅按指令写出。
+  // 先设 letterSpacing 以便 measureText 计入字距（与编辑器/导出一致）。
+  ctx.letterSpacing = `${te.letterSpacing ?? 0}px`;
+  for (const w of buildTextLayout(te, (s) => ctx.measureText(s).width)) {
+    ctx.textAlign = w.textAlign;
+    ctx.fillText(w.text, w.x, w.y);
   }
   ctx.letterSpacing = '0px';
 }
@@ -703,49 +848,50 @@ function drawSticker(
 
 /** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform 与最小尺寸下限，逻辑与 exportEngine.drawShape 一致） */
 function drawShape(ctx: AnyCtx2D, sh: ShapeElement): void {
-  const px = sh.x * MM_TO_PX;
-  const py = sh.y * MM_TO_PX;
-  // 最小尺寸下限与编辑器 ShapeNode 同源（MIN_SHAPE_SIZE_MM），确保小尺寸形状在缩略图与编辑模式一致
-  const pw = Math.max(sh.width * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
-  const ph = Math.max(sh.height * MM_TO_PX, MIN_SHAPE_SIZE_MM * MM_TO_PX);
+  // 画刷/变换等确定性判定由纯函数 buildShapePaintSpec 统一计算（与导出/画布/预览同源）
+  const spec = buildShapePaintSpec(sh);
+  const px = spec.x;
+  const py = spec.y;
+  const pw = spec.pw;
+  const ph = spec.ph;
+  const lineWidth = spec.lineWidth;
 
   ctx.save();
   ctx.translate(px, py);
-  ctx.rotate((sh.rotation * Math.PI) / 180);
-  ctx.globalAlpha = typeof sh.opacity === 'number' ? sh.opacity : 1;
+  ctx.rotate((spec.rotation * Math.PI) / 180);
+  ctx.globalAlpha = spec.opacity;
 
-  const lineWidth = Math.max(MIN_STROKE_WIDTH, sh.strokeWidth || 0);
   ctx.lineWidth = lineWidth;
   const halfW = pw / 2;
   const halfH = ph / 2;
-  // 渐变填充（与画布 ShapeGlyph / exportEngine 一致：线性=左上→右下，径向=中心向外）
-  const hasFill = !!(sh.fill || (sh.gradient && sh.gradient.length >= 2));
-  if (sh.gradient && sh.gradient.length >= 2) {
-    if (sh.gradientType === 'radial') {
-      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.min(pw, ph) / 2);
-      for (const s of sh.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+  // 填充（纯色 / 线/径向梯度）与描边（纯色 / 线性梯度）
+  const hasFill = !!spec.fill;
+  if (spec.fill) {
+    if (spec.fill.kind === 'solid') {
+      ctx.fillStyle = spec.fill.color;
+    } else if (spec.fill.kind === 'radial') {
+      const grad = ctx.createRadialGradient(spec.fill.start.x, spec.fill.start.y, 0, spec.fill.end.x, spec.fill.end.y, spec.fill.radius);
+      for (let i = 0; i < spec.fill.stops.length; i += 2) grad.addColorStop(spec.fill.stops[i] as number, spec.fill.stops[i + 1] as string);
       ctx.fillStyle = grad;
     } else {
-      const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.gradientAngle ?? 45);
-      const grad = ctx.createLinearGradient(startX, startY, endX, endY);
-      for (const s of sh.gradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
+      const grad = ctx.createLinearGradient(spec.fill.start.x, spec.fill.start.y, spec.fill.end.x, spec.fill.end.y);
+      for (let i = 0; i < spec.fill.stops.length; i += 2) grad.addColorStop(spec.fill.stops[i] as number, spec.fill.stops[i + 1] as string);
       ctx.fillStyle = grad;
     }
-  } else if (sh.fill) {
-    ctx.fillStyle = sh.fill;
   }
-  if (sh.strokeGradient && sh.strokeGradient.length >= 2) {
-    const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.strokeGradientAngle ?? 45);
-    const grad = ctx.createLinearGradient(startX, startY, endX, endY);
-    for (const s of sh.strokeGradient) grad.addColorStop(s.offset, s.alpha != null && s.alpha < 1 ? toRgba(s.color, s.alpha) : s.color);
-    ctx.strokeStyle = grad;
-  } else if (sh.stroke) {
-    ctx.strokeStyle = sh.stroke;
+  if (spec.stroke) {
+    if (spec.stroke.kind === 'solid') {
+      ctx.strokeStyle = spec.stroke.color;
+    } else {
+      const grad = ctx.createLinearGradient(spec.stroke.start.x, spec.stroke.start.y, spec.stroke.end.x, spec.stroke.end.y);
+      for (let i = 0; i < spec.stroke.stops.length; i += 2) grad.addColorStop(spec.stroke.stops[i] as number, spec.stroke.stops[i + 1] as string);
+      ctx.strokeStyle = grad;
+    }
   }
 
   const beginShape = () => {
     if (hasFill) ctx.fill();
-    if ((sh.stroke || (sh.strokeGradient && sh.strokeGradient.length >= 2)) && lineWidth > 0) ctx.stroke();
+    if (spec.stroke && lineWidth > 0) ctx.stroke();
   };
 
   switch (sh.type) {

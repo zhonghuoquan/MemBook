@@ -7,12 +7,14 @@
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../store';
 import { useEditorStore } from '../../store';
+import { RULER_SIZE } from './CanvasRulers';
 
 export function PageDisplayModeToggle() {
   const { t } = useTranslation();
   const pageDisplayMode = useUIStore((s) => s.pageDisplayMode);
   const setPageDisplayMode = useUIStore((s) => s.setPageDisplayMode);
   const pagesLength = useEditorStore((s) => s.pages.length);
+  const rulerEnabled = useUIStore((s) => s.rulerEnabled);
 
   if (pagesLength === 0) return null;
 
@@ -20,7 +22,7 @@ export function PageDisplayModeToggle() {
   const toggle = () => setPageDisplayMode(isFull ? 'page' : 'full');
 
   return (
-    <div className="absolute top-3 right-3 z-[var(--z-dropdown)]">
+    <div className="absolute right-3 z-[var(--z-dropdown)]" style={{ top: rulerEnabled ? RULER_SIZE + 12 : 12 }}>
       <button
         onClick={toggle}
         className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg bg-white shadow-md border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer text-[var(--color-gray-600)] text-xs font-medium"

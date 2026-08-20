@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import type {
   AlbumPage, PhotoAdjustments, AlbumSize, SlotOverride, PageMarginSettings, AlbumTypeId,
   EditorTool, BrushStroke, BrushSettings, StickyNote, PageTextElement, StickerElement, ShapeElement, ShapeType, WatermarkSettings,
-  BackgroundApply, BackgroundApplyScope,
+  BackgroundApply, BackgroundApplyScope, AlbumGuideLine,
 } from '../../types';
 
 /* ── Editor Store (当前编辑状态) ── */
@@ -65,10 +65,12 @@ export interface PageSlice {
   resetPageLayout: (pageIndex: number) => void;
   /** 在当前页添加一个照片槽位（默认居中，30%×30%，百分比坐标） */
   addPhotoSlot: () => void;
-  /** 应用封面模板：插入封面页或切换已有封面的模板（保留已填照片，不足用预设照片补齐） */
+  /** 应用封面模板：插入封面页或切换已有封面的模板（保留已填照片，不足用预设照片补齐）。
+   * 成套设计：若模板带配套封底（backCover）会联动应用，封面+封底合并为**一次**快照（一次撤销）。 */
   applyCoverTemplate: (templateId: string) => Promise<void>;
-  /** 应用封底模板：插入封底页或切换已有封底的模板（不足用预设照片补齐） */
-  applyBackCoverTemplate: (templateId: string) => Promise<void>;
+  /** 应用封底模板：插入封底页或切换已有封底的模板（不足用预设照片补齐）。
+   * recordHistory=false 时（被 applyCoverTemplate 联动调用）不压快照，由调用方统一提交。 */
+  applyBackCoverTemplate: (templateId: string, recordHistory?: boolean) => Promise<void>;
 }
 
 /* ── 槽位/照片编辑 ──
@@ -87,12 +89,12 @@ export interface PlacementSlice {
   swapPagePhotoPlacements: (pageIndex: number, fromIndex: number, toIndex: number) => boolean;
   /* 照片编辑 */
   updatePlacementRotation: (pageIndex: number, slotId: string, rotation: number) => void;
-  updatePlacementAdjustments: (pageIndex: number, slotId: string, adjustments: PhotoAdjustments) => void;
+  updatePlacementAdjustments: (pageIndex: number, slotId: string, adjustments: PhotoAdjustments, recordHistory?: boolean) => void;
   updatePlacementFilter: (pageIndex: number, slotId: string, filter: string | null) => void;
   updatePlacementPan: (pageIndex: number, slotId: string, panX: number, panY: number, panScale?: number, recordHistory?: boolean) => void;
   resetPlacementPan: (pageIndex: number, slotId: string) => void; // 仅重置pan，保留调整/滤镜/翻转
   updatePlacementFlip: (pageIndex: number, slotId: string, flipH?: boolean, flipV?: boolean) => void;
-  updatePlacementFilterIntensity: (pageIndex: number, slotId: string, intensity: number) => void;
+  updatePlacementFilterIntensity: (pageIndex: number, slotId: string, intensity: number, recordHistory?: boolean) => void;
   resetPlacementEdits: (pageIndex: number, slotId: string) => void;
   /* 照片位自由编辑 */
   updateSlotOverride: (pageIndex: number, slotId: string, override: SlotOverride) => void;
@@ -115,6 +117,8 @@ export interface AlbumMetaSlice {
   defaultSlotCornerRadius: number;
   showGuides: boolean;
   showMarginGuide: boolean;
+  /** 相册级参考线（编辑辅助，跨页共享，随项目持久化） */
+  guideLines: AlbumGuideLine[];
   setProjectName: (name: string) => void;
   setAlbumSize: (size: AlbumSize) => void;
   /** 设置相册类型（封面场景化引言与配色） */
@@ -132,6 +136,7 @@ export interface AlbumMetaSlice {
   setPageSlotCornerRadius: (pageIndex: number, r: number) => void;
   setShowGuides: (v: boolean) => void;
   setShowMarginGuide: (v: boolean) => void;
+  setGuideLines: (guides: AlbumGuideLine[]) => void;
 }
 
 /* ── 工具模式 ── */

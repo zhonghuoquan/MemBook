@@ -42,6 +42,27 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npx tauri build --bundles nsis
 
+      - name: Generate update manifest (Windows)
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          $repo = $env:GITHUB_REPOSITORY
+          $exe = "MemBook_${ver}_x64-setup.exe"
+          $url = "https://github.com/${repo}/releases/download/${tag}/${exe}"
+          $sig = (Get-Content "src-tauri/target/release/bundle/nsis/${exe}.sig" -Raw).Trim()
+          $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $manifest = [ordered]@{
+            version  = $ver
+            pub_date = $pub
+            notes    = ""
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{ signature = $sig; url = $url }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 6
+          Set-Content -Path "update-windows-x86_64.json" -Value $json -Encoding utf8
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -49,6 +70,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
+            update-windows-x86_64.json
           if-no-files-found: warn
 
       - name: Publish GitHub Release
@@ -59,6 +81,7 @@ jobs:
           files: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
+            update-windows-x86_64.json
 
   # ================= macOS 构建（Universal DMG，Intel + Apple Silicon） =================
   build-macos:
@@ -94,6 +117,27 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npx tauri build --bundles app,dmg --target universal-apple-darwin
 
+      - name: Generate update manifest (macOS)
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          $repo = $env:GITHUB_REPOSITORY
+          $dmg = "MemBook_${ver}_universal.dmg"
+          $url = "https://github.com/${repo}/releases/download/${tag}/${dmg}"
+          $sig = (Get-Content "src-tauri/target/universal-apple-darwin/release/bundle/dmg/${dmg}.sig" -Raw).Trim()
+          $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $manifest = [ordered]@{
+            version  = $ver
+            pub_date = $pub
+            notes    = ""
+            platforms = [ordered]@{
+              "darwin-universal" = [ordered]@{ signature = $sig; url = $url }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 6
+          Set-Content -Path "update-darwin-universal.json" -Value $json -Encoding utf8
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -101,6 +145,7 @@ jobs:
           path: |
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.sig
+            update-darwin-universal.json
           if-no-files-found: warn
 
       - name: Publish GitHub Release
@@ -111,3 +156,4 @@ jobs:
           files: |
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.sig
+            update-darwin-universal.json

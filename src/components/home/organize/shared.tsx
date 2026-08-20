@@ -9,6 +9,7 @@ import type { PhotoFileInfo, ToolProgress, ToolResultSummary, DataSourceMode } f
 import type { LicenseFeature } from '../../../license/types';
 import { formatBytes, isTauri } from '../../../photo-tools';
 import { getThumbUrl, evictFromCache, type ThumbSize } from './thumbCache';
+import { invalidatePhotoContentCache } from '../../../engine/content-aware';
 
 // ── 按标签持久化工具结果 ────────────────────────────────
 
@@ -51,6 +52,45 @@ export function useTabCachedResult<T>(tabId: string | undefined, initial: T): [T
   }, [tabId, initial]);
 
   return [state, setState];
+}
+
+/**
+ * 懒加载列表：哨兵元素进入视口时增量加载下一批，直到全部显示。
+ *
+ * 用于照片数量很多时避免一次性渲染全部（配合 ThumbImage 的 IntersectionObserver
+ * 懒加载，进一步降低缩略图解码与 DOM 压力）。替代原「slice 截断 + 还有 N 张」静态提示——
+ * 列表滚动到底部自动继续加载，最终全部照片都能展示出来。
+ *
+ * @param total 列表总数
+ * @param batch 每批加载条数（初始批 + 滚动增量批）
+ * @returns visibleCount 当前应渲染的条数；sentinelRef 挂到列表末尾哨兵元素上
+ */
+export function useLazyList(total: number, batch: number) {
+  const [visibleCount, setVisibleCount] = useState(Math.min(batch, total));
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // 总数减少（照片被修改/移除移出列表）时收敛已加载数量，避免渲染越界
+  useEffect(() => {
+    setVisibleCount((c) => Math.min(c, total));
+  }, [total]);
+
+  // 哨兵进入视口（提前 300px）→ 追加下一批；全部加载完停止观察
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= total) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleCount((c) => Math.min(c + batch, total));
+        }
+      },
+      { rootMargin: '300px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleCount, total, batch]);
+
+  return { visibleCount, sentinelRef };
 }
 
 // ── 常量 ────────────────────────────────────────────────
@@ -804,7 +844,7 @@ export function ThumbImage({
   photo: PhotoFileInfo;
   onPreview?: () => void;
   readPhotoData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
-  aspect?: 'square' | '4/3' | 'video';
+  aspect?: 'square' | '4/3' | 'video' | 'fill';
   size?: ThumbSize;
   lazy?: boolean;
 }) {
@@ -877,7 +917,7 @@ export function ThumbImage({
   }, [inView, photo, size, readPhotoData, retryCount]);
 
   const src = photo.thumbUrl || url;
-  const aspectCls = aspect === '4/3' ? 'aspect-[4/3]' : aspect === 'video' ? 'aspect-video' : 'aspect-square';
+  const aspectCls = aspect === 'fill' ? 'h-full w-full' : aspect === '4/3' ? 'aspect-[4/3]' : aspect === 'video' ? 'aspect-video' : 'aspect-square';
 
   // 预览按钮覆盖层（hover 显示眼睛图标）
   const previewOverlay = onPreview ? (
@@ -953,6 +993,8 @@ export async function deletePhotos(
       for (const f of target) {
         if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
         evictFromCache(f.id);
+        // 同步失效内容感知缓存，避免被删照片的 contentInfo 驻留
+        invalidatePhotoContentCache(f.id);
         ok++;
       }
     } else if (isTauri()) {

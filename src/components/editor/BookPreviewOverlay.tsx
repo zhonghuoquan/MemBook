@@ -128,6 +128,8 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
   const totalPagesRef = useRef(0);
   // 按下位置：区分「点击衬页合书」与「拖拽翻页」（位移 > 6px 视为拖拽）
   const downPosRef = useRef<{ x: number; y: number } | null>(null);
+  // 仅有封面+封底、无内容页：此时没有软页可翻，预览退化为「封面↔封底」直接切换
+  const noContentPagesRef = useRef(false);
   // 当前对开左页页码（0 起），由 flip 事件驱动
   const [pageIndex, setPageIndex] = useState(0);
   // 封面/封底真实渲染图（与主页相册封面同源的真实页面内容）
@@ -144,10 +146,55 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
   // 底部进度条自动收起：悬浮底部唤起，2.5s 无操作渐隐滑出（对齐全屏查看交互）
   const [progressVisible, setProgressVisible] = useState(false);
   const progressTimerRef = useRef<number | null>(null);
+  // 渐进式渲染：后台分批渲染内容页的进度（正在生成预览页面 x/N），翻页书就绪前给用户反馈
+  const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
+  // 用户在翻页书就绪前点击封面/封底 → 就绪后自动翻开（不再静默忽略点击）
+  const pendingOpenRef = useRef(false);
+  // 批次渲染完成待热替换：翻页进行中（changeState ≠ 'read'）时延后到静止再 updateFromImages
+  const pendingUpdateRef = useRef(false);
+  // 当前翻页书页面图片数组（未渲染部分为加载占位；批次完成后整体热替换）
+  const pageImagesRef = useRef<string[]>([]);
 
   // 相册尺寸标识：albumSize 迟到（会话恢复 hydrate 竞态）或切换尺寸时，
   // 下方初始化 effect 据此销毁重建翻页书，保证书本按用户设定尺寸生成
   const sizeKey = albumSize ? `${Math.round(albumSize.width)}x${Math.round(albumSize.height)}` : '';
+
+  // 进入翻页书（封面/封底绕书脊翻开的 3D 动效）。
+  // 无内容页（仅封面+封底）时退化为封面↔封底切换。
+  // 就绪前被点击由 pendingOpenRef 标记，翻页书创建完成后自动调用本函数。
+  const openFlipBook = (dir: 'front' | 'back' = 'front') => {
+    const openState = dir === 'back' ? openingBack : opening;
+    const setOpen = dir === 'back' ? setOpeningBack : setOpening;
+    if (noContentPagesRef.current) {
+      if (openState) return;
+      setOpen(true);
+      setTimeout(() => {
+        setOpen(false);
+        setStage(dir === 'back' ? 'cover' : 'back');
+      }, 550);
+      return;
+    }
+    if (openState || !flipRef.current) return;
+    setOpen(true);
+    setTimeout(() => {
+      setOpen(false);
+      if (!flipRef.current) return;
+      setStage('flip');
+      flipRef.current.turnToPage(dir === 'back' ? Math.max(0, totalPagesRef.current - 2) : 1);
+    }, 550);
+  };
+
+  // 批次渲染完成 → 把最新页面图片数组热替换进翻页书（PageFlip.updateFromImages）。
+  // 若用户正在翻页（拖角/翻动中），先标记 pending，等 changeState 回到 'read' 再替换，避免打断翻页动画。
+  const flushPendingUpdate = () => {
+    const flip = flipRef.current;
+    if (!flip) return;
+    if ((flip as any).getState?.() !== 'read') { pendingUpdateRef.current = true; return; }
+    pendingUpdateRef.current = false;
+    try {
+      flip.updateFromImages(pageImagesRef.current);
+    } catch { /* 忽略热替换失败 */ }
+  };
 
   // 打开时渲染封面/封底真实页面 + 内容页，初始化翻页书
   useEffect(() => {
@@ -161,44 +208,64 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
     setClosingDir(null);
     setCoverImage(null);
     setBackImage(null);
+    setRenderProgress(null);
+    pendingOpenRef.current = false;
+    pendingUpdateRef.current = false;
 
     const boot = async () => {
+      // 显式传入相册尺寸给渲染引擎：冷启动时全局 store 的 albumSize 为 null，
+      // 不传会让 renderPageThumbnail 回退 store 尺寸 → 返回 null → 封面/内容全空白。
+      // （与主页封面卡片一致：必须按当前相册尺寸渲染，而非依赖全局 store）
+      const renderAlbumSize = { width: albumSize?.width ?? 210, height: albumSize?.height ?? 280 };
       // 封面/封底硬壳书板：渲染相册真实页面（与主页相册封面卡片一致的内容）
       const coverPage = pages.find((p) => p.pageKind === 'cover') ?? pages[0];
       if (coverPage) {
-        const img = await renderSinglePage(coverPage, photos);
+        const img = await renderSinglePage(coverPage, photos, renderAlbumSize);
         if (!cancelled) setCoverImage(img);
       }
       const backPage = pages.find((p) => p.pageKind === 'backCover');
       if (backPage) {
-        const img = await renderSinglePage(backPage, photos);
+        const img = await renderSinglePage(backPage, photos, renderAlbumSize);
         if (!cancelled) setBackImage(img);
       }
 
-      // 内容页（软翻页主体）
-      const contentPages = pages.filter((p) => p.pageKind !== 'cover' && p.pageKind !== 'backCover');
-      let contentImages: string[];
-      try {
-        contentImages = await renderAllPages(contentPages, photos);
-      } catch (err) {
-        console.warn('[BookPreview] 页面渲染失败', err);
-        contentImages = [];
+      // 内容页（软翻页主体）；携带完整 pages 供渲染时按绝对页索引绘制时间水印
+      const content = pages
+        .map((p, i) => ({ p, i }))
+        .filter(({ p }) => p.pageKind !== 'cover' && p.pageKind !== 'backCover');
+      // 无内容页（仅有封面+封底）：不创建翻页书，退化为封面↔封底切换
+      noContentPagesRef.current = content.length === 0;
+      if (content.length === 0) {
+        if (!cancelled) setRenderProgress(null);
+        return;
       }
-      if (cancelled) return;
-      if (contentImages.length === 0) return;
 
       // 页序（软页，总页数补为偶数，保证末对开为 [补白页 | 后衬页]，封底内衬始终在右侧）：
       //   [衬页 | 内容1..N | (补白页) | 衬页]
+      // 未渲染的内容页先用「加载占位页」填充，使翻页书页数完整、可立即创建。
       const endpaper = makeEndpaperDataUrl();
-      const pageImages = [endpaper, ...contentImages, endpaper];
+      const pageImages: string[] = [endpaper, ...content.map(() => LOADING_PAGE_DATAURL), endpaper];
       if (pageImages.length % 2 === 1) {
-        pageImages.splice(pageImages.length - 1, 0, BLANK_PAGE_DATAURL);
+        pageImages.splice(pageImages.length - 1, 0, LOADING_PAGE_DATAURL);
       }
       totalPagesRef.current = pageImages.length;
+      pageImagesRef.current = pageImages;
 
       const el = containerRef.current;
       if (!el) return;
       el.innerHTML = '';
+
+      // 渐进式渲染第一步：只渲染首屏对开附近的前 N 张内容页，即可创建翻页书 → 点封面马上能进翻页
+      const FIRST_BATCH = 8;
+      let renderedCount = 0; // 已渲染内容页数（累计，跨批次进度）
+      const report = (doneInBatch: number) => {
+        if (cancelled) return;
+        setRenderProgress({ done: Math.min(renderedCount + doneInBatch, content.length), total: content.length });
+      };
+      const firstImages = await renderPageBatch(content.slice(0, FIRST_BATCH), photos, renderAlbumSize, pages, report);
+      if (cancelled) return;
+      for (let k = 0; k < firstImages.length; k++) pageImages[1 + k] = firstImages[k];
+      renderedCount += firstImages.length;
 
       let flip: PageFlip;
       try {
@@ -235,7 +302,8 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
           useMouseEvents: true,
           disableFlipByClick: false,
         });
-        flip.loadFromImages(pageImages);
+        // 先加载当前快照（首批真实 + 其余占位），后续批次经 updateFromImages 热替换
+        flip.loadFromImages([...pageImages]);
       } catch (err) {
         console.warn('[BookPreview] 翻页书初始化失败', err);
         return;
@@ -256,11 +324,13 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
       });
 
       // 翻页交互状态：'read'（静止）| 'user_fold'/'fold_corner'（拖角）| 'flipping'（翻动中）
-      // 翻动中隐藏书脊沟槽阴影（gutter 在画布之上，避免压住翻起页穿模），静止后淡入还原
+      // 翻动中隐藏书脊沟槽阴影（gutter 在画布之上，避免压住翻起页穿模），静止后淡入还原；
+      // 静止时若有待热替换的批次（翻页中完成渲染的），立即执行，避免打断翻页动画。
       flip.on('changeState', (e: FlipEvent) => {
         if (cancelled) return;
         const state = e?.data as unknown as string | undefined;
         setFlipping(state !== 'read');
+        if (state === 'read' && pendingUpdateRef.current) flushPendingUpdate();
       });
 
       // 响应式尺寸：wrapper 宽度随视口/容器变化，重新触发自动尺寸适配，并重挂缓冲
@@ -280,6 +350,24 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
         applyFlipBuffer(containerRef.current, pageSizeRef.current);
       }, 90);
       void guardTimer;
+
+      // 用户在翻页书就绪前点过封面 → 自动翻开，不要求再次点击
+      if (pendingOpenRef.current) {
+        pendingOpenRef.current = false;
+        window.setTimeout(openFlipBook, 60);
+      }
+
+      // 渐进式渲染第二步：其余页面后台分批渲染（每批让出主线程 + 报告进度），
+      // 完成后整体热替换进翻页书（翻页进行中延后，静止后 flushPendingUpdate 生效）。
+      for (let start = FIRST_BATCH; start < content.length && !cancelled; start += FIRST_BATCH) {
+        const batchImages = await renderPageBatch(content.slice(start, start + FIRST_BATCH), photos, renderAlbumSize, pages, report);
+        if (cancelled) return;
+        for (let k = 0; k < batchImages.length; k++) pageImages[start + 1 + k] = batchImages[k];
+        renderedCount += batchImages.length;
+        pageImagesRef.current = pageImages;
+        flushPendingUpdate();
+      }
+      if (!cancelled) setRenderProgress(null);
     };
 
     boot();
@@ -391,28 +479,25 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
 
   // ── 阶段切换与翻页控制 ──
 
-  // 封面 → 翻页书：封面绕书脊（左）向左翻开的 3D 动效
+  // 封面 → 翻页书：封面绕书脊（左）向左翻开的 3D 动效；
+  // 无内容页（仅有封面+封底）：翻页书不存在，点击直接在「封面→封底」间切换。
+  // 翻页书仍在生成（渐进式渲染首批未完成）时：标记 pendingOpen，就绪后自动翻开（不再静默忽略点击）。
   const toFlipFromCover = () => {
-    if (opening || !flipRef.current) return;
-    setOpening(true);
-    setTimeout(() => {
-      setOpening(false);
-      if (!flipRef.current) return;
-      setStage('flip');
-      flipRef.current.turnToPage(1);
-    }, 550);
+    if (!flipRef.current && !noContentPagesRef.current) {
+      pendingOpenRef.current = true;
+      return;
+    }
+    openFlipBook('front');
   };
 
-  // 封底 → 翻页书：封底绕书脊（右）向右翻开的 3D 动效（镜像），回到末屏
+  // 封底 → 翻页书：封底绕书脊（右）向右翻开的 3D 动效（镜像），回到末屏；
+  // 无内容页（仅有封面+封底）：翻页书不存在，点击直接在「封底→封面」间切换
   const openFromBack = () => {
-    if (openingBack || !flipRef.current) return;
-    setOpeningBack(true);
-    setTimeout(() => {
-      setOpeningBack(false);
-      if (!flipRef.current) return;
-      setStage('flip');
-      flipRef.current.turnToPage(Math.max(0, totalPagesRef.current - 2));
-    }, 550);
+    if (!flipRef.current && !noContentPagesRef.current) {
+      pendingOpenRef.current = true;
+      return;
+    }
+    openFlipBook('back');
   };
 
   // 合书：翻页书向封面/封底方向收拢，随后切换到对应硬壳书板（与翻开动效互逆）
@@ -745,6 +830,17 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
             <NavArrow dir="next" onClick={handleNext} label={t('editor.bookPreview.next')} />
           </div>
         </div>
+        {/* 渐进式渲染进度：后台分批生成预览页面中（封面/翻页态都显示，浅色胶囊提示，不挡书不拦截点击） */}
+        {renderProgress && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full bg-white/85 backdrop-blur border border-[var(--color-border)] px-3.5 py-1.5 text-[12px] text-[var(--color-gray-600)] shadow-sm pointer-events-none select-none">
+            <svg className="w-3.5 h-3.5 animate-spin text-[var(--color-brand)]" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            <span>{t('editor.bookPreview.generatingPages', { current: renderProgress.done, total: renderProgress.total })}</span>
+          </div>
+        )}
+
         {/* 底部悬浮区（不占布局，停于内容区底部薄悬浮区）。
           外层容器保持可交互以接收 hover 唤起（不能因隐藏而带 pointer-events-none，否则收不到鼠标事件）；
           内层进度条/快捷按钮在隐藏时才 pointer-events-none + 滑出。
@@ -817,10 +913,12 @@ function NavArrow({ dir, onClick, label }: { dir: 'prev' | 'next'; onClick: () =
   );
 }
 
-/** 渲染单页为翻页书图片（复用缩略图渲染引擎） */
+/** 渲染单页为翻页书图片（复用缩略图渲染引擎）。albumSize 必须显式传入，
+ *  否则 renderPageThumbnail 回退全局 store 尺寸，冷启动（store albumSize=null）会渲染失败返回 null。 */
 async function renderSinglePage(
   page: AlbumPage,
   photos: Photo[],
+  albumSize?: { width: number; height: number },
 ): Promise<string | null> {
   try {
     const photoImages = await preloadSharedPhotos([page], photos);
@@ -832,7 +930,7 @@ async function renderSinglePage(
         photos,
         1,
         photoImages,
-        { baseWidth: 1440, noCache: true, cacheSuffix: 'book-cover' },
+        { baseWidth: 1440, noCache: true, cacheSuffix: 'book-cover', albumSize },
         stickerImages,
         bgBitmap ?? undefined,
       );
@@ -851,12 +949,19 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p, new Promise<null>((res) => setTimeout(() => res(null), ms))]);
 }
 
-/** 解析照片可加载 src（等价 resolveGridPhotoSrc，优先读库缩略图） */
+/** 解析照片可加载 src（等价 resolveGridPhotoSrc，优先读库缩略图）。
+ *  先复用已解析的 photo.src（data: 永不失效 / blob: 存活即用），
+ *  可跳过冷启动时重新读取 IndexedDB 的耗时 → 封面/内容更快显示，不回落到灰占位。 */
 async function resolvePhotoSrc(
   photo: Photo,
   readPhotoFromDB: (id: string) => Promise<string | null>,
   makeDirectPhotoUrl: (p: Photo) => Promise<string | null>,
+  isBlobUrlAlive: (url: string) => boolean,
 ): Promise<string | null> {
+  const aliveSrc = photo.src?.startsWith('data:')
+    ? photo.src
+    : (photo.src?.startsWith('blob:') && isBlobUrlAlive(photo.src) ? photo.src : null);
+  if (aliveSrc) return aliveSrc;
   if (photo.storageMode === 'import') {
     const id = photo.thumbBlobId ?? photo.previewBlobId ?? photo.blobId ?? photo.originalBlobId;
     if (id) {
@@ -898,12 +1003,12 @@ async function preloadSharedPhotos(
   if (needed.length === 0) return new Map();
 
   const result = new Map<string, HTMLImageElement | ImageBitmap>();
-  const { readPhotoFromDB, makeDirectPhotoUrl } = await import('../../engine/storage-engine');
+  const { readPhotoFromDB, makeDirectPhotoUrl, isBlobUrlAlive } = await import('../../engine/storage-engine');
 
   await Promise.all(
     needed.map(async (photo) => {
       try {
-        const src = await resolvePhotoSrc(photo, readPhotoFromDB, makeDirectPhotoUrl);
+        const src = await resolvePhotoSrc(photo, readPhotoFromDB, makeDirectPhotoUrl, isBlobUrlAlive);
         if (!src) return;
         // 只接受 dataURL/blob（同源，可直接绘制）；其他（如 asset://）通过文件读取已转 blob
         const img = await withTimeout(loadImage(src, { timeout: 5000 }), 5000);
@@ -918,40 +1023,50 @@ async function preloadSharedPhotos(
 }
 
 /**
- * 把相册页面渲染为翻页书图片（复用缩略图渲染引擎）。
- * 照片一次性共享预加载（去重），各页并行渲染，渲染后释放图像资源。
+ * 渲染一批内容页为翻页书图片（复用缩略图渲染引擎）。
+ * 照片按批次共享预加载（去重，只加载本批用到的照片 → 渐进式渲染下首批/后台批次 I/O 更小）；
+ * 页间让出主线程（setTimeout 0）保持界面响应，并逐页回调进度。
+ * 内容页传入各自的绝对 pageIndex（并携带完整相册 pages 作水印判定）→ 启用水印；
+ * 封面/封底由 renderSinglePage 处理，不传 pageIndex，故不显示水印。
  */
-async function renderAllPages(
-  pages: AlbumPage[],
+async function renderPageBatch(
+  items: { p: AlbumPage; i: number }[],
   photos: Photo[],
+  albumSize: { width: number; height: number } | undefined,
+  watermarkPages: AlbumPage[],
+  onPage?: (doneInBatch: number) => void,
 ): Promise<string[]> {
-  const allPhotoImages = await preloadSharedPhotos(pages, photos);
+  if (items.length === 0) return [];
+  const allPhotoImages = await preloadSharedPhotos(items.map((c) => c.p), photos);
   try {
-    const results = await Promise.all(
-      pages.map(async (page) => {
+    const results: string[] = [];
+    for (let idx = 0; idx < items.length; idx++) {
+      const { p, i } = items[idx];
+      try {
+        const stickerImages = await preloadStickers(p);
+        const bgBitmap = p.backgroundImage ? await loadBackgroundBitmap(p.backgroundImage) : null;
         try {
-          const stickerImages = await preloadStickers(page);
-          const bgBitmap = page.backgroundImage ? await loadBackgroundBitmap(page.backgroundImage) : null;
-          try {
-            const img = renderPageThumbnail(
-              page,
-              photos,
-              1,
-              allPhotoImages,
-              { baseWidth: 1440, noCache: true, cacheSuffix: 'book-preview' },
-              stickerImages,
-              bgBitmap ?? undefined,
-            );
-            return img ?? BLANK_PAGE_DATAURL;
-          } finally {
-            releaseStickerImages(stickerImages);
-            if (bgBitmap instanceof ImageBitmap) bgBitmap.close();
-          }
-        } catch {
-          return BLANK_PAGE_DATAURL;
+          const img = renderPageThumbnail(
+            p,
+            photos,
+            1,
+            allPhotoImages,
+            { baseWidth: 1440, noCache: true, cacheSuffix: 'book-preview', albumSize, pageIndex: i, watermarkPages },
+            stickerImages,
+            bgBitmap ?? undefined,
+          );
+          results.push(img ?? BLANK_PAGE_DATAURL);
+        } finally {
+          releaseStickerImages(stickerImages);
+          if (bgBitmap instanceof ImageBitmap) bgBitmap.close();
         }
-      }),
-    );
+      } catch {
+        results.push(BLANK_PAGE_DATAURL);
+      }
+      // 让出主线程：避免整批同步绘制卡死界面，也便于进度条刷新
+      await new Promise((r) => setTimeout(r, 0));
+      onPage?.(idx + 1);
+    }
     return results;
   } finally {
     releasePreloadedImages(allPhotoImages);
@@ -961,6 +1076,16 @@ async function renderAllPages(
 /** 渲染失败时的空白页面占位（避免翻页书缺页） */
 const BLANK_PAGE_DATAURL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+/** 渐进式渲染中尚未渲染完成的内容页占位（浅灰加载页），后台批次渲染完成后由真实页热替换 */
+const LOADING_PAGE_DATAURL =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="840">' +
+    '<rect width="600" height="840" fill="#f2f3f5"/>' +
+    '<rect x="0.5" y="0.5" width="599" height="839" fill="none" stroke="#e2e4e9"/>' +
+    '</svg>'
+  );
 
 /** 精装书内衬页（空白幽色微纹理）：封面/封底内页，翻页书的边界页 */
 function makeEndpaperDataUrl(): string {

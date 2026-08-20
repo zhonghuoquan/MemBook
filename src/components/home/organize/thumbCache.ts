@@ -28,6 +28,27 @@ export type ThumbSize = 'tiny' | 'small' | 'medium' | 'full';
 /** HEIC 转换结果缓存（按 photoId），避免同一 HEIC 照片多次转换 */
 const heicConvertedCache = new Map<string, Blob>();
 
+/** HEIC 转换缓存上限：只保留最近处理的一小批，避免大 HEIC 相册浏览时无限增长 */
+const HEIC_CACHE_LIMIT = 100;
+/** 人脸裁剪缩略图缓存 key 前缀（与普通缩略图分开，避免误清） */
+const FACE_CACHE_PREFIX = 'face:';
+
+/** 写入 HEIC 转换缓存（超上限时淘汰最旧条目），防止 Map 无界增长 */
+export function setHeicConvertedCache(photoId: string, blob: Blob): void {
+  if (heicConvertedCache.size >= HEIC_CACHE_LIMIT) {
+    const oldest = heicConvertedCache.keys().next().value;
+    if (oldest !== undefined) heicConvertedCache.delete(oldest);
+  }
+  heicConvertedCache.set(photoId, blob);
+}
+/** 当前 HEIC 转换缓存条目数（主要供测试断言缓存有界） */
+export function getHeicConvertedCacheSize(): number { return heicConvertedCache.size; }
+
+/** 判断某缓存 key 是否属于指定照片：普通 `${photoId}:` 前缀 **或** 人脸 `face:${photoId}:` 前缀 */
+export function isPhotoCacheKey(photoId: string, key: string): boolean {
+  return key.startsWith(`${photoId}:`) || key.startsWith(`${FACE_CACHE_PREFIX}${photoId}:`);
+}
+
 const SIZE_DIM: Record<ThumbSize, number> = {
   tiny: 64,
   small: 128,
@@ -148,7 +169,7 @@ async function generateThumb(
         const file = new File([buf], photo.name, { type: mime });
         const jpegFile = await ensureSupportedFormat(file);
         converted = new Blob([await jpegFile.arrayBuffer()], { type: 'image/jpeg' });
-        heicConvertedCache.set(photo.id, converted);
+        setHeicConvertedCache(photo.id, converted);
       } catch {
         // 转换失败则用原 blob（shrinkToThumb 会进一步处理失败）
       }
@@ -248,7 +269,8 @@ export function clearThumbCache() {
 export function evictFromCache(photoId: string) {
   const keysToDelete: string[] = [];
   for (const [key, entry] of cache) {
-    if (key.startsWith(`${photoId}:`)) {
+    // 同时命中普通 `${photoId}:` 与人脸 `face:${photoId}:` 前缀，避免人脸缩略图 URL 在照片删除后泄漏
+    if (isPhotoCacheKey(photoId, key)) {
       keysToDelete.push(key);
       URL.revokeObjectURL(entry.url);
     }
@@ -258,11 +280,7 @@ export function evictFromCache(photoId: string) {
   heicConvertedCache.delete(photoId);
 }
 
-/** 人脸裁剪缩略图缓存 key 前缀 */
-const FACE_CACHE_PREFIX = 'face:';
-
-/**
- * 生成人脸裁剪缩略图 — 根据人脸在照片中的相对位置裁剪放大，
+/** 生成人脸裁剪缩略图 — 根据人脸在照片中的相对位置裁剪放大，
  * 让人脸区域清晰可辨（解决有人脸照片缩略图模糊的问题）。
  *
  * @param photo 照片信息
@@ -301,7 +319,7 @@ export async function getFaceThumbUrl(
             const file = new File([buf], photo.name, { type: mime });
             const jpegFile = await ensureSupportedFormat(file);
             converted = new Blob([await jpegFile.arrayBuffer()], { type: 'image/jpeg' });
-            heicConvertedCache.set(photo.id, converted);
+            setHeicConvertedCache(photo.id, converted);
           } catch { /* 转换失败则用原 blob */ }
         }
         if (converted) blob = converted;

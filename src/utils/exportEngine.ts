@@ -23,13 +23,14 @@ import { isTauri, loadImage, readFileAsBlobUrl, saveFile, type SaveFileResult } 
 import {
   MM_TO_PX,
   getSlotRect,
-  calcPhotoRenderParams,
-  wrapTextLines,
   type SlotRect,
   type PhotoRenderParams,
   getTextureBaseColor,
+  SPINE_LOGO_TOP_MM,
+  resolveSpineLogoColor,
+  tintMonochromeImage,
 } from './sharedRender';
-import { createTextureCanvas, MIN_SHAPE_SIZE_MM, MIN_STROKE_WIDTH, isDarkBackground } from '../components/editor/canvas/constants';
+import { createTextureCanvas, MIN_STROKE_WIDTH } from '../components/editor/canvas/constants';
 import {
   resolveTemplate,
   isCoverPage,
@@ -45,21 +46,25 @@ import {
   WATERMARK_FONT_STACK,
 } from './watermarkRenderer';
 import type { AlbumPage, Photo, PhotoPlacement, StickerElement, StickyNote, PageTextElement, BrushStroke, ShapeElement } from '../types';
-import { getSlotZIndex } from '../types';
+import { buildPhotoPlacementPlan, buildShapePaintSpec, buildTextLayout } from './thumbnailCore';
 import { getShapePolygonPoints, getRectCornerRadii } from './shapeGeometry';
+import { pageExportWidthMm, calcExportCanvasSize, calcExportMaxDim } from './exportGeometry';
+// re-export：保持 printEngine 等外部调用方从 exportEngine 引用 calcExportMaxDim 兼容
+export { calcExportMaxDim };
 import { preloadStickerSrc } from '../hooks/useStickerSrc';
 import { ensurePhotoAnalyzed } from '../engine/content-aware';
 import { logger } from './logger';
 import logoLight from '../assets/logo-light.png';
-import logoDark from '../assets/logo-dark.png';
 // 静态导入 jsPDF：避免动态 import 在 Vite dev 环境下偶发 "Failed to fetch dynamically imported module" 错误
 import jsPDF from 'jspdf';
 
 /* ══════════════════════════ 类型 ══════════════════════════ */
 
-/** 按书脊背景色深浅选择 MemBook logo 水印图（亮底用黑色 logo-light，深底用白色 logo-dark） */
-function spineLogoSrc(spineBg: string | undefined): string {
-  return isDarkBackground(spineBg || '#FFFFFF') ? logoDark : logoLight;
+/** 书脊 MemBook logo 水印基础位图（单色黑线版），模块级缓存避免重复加载 */
+let spineBaseLogoPromise: Promise<HTMLImageElement> | null = null;
+function loadSpineBaseLogo(): Promise<HTMLImageElement> {
+  if (!spineBaseLogoPromise) spineBaseLogoPromise = loadImage(logoLight);
+  return spineBaseLogoPromise;
 }
 
 export type ExportFormat = 'pdf' | 'png' | 'jpg';
@@ -320,8 +325,7 @@ type ExportImage = HTMLImageElement | HTMLCanvasElement;
 const EXPORT_PRELOAD_CONCURRENCY = 6;
 /** 滑动窗口半径：仅缓存当前页 ±N 页范围内的照片位图 */
 const SLIDING_WINDOW_RADIUS = 2;
-/** 降采样阈值 = 页面最长边像素 × 该倍数（仅在远超需求时触发，保证导出质量） */
-const DOWNSCALE_FACTOR = 2;
+/** 降采样阈值 = 页面最长边像素 × 该倍数（仅在远超需求时触发，保证导出质量），实现见 exportGeometry.calcExportMaxDim */
 
 /** 收集指定页码区间（含两端）内使用到的照片 ID */
 function collectPagePhotoIds(pages: AlbumPage[], fromIdx: number, toIdx: number): Set<string> {
@@ -470,11 +474,6 @@ export class SlidingPhotoCache {
   clear(): void {
     this.cache.clear();
   }
-}
-
-/** 按导出 DPI 计算降采样阈值（页面最长边像素 × DOWNSCALE_FACTOR） */
-export function calcExportMaxDim(pageMM: { w: number; h: number }, dpi: number): number {
-  return Math.max(pageMM.w, pageMM.h) * (dpi / 25.4) * DOWNSCALE_FACTOR;
 }
 
 /* ══════════════════════════ Canvas 2D 页面渲染 ══════════════════════════ */
@@ -635,6 +634,11 @@ async function drawPage(
   // 导出封面为印刷一体设计：书脊背面 + 封面正面连续，无编辑器视觉间隙（SPINE_GAP_MM）
   // 故画布宽度 = 页面宽 + 书脊（不含间隙），mmToPx 基准与之匹配
   const _spineMm = _isCoverLike ? (page.spineWidth ?? 0) : 0;
+  // 书脊偏移锚点（mm）= 内容烘焙的书脊偏移量。书脊宽度变化时封面区内容数据不移动，
+  // renderPage 整体平移 (书脊宽-锚点)；书脊自动文字（spine-text-*）数据已按新书脊宽居中，
+  // 需在此逆补偿 delta，抵消整体平移使其与画布一致居中于书脊（与 logo 补偿同理）。
+  const _spineAnchorMm = _isCoverLike ? (page.spineAnchorMm ?? page.spineWidth ?? 0) : 0;
+  const _spineDeltaMm = _spineMm - _spineAnchorMm;
   const mmToPx = canvasW / (albumW + _spineMm);
   // 导出引擎在主线程运行，可直接读取 store 的 pageMargin 传给 getSlotRect
   const exportMargin = useEditorStore.getState().pageMargin;
@@ -662,27 +666,16 @@ async function drawPage(
     drawExportTemplateSlot(ctx, slotRect, i, slotCornerRadius);
   });
 
-  // ── 2. 收集所有需要渲染的 placement ──
-  // 按 slotOrder 排序（未定义时回退到模板 slots 顺序，与 Canvas.tsx/thumbnailCore.ts 一致）
-  // 这对 overlay 模板至关重要：slots 数组顺序 = 渲染层级（后者覆盖前者）
-  const exportSlotOrder = page.slotOrder ?? template?.slots.map((s) => s.id) ?? [];
-  const exportOrderMap = new Map<string, number>();
-  exportSlotOrder.forEach((id, i) => exportOrderMap.set(id, i));
-  const placements = page.placements.filter((pl) => {
-    if (!pl.photoId) return false;
-    if (!photoImages.has(pl.photoId)) {
+  // ── 2. 预检：对缺失位图的照片打警告（诊断用）。排序/坐标/层级统一由
+  //    共享 buildPhotoPlacementPlan 计算（与画布/缩略图/预览同源，四端一致）
+  for (const pl of page.placements) {
+    if (pl.photoId && !photoImages.has(pl.photoId)) {
       const photo = photoDataMap.get(pl.photoId);
       logger.warn(
         `[Export] drawPage 跳过缺失位图的照片: page=${page.id ?? '?'}, slot=${pl.slotId}, photoId=${pl.photoId}, name=${photo?.name ?? 'unknown'}`
       );
-      return false;
     }
-    return true;
-  }).sort((a, b) => {
-    const ia = exportOrderMap.has(a.slotId) ? exportOrderMap.get(a.slotId)! : 999;
-    const ib = exportOrderMap.has(b.slotId) ? exportOrderMap.get(b.slotId)! : 999;
-    return ia - ib;
-  });
+  }
 
   // ── 3. 预加载本页所有贴纸图片（异步并行） ──
   const stickerImageCache = new Map<string, HTMLImageElement | null>();
@@ -714,21 +707,15 @@ async function drawPage(
   type RenderItem = { z: number; typeOrder: number; draw: () => void };
   const items: RenderItem[] = [];
 
-  // 4.1 槽位（typeOrder=0）
-  for (const placement of placements) {
-    const photo = photoDataMap.get(placement.photoId!);
-    if (!photo) continue;
-    const img = photoImages.get(placement.photoId!);
-    if (!img) continue;
-    const slot = getSlotRect(placement.slotId, page, canvasW, canvasH, exportMargin);
-    if (!slot) continue;
-    const params = calcPhotoRenderParams(photo, placement, slot.width, slot.height);
-    if (!params) continue;
-    const z = getSlotZIndex(page, placement.slotId);
+  // 4.1 槽位（typeOrder=0）—— 照片布局判定走共享 buildPhotoPlacementPlan（与缩略图/预览同源）
+  for (const planItem of buildPhotoPlacementPlan(page, Array.from(photoDataMap.values()), canvasW, canvasH, exportMargin)) {
+    const img = photoImages.get(planItem.photoId);
+    const params = planItem.params;
+    if (!img || !params) continue;
     items.push({
-      z,
+      z: planItem.z,
       typeOrder: 0,
-      draw: () => drawPlacement(ctx, placement, img, slot, params, slotCornerRadius),
+      draw: () => drawPlacement(ctx, planItem.placement, img, planItem.slot, params, slotCornerRadius),
     });
   }
 
@@ -743,10 +730,15 @@ async function drawPage(
 
   // 4.3 文字元素（typeOrder=1）
   (page.textElements || []).forEach((te: PageTextElement) => {
+    // 书脊文字（spine-text-*）：renderPage 已整体平移 (书脊宽-锚点)，此处逆补偿 delta，
+    // 使书脊文字在导出的最终坐标系中与画布一致居中于书脊（数据坐标已按新书脊宽居中）。
+    const teForDraw: PageTextElement = te.id.startsWith('spine-text-') && _spineDeltaMm
+      ? { ...te, x: te.x - _spineDeltaMm }
+      : te;
     items.push({
       z: te.zIndex || 0,
       typeOrder: 1,
-      draw: () => drawTextElement(ctx, te, mmToPx),
+      draw: () => drawTextElement(ctx, teForDraw, mmToPx),
     });
   });
 
@@ -1012,7 +1004,6 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
   const tw = te.width * mmToPx;
   const th = (te.height ?? 0) * mmToPx;
   const fs = te.fontSize * scale;
-  const pad = 4 * scale;
   const rotation = te.rotation ?? 0;
 
   // 空文本处理（与 TextElementNode.tsx 一致：灰色斜体占位文字）
@@ -1042,99 +1033,23 @@ function drawTextElement(ctx: CanvasRenderingContext2D, te: PageTextElement, mmT
   }
   ctx.fillStyle = fillValue;
 
-  // 竖排（春联）模式：isVertical 标志为 true 时逐字竖排，从右到左（旋转角度与竖排解耦，竖排也应用旋转变换）
-  if (te.isVertical) {
-    ctx.save();
-    // 与横排一致：绕文字框中心旋转
-    if (rotation !== 0) {
-      const centerX = tx + tw / 2;
-      const centerY = ty + th / 2;
-      ctx.translate(centerX, centerY);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.translate(-centerX, -centerY);
-    }
-    ctx.textAlign = 'left';
-    const text = te.text || '';
-    const stepY = fs + (te.letterSpacing ?? 0) * scale;
-    const stepX = fs + ((te.lineHeight ?? 1.2) - 1) * fs;
-    const top = ty + pad;
-    const bottom = ty + th - pad;
-    let colX = tx + tw - fs - pad; // 从最右侧开始
-    let cy = top;
-    const nodes: { ch: string; x: number; y: number }[] = [];
-    for (const ch of text) {
-      if (ch === '\n') {
-        colX -= stepX;
-        cy = top;
-        continue;
-      }
-      if (cy + fs > bottom) {
-        colX -= stepX;
-        cy = top;
-      }
-      nodes.push({ ch, x: colX, y: cy });
-      cy += stepY;
-    }
-    // 对齐：根据 align 水平定位整块列（左/居/右对齐）
-    if (nodes.length > 0) {
-      const xs = nodes.map((n) => n.x);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs) + fs;
-      let shift: number;
-      if (te.align === 'left') shift = tx + pad - minX;
-      else if (te.align === 'right') shift = tx + tw - fs - pad - maxX;
-      else shift = tx + tw / 2 - (minX + maxX) / 2; // 居中
-      for (const n of nodes) n.x += shift;
-      // 垂直对齐：竖排整块内容在框内按 verticalAlign（top/center/bottom）定位
-      const ys = nodes.map((n) => n.y);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys) + fs;
-      const contentH = th - pad * 2;
-      const blockH = maxY - minY;
-      const valign = te.verticalAlign ?? 'center';
-      let vshift = 0;
-      if (valign === 'center') vshift = (contentH - blockH) / 2;
-      else if (valign === 'bottom') vshift = contentH - blockH;
-      if (vshift > 0) for (const n of nodes) n.y += vshift;
-    }
-    for (const n of nodes) ctx.fillText(n.ch, n.x, n.y);
-    ctx.restore();
-    return;
-  }
-
-  // 任意角度旋转：中心定位（与编辑器 TextElementNode.tsx 一致）
-  // Group: x=cx, y=cy, rotation=θ（无 offset，旋转中心 = 文字框中心）
-  // 在本地坐标系（0,0 = 左上角，tw×th）内绘制横排文字
+  // 排版指令（横排断行/对齐/垂直对齐 + 竖排逐字）统一由共享 buildTextLayout 计算
+  // （与画布/缩略图/预览同源）。buildTextLayout 基于逻辑坐标（×MM_TO_PX）返回锚点，
+  // 乘 scale 映射回导出像素（×mmToPx），行为与旧实现一致。
   ctx.save();
+  // 任意角度（含 0°）：绕文字框中心旋转，绘于页面绝对坐标（与编辑器 TextElementNode.tsx 一致）
   if (rotation !== 0) {
     const centerX = tx + tw / 2;
     const centerY = ty + th / 2;
     ctx.translate(centerX, centerY);
     ctx.rotate((rotation * Math.PI) / 180);
-    ctx.translate(-tw / 2, -th / 2);
-  } else {
-    ctx.translate(tx, ty);
+    ctx.translate(-centerX, -centerY);
   }
-
-  // 横排文字（本地坐标系）
-  ctx.textAlign = te.align as CanvasTextAlign;
-  const hLs = (te.letterSpacing ?? 0) * scale;
-  ctx.letterSpacing = `${hLs}px`;
-  // 断行与编辑器 DOM 文字层同源：CJK 逐字可断、Latin 按空格断行，测量计入字距
-  const lines = wrapTextLines(ctx, te.text || '', tw - pad * 2 - hLs, hLs);
-  const lineHeight = fs * (te.lineHeight ?? 1.2);
-  // 垂直对齐：顶/居中/底（与编辑器 TextElementNode 的 verticalAlign 一致，默认居中）
-  const totalH = lines.length * lineHeight;
-  const verticalAlign = te.verticalAlign ?? 'center';
-  let y = pad;
-  if (verticalAlign === 'center') y += Math.max(0, (th - pad * 2 - totalH) / 2);
-  else if (verticalAlign === 'bottom') y = Math.max(pad, th - pad - totalH);
-  for (const line of lines) {
-    let x = pad;
-    if (te.align === 'center') x = tw / 2;
-    else if (te.align === 'right') x = tw - pad;
-    ctx.fillText(line, x, y);
-    y += lineHeight;
+  // 先设 letterSpacing 以便 measureText 计入字距（与编辑器 / 缩略图一致）
+  ctx.letterSpacing = `${(te.letterSpacing ?? 0) * scale}px`;
+  for (const w of buildTextLayout(te, (s) => ctx.measureText(s).width)) {
+    ctx.textAlign = w.textAlign;
+    ctx.fillText(w.text, w.x * scale, w.y * scale);
   }
   ctx.letterSpacing = '0px';
   ctx.restore();
@@ -1350,52 +1265,73 @@ function roundRectPerCorner(
   ctx.closePath();
 }
 
+/** 把共享 spec 的扁平 stop 数组 [offset,color,...] 写入 CanvasGradient */
+function applyGradientStops(grad: CanvasGradient, stops: (string | number)[]): void {
+  for (let i = 0; i + 1 < stops.length; i += 2) {
+    grad.addColorStop(stops[i] as number, stops[i + 1] as string);
+  }
+}
+
 /** 绘制形状元素（复刻 ShapeNode.tsx 的 Konva transform） */
 function drawShape(ctx: CanvasRenderingContext2D, sh: ShapeElement, mmToPx: number): void {
+  // 画刷（填充/描边/渐变解析）、尺寸/描边下限、透明度/旋转等确定性判定统一由
+  // 共享 buildShapePaintSpec 给出（与画布/缩略图/预览同源），本函数仅做导出像素映射 + 路径构造。
+  const spec = buildShapePaintSpec(sh);
   const scale = mmToPx / MM_TO_PX;
-  const px = sh.x * mmToPx;
-  const py = sh.y * mmToPx;
-  // 最小尺寸下限与编辑器 ShapeNode 同源（MIN_SHAPE_SIZE_MM），确保小尺寸形状导出与编辑模式一致
-  const pw = Math.max(sh.width * mmToPx, MIN_SHAPE_SIZE_MM * mmToPx);
-  const ph = Math.max(sh.height * mmToPx, MIN_SHAPE_SIZE_MM * mmToPx);
+  // spec 值基于逻辑坐标（×MM_TO_PX）给出，乘 scale 映射回导出像素（×mmToPx），保证行为不变
+  const px = spec.x * scale;
+  const py = spec.y * scale;
+  // 最小尺寸下限已由 spec 内部按 MIN_SHAPE_SIZE_MM 抬升，此处直接映射
+  const pw = spec.pw * scale;
+  const ph = spec.ph * scale;
 
   ctx.save();
   ctx.translate(px, py);
-  ctx.rotate((sh.rotation * Math.PI) / 180);
-  ctx.globalAlpha = typeof sh.opacity === 'number' ? sh.opacity : 1;
+  ctx.rotate((spec.rotation * Math.PI) / 180);
+  ctx.globalAlpha = spec.opacity;
 
-  const lineWidth = Math.max(MIN_STROKE_WIDTH, (sh.strokeWidth || 0) * scale);
-  ctx.lineWidth = lineWidth;
+  ctx.lineWidth = spec.lineWidth * scale;
 
   const halfW = pw / 2;
   const halfH = ph / 2;
 
-  if (sh.gradient && sh.gradient.length >= 2) {
-    if (sh.gradientType === 'radial') {
-      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.min(pw, ph) / 2);
-      for (const stop of sh.gradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
+  // 填充画刷：纯色 / 线/径向渐变（stop 解析均来自 spec）
+  if (spec.fill) {
+    if (spec.fill.kind === 'solid') {
+      ctx.fillStyle = spec.fill.color;
+    } else if (spec.fill.kind === 'radial') {
+      const grad = ctx.createRadialGradient(
+        spec.fill.start.x * scale, spec.fill.start.y * scale, 0,
+        spec.fill.end.x * scale, spec.fill.end.y * scale, spec.fill.radius * scale,
+      );
+      applyGradientStops(grad, spec.fill.stops);
       ctx.fillStyle = grad;
     } else {
-      const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.gradientAngle ?? 45);
-      const grad = ctx.createLinearGradient(startX, startY, endX, endY);
-      for (const stop of sh.gradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
+      const grad = ctx.createLinearGradient(
+        spec.fill.start.x * scale, spec.fill.start.y * scale,
+        spec.fill.end.x * scale, spec.fill.end.y * scale,
+      );
+      applyGradientStops(grad, spec.fill.stops);
       ctx.fillStyle = grad;
     }
-  } else if (sh.fill) {
-    ctx.fillStyle = sh.fill;
   }
-  if (sh.strokeGradient && sh.strokeGradient.length >= 2) {
-    const { startX, startY, endX, endY } = linearGradientEndpoints(pw, ph, sh.strokeGradientAngle ?? 45);
-    const grad = ctx.createLinearGradient(startX, startY, endX, endY);
-    for (const stop of sh.strokeGradient) { grad.addColorStop(stop.offset, stop.alpha != null && stop.alpha < 1 ? toRgba(stop.color, stop.alpha) : stop.color); }
-    ctx.strokeStyle = grad;
-  } else if (sh.stroke) {
-    ctx.strokeStyle = sh.stroke;
+  // 描边画刷：纯色 / 线性渐变
+  if (spec.stroke) {
+    if (spec.stroke.kind === 'solid') {
+      ctx.strokeStyle = spec.stroke.color;
+    } else {
+      const grad = ctx.createLinearGradient(
+        spec.stroke.start.x * scale, spec.stroke.start.y * scale,
+        spec.stroke.end.x * scale, spec.stroke.end.y * scale,
+      );
+      applyGradientStops(grad, spec.stroke.stops);
+      ctx.strokeStyle = grad;
+    }
   }
 
   const beginShape = () => {
-    if (sh.fill || (sh.gradient && sh.gradient.length >= 2)) ctx.fill();
-    if ((sh.stroke || (sh.strokeGradient && sh.strokeGradient.length >= 2)) && lineWidth > 0) ctx.stroke();
+    if (spec.fill) ctx.fill();
+    if (spec.stroke && spec.lineWidth > 0) ctx.stroke();
   };
 
   switch (sh.type) {
@@ -1534,12 +1470,7 @@ export interface RenderPageOptions {
   spineWidth?: number;
 }
 
-/** 页面导出的物理宽度（mm）：封面页含设计书脊（书脊背面 + 封面正面，印刷一体，无编辑器视觉间隙），封底无书脊 */
-function pageExportWidthMm(page: AlbumPage | undefined, pageMM: { w: number; h: number }, bleed: number): number {
-  if (!page) return pageMM.w + bleed * 2;
-  const isCoverLike = isCoverPage(page);
-  return pageMM.w + (isCoverLike ? (page.spineWidth ?? 0) : 0) + bleed * 2;
-}
+/** 页面导出的物理宽度（mm）计算来自共享 pageExportWidthMm（exportGeometry.ts，与测试同源） */
 
 export async function renderPage(
   page: AlbumPage,
@@ -1551,17 +1482,19 @@ export async function renderPage(
   const pageMM = getPageSizeMM();
   const bleed = opts.bleed ?? 0;
   const bindingSpine = opts.spineWidth ?? 0;
-  const pxPerMM = dpi / 25.4;
   // 封面页：书脊背面 + 封面正面 印刷一体排布（无编辑器视觉间隙 SPINE_GAP_MM），
   // 画布逻辑宽度 += 书脊宽；封底无书脊
   const isCoverLike = isCoverPage(page);
   const spineMm = isCoverLike ? (page.spineWidth ?? 0) : 0;
-  const designSpine = spineMm;
-  const logicalW = (pageMM.w + designSpine) * MM_TO_PX;
-  const logicalH = pageMM.h * MM_TO_PX;
-  // 出血时画布四周扩展出血边
-  const canvasW = Math.round((pageMM.w + designSpine + bleed * 2) * pxPerMM);
-  const canvasH = Math.round((pageMM.h + bleed * 2) * pxPerMM);
+  // 书脊偏移锚点（mm）= 内容烘焙的书脊偏移量（折线位置）。书脊宽度变化时内容数据不再移动，
+  // 导出整体平移 (书脊宽 - 锚点)，使封面正面内容位于书脊之后（书脊向左扩展、封面内容视口固定），与画布一致。
+  const spineAnchorMm = isCoverPage(page) ? (page.spineAnchorMm ?? page.spineWidth ?? 0) : 0;
+  // 出血时画布四周扩展出血边；尺寸数学来自共享 calcExportCanvasSize（exportGeometry.ts，与测试同源）
+  const geom = calcExportCanvasSize(pageMM, { spineMm, bleed, dpi });
+  const logicalW = geom.logicalW;
+  const logicalH = geom.logicalH;
+  const canvasW = geom.canvasW;
+  const canvasH = geom.canvasH;
 
   const canvas = document.createElement('canvas');
   canvas.width = canvasW;
@@ -1572,8 +1505,8 @@ export async function renderPage(
   ctx.fillStyle = page.background || '#FFFFFF';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // 封面印刷一体：编辑器封面正面内容整体右移书脊宽（无视觉间隙），坐标已在数据层落位，
-  // 导出无需二次偏移，直接按 书脊背面 + 封面正面 连续渲染。
+  // 封面印刷一体：内容数据烘焙偏移为锚点，这里整体平移 (书脊宽 - 锚点) 使封面正面内容落到书脊之后，
+  // 与 书脊背面 + 封面正面 连续渲染（无视觉间隙）；锚点 == 书脊宽（旧数据）时平移为 0，行为不变。
 
   // 编辑器逻辑坐标 → 导出像素坐标的缩放因子（基于内容区 = 页面尺寸 + 书脊）
   const scale = canvasW / (logicalW + bleed * 2 * MM_TO_PX);
@@ -1594,19 +1527,38 @@ export async function renderPage(
     }
   }
 
+  // 书脊偏移（书脊向左扩展、封面内容固定）：整体平移 (书脊宽 - 锚点)，
+  // 背景、书脊底色、内容、logo 同坐标系连续（背景铺满 [0, logicalW]，内容落于书脊之后）
+  ctx.translate((spineMm - spineAnchorMm) * MM_TO_PX, 0);
+
+  // 书脊底色：独立色块覆盖书脊区域（与 logo/书脊文字同坐标系，最终落在逻辑坐标 0..spineMm），与封面正面背景区分。
+  // 当前坐标系已整体平移 (书脊宽-锚点)，故绘制的 x = 0 - 平移 = 锚点 - 书脊宽，
+  // 使书脊底色恰好填满 [0, spineMm]，与画布叠层一致（书脊向左扩展、封面内容固定）。
+  // 仅在封面页设置了 spineColor 时生效；未设置时书脊沿用整页背景（与编辑器缺省行为一致）。
+  if (isCoverPage(page) && spineMm > 0 && page.spineColor) {
+    ctx.fillStyle = page.spineColor;
+    ctx.fillRect((spineAnchorMm - spineMm) * MM_TO_PX, 0, spineMm * MM_TO_PX, logicalH);
+  }
+
   await drawPage(ctx, page, logicalW, logicalH, photoImages, photoDataMap);
 
-  // 书脊 MemBook logo 水印（封面页书脊背面顶部，半透明）
+  // 书脊 MemBook logo 水印（封面页书脊背面顶部，半透明，颜色可自定义）
+  // logo 居中于书脊（与编辑器一致）、尺寸随书脊自适应（min(书脊宽×0.6, 12) 封顶）、顶部距页边固定 SPINE_LOGO_TOP_MM=15mm。
+  // 当前坐标系已整体平移 (spineMm-锚点)，故绘制的 x = 居中位置 - 平移 = 锚点 - 书脊宽/2 - logoW/2。
   // 坐标须为逻辑像素（mm × MM_TO_PX，与编辑器/缩略图一致），直接用 mm 会导致 logo 极小且错位
   if (isCoverPage(page) && spineMm > 0) {
     try {
-      // 书脊背景色 = 用户设置的 spineColor，缺省回退到页面背景色，据此选黑/白 logo
-      const logo = await loadImage(spineLogoSrc(page.spineColor || page.background));
-      const logoWmm = spineMm * 0.6;
+      // 单色位图按书脊 logo 颜色重着色：用户设置了 spineLogoColor 用其值，否则按书脊底色深浅自动黑/白
+      const baseLogo = await loadSpineBaseLogo();
+      const tinted = tintMonochromeImage(baseLogo, resolveSpineLogoColor(page.spineColor, page.spineLogoColor));
+      // logo 尺寸随书脊宽自适应（min(书脊宽×0.6, 12) 封顶）
+      const logoWmm = Math.min(spineMm * 0.6, 12);
       const logoW = logoWmm * MM_TO_PX;
-      const logoH = logoW * (logo.height / logo.width);
+      const logoH = logoW * (tinted.height / tinted.width);
+      const logoX = (spineAnchorMm - spineMm / 2 - logoWmm / 2) * MM_TO_PX;
+      const logoY = SPINE_LOGO_TOP_MM * MM_TO_PX;
       ctx.globalAlpha = 0.8;
-      ctx.drawImage(logo, ((spineMm - logoWmm) / 2) * MM_TO_PX, spineMm * 0.7 * MM_TO_PX, logoW, logoH);
+      ctx.drawImage(tinted, logoX, logoY, logoW, logoH);
       ctx.globalAlpha = 1;
     } catch { /* logo 水印加载失败忽略 */ }
   }

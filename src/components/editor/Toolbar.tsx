@@ -7,7 +7,6 @@ import { usePhotoStore } from '../../store';
 import { exportBackupZip } from '../../utils/backup';
 import { ExportDialog } from './ExportDialog';
 import { PageSettings } from './PageSettings';
-import { CoverSettings } from './CoverSettings';
 import { WatermarkSettings } from './WatermarkSettings';
 import { PrintDialog } from './PrintDialog';
 import { BookPreviewOverlay } from './BookPreviewOverlay';
@@ -30,7 +29,6 @@ export function Toolbar({ onBack }: ToolbarProps) {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const checkFeature = useLicenseStore((s) => s.checkFeature);
   const [isPageSettingsOpen, setIsPageSettingsOpen] = useState(false);
-  const [isCoverSettingsOpen, setIsCoverSettingsOpen] = useState(false);
   const [isWatermarkSettingsOpen, setIsWatermarkSettingsOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [backupConfirmOpen, setBackupConfirmOpen] = useState(false);
@@ -105,7 +103,13 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
       const existing = await loadProject(projectId);
       if (existing) {
-        await saveProject({ ...existing, pages, size: albumSize!, updatedAt: new Date().toISOString() });
+        await saveProject({
+          ...existing,
+          pages,
+          size: albumSize!,
+          guideLines: useEditorStore.getState().guideLines,
+          updatedAt: new Date().toISOString(),
+        });
       }
       await savePhotos(photos, projectId);
       addToast({ type: 'success', message: t('editor.toast.saved') });
@@ -224,7 +228,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
               </button>
               <button
                 className="flex items-center gap-2.5 w-full px-3 py-2 text-[var(--text-body-sm)] text-[var(--color-gray-700)] border-none bg-transparent cursor-pointer hover:bg-[var(--color-primary-50)] transition-colors"
-                onClick={() => { setPageMenuOpen(false); setIsCoverSettingsOpen(true); }}
+                onClick={() => { setPageMenuOpen(false); useUIStore.getState().setCoverSettingsOpen(true); }}
               >
                 <svg className="w-3.5 h-3.5 shrink-0 text-[var(--color-gray-500)]" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -307,7 +311,6 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
       <ExportDialog isOpen={isExportDialogOpen} onClose={() => setIsExportDialogOpen(false)} />
       <PageSettings open={isPageSettingsOpen} onClose={() => setIsPageSettingsOpen(false)} />
-      <CoverSettings open={isCoverSettingsOpen} onClose={() => setIsCoverSettingsOpen(false)} />
       <WatermarkSettings open={isWatermarkSettingsOpen} onClose={() => setIsWatermarkSettingsOpen(false)} />
       <PrintDialog isOpen={isPrintDialogOpen} onClose={() => setIsPrintDialogOpen(false)} />
 

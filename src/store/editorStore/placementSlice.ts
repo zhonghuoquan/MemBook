@@ -118,7 +118,7 @@ export const createPlacementSlice: EditorSlice<PlacementSlice> = (set, get) => (
     });
     pushSnapshot(get);
   },
-  updatePlacementAdjustments: (pageIndex, slotId, adjustments) => {
+  updatePlacementAdjustments: (pageIndex, slotId, adjustments, recordHistory) => {
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
@@ -130,7 +130,7 @@ export const createPlacementSlice: EditorSlice<PlacementSlice> = (set, get) => (
       };
       return { pages: newPages };
     });
-    pushSnapshot(get);
+    if (recordHistory !== false) pushSnapshot(get);
   },
   updatePlacementFilter: (pageIndex, slotId, filter) => {
     set((s) => {
@@ -194,7 +194,7 @@ export const createPlacementSlice: EditorSlice<PlacementSlice> = (set, get) => (
     });
     pushSnapshot(get);
   },
-  updatePlacementFilterIntensity: (pageIndex, slotId, intensity) => {
+  updatePlacementFilterIntensity: (pageIndex, slotId, intensity, recordHistory) => {
     set((s) => {
       const newPages = [...s.pages];
       if (!newPages[pageIndex]) return s;
@@ -206,7 +206,7 @@ export const createPlacementSlice: EditorSlice<PlacementSlice> = (set, get) => (
       };
       return { pages: newPages };
     });
-    pushSnapshot(get);
+    if (recordHistory !== false) pushSnapshot(get);
   },
   resetPlacementEdits: (pageIndex, slotId) => {
     set((s) => {

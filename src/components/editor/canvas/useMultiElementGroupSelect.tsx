@@ -21,6 +21,7 @@ import {
   computeBBox, computeScaledSlots, computeMovedSlots,
   type SlotRect, type AnchorHandle,
 } from '../../../engine/selection-engine';
+import type { AlignBounds } from '../../../engine/alignment-engine';
 import { useEditorStore, usePhotoStore } from '../../../store';
 import { useHistoryStore } from '../../../store/historyStore';
 import { calcCoverFitWithRotation, computePanForResizedSlot } from '../../../utils/photoGeometry';
@@ -37,6 +38,8 @@ export interface UseMultiElementGroupSelectOptions {
   groupOY: number;
   CANVAS_W: number;
   CANVAS_H: number;
+  /** 组合移动时对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 不参与对齐 */
+  alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }
 
 /** 收集所有选中元素的 px 几何（统一为 SlotRect 格式） */
@@ -113,7 +116,7 @@ function collectElementRects(
 
 export function useMultiElementGroupSelect({
   stageRef, template, currentPage, currentPageIndex, multiSelectedElements,
-  canvasZoom, groupOX, groupOY, CANVAS_W, CANVAS_H,
+  canvasZoom, groupOX, groupOY, CANVAS_W, CANVAS_H, alignDrag,
 }: UseMultiElementGroupSelectOptions) {
   /* ── 组合缩放/移动状态 ── */
   const [scaleHandle, setScaleHandle] = useState<AnchorHandle | null>(null);
@@ -258,9 +261,24 @@ export function useMultiElementGroupSelect({
       return true;
     }
     const { mx, my, rects } = moveStartRef.current;
-    setPreviewRects(computeMovedSlots(rects, pos.x - mx, pos.y - my));
+    let dx = pos.x - mx;
+    let dy = pos.y - my;
+    // 组合移动对齐：以组包围盒检测吸附 + 显示引导线，偏移叠加到移动增量；
+    // 排除所有选中元素 id（避免组内自对齐）
+    if (alignDrag) {
+      const bbox = computeBBox(rects, CANVAS_W, CANVAS_H);
+      if (bbox) {
+        const { offsetX, offsetY } = alignDrag(
+          { x: bbox.minX, y: bbox.minY, width: bbox.width, height: bbox.height },
+          multiSelectedElements.map((m) => m.id),
+        );
+        dx += offsetX;
+        dy += offsetY;
+      }
+    }
+    setPreviewRects(computeMovedSlots(rects, dx, dy));
     return true;
-  }, [scaleHandle, isMovingGroup, pointerLogical, CANVAS_W, CANVAS_H]);
+  }, [scaleHandle, isMovingGroup, pointerLogical, CANVAS_W, CANVAS_H, alignDrag, multiSelectedElements]);
 
   /** Stage onMouseUp：提交缩放/移动；消费事件返回 true */
   const handleUp = useCallback((): boolean => {

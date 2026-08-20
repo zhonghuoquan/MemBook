@@ -202,6 +202,45 @@ export function computePanForResizedSlot(
   return { panX: clamped.panX, panY: clamped.panY };
 }
 
+/** 照片位置重排的平移编辑输入（用于换槽时重拟合 panX/panY） */
+export interface PlacementPanEdit {
+  rotation?: number;
+  panRotation?: number;
+  panScale?: number;
+  panX?: number | null;
+  panY?: number | null;
+}
+
+/**
+ * 照片从一个槽位重排到另一个槽位时，重新拟合其 panX/panY，确保在目标槽位内仍然铺满不露白。
+ * - 保留 rotation / panScale（几何意图），仅重算平移偏移；
+ * - 复用 computePanForResizedSlot（按新旧槽尺寸比例映射相对位置）+ clampPhotoToSlotBounds（多边形夹紧）保证覆盖四角；
+ * - 无平移编辑（panX/panY/panScale 全空）、或照片尺寸未知、或槽位尺寸非法时返回空对象 → 调用方回退为居中（cover-fit 必填满）。
+ */
+export function refitPlacementPan(
+  photoW: number,
+  photoH: number,
+  oldSlotW: number,
+  oldSlotH: number,
+  newSlotW: number,
+  newSlotH: number,
+  edit: PlacementPanEdit,
+): { panX?: number; panY?: number; panScale?: number } {
+  const rot = edit.panRotation ?? edit.rotation ?? 0;
+  // 无平移编辑：居中即 cover-fit 铺满，无需重拟
+  if (edit.panX == null && edit.panY == null && edit.panScale == null) return {};
+  if (photoW <= 0 || photoH <= 0 || oldSlotW <= 0 || oldSlotH <= 0 || newSlotW <= 0 || newSlotH <= 0) return {};
+  const ps = Math.max(edit.panScale || 1, 1);
+  const oldCF = calcCoverFitWithRotation(photoW, photoH, oldSlotW, oldSlotH, rot);
+  const oldPanX = edit.panX ?? (oldSlotW - oldCF.boundingW * ps) / 2;
+  const oldPanY = edit.panY ?? (oldSlotH - oldCF.boundingH * ps) / 2;
+  const newPan = computePanForResizedSlot(
+    photoW, photoH, oldSlotW, oldSlotH, newSlotW, newSlotH,
+    rot, ps, oldPanX, oldPanY,
+  );
+  return { panX: newPan.panX, panY: newPan.panY, panScale: ps };
+}
+
 /** 将照片位置（panX/panY）投影到可行多边形内，确保旋转+缩放+移动后槽位四角不露白
  * 使用半平面迭代投影，收敛到距离目标点最近的可行解
  */

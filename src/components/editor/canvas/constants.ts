@@ -92,16 +92,8 @@ export function applySlotResizeConstraints(
   return clamped;
 }
 
-/** 判断十六进制颜色是否为深色背景 */
-export function isDarkBackground(hex: string): boolean {
-  const c = hex.replace('#', '');
-  if (c.length < 6) return false;
-  const r = parseInt(c.slice(0, 2), 16);
-  const g = parseInt(c.slice(2, 4), 16);
-  const b = parseInt(c.slice(4, 6), 16);
-  // 亮度感知加权
-  return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
-}
+/** 判断十六进制颜色是否为深色背景（sharedRender 共享实现，与缩略图/导出一致） */
+export { isDarkBackground } from '../../../utils/sharedRender';
 
 /** 解析 CSS linear-gradient 中的颜色为 Konva 渐变色标 */
 export function parseGradientColors(css: string): (string | number)[] {
