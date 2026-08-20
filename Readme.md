@@ -3,11 +3,11 @@
 > 一款运行在桌面的电子相册制作工具，所有数据保存在你的设备上，不上传服务器。支持自定义尺寸、一键成册、模板套用、滤镜调色、HEIC 解码、PDF 导出、直连打印等完整工作流。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.0.9-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
-- **版本**：1.0.9
+- **版本**：1.1.1
 - **标识符**：`app.membook.desktop`
 - **技术栈**：Tauri 2 + React 19 + TypeScript + Konva 10 + Zustand 5 + Tailwind 4 + Dexie 4 (IndexedDB) + Rust
 - **平台**：Windows（主要）/ macOS 10.15+ / Linux
@@ -17,7 +17,7 @@
 ## 产品主页
 
 - 产品官网与下载：<https://zhonghuoquan.github.io/membook-home/>
-- 桌面安装包：`download/MemBook_1.0.9_x64-setup.exe`（约 13MB，NSIS）
+- 桌面安装包：`download/MemBook_1.1.1_x64-setup.exe`（约 13MB，NSIS）
 
 ---
 
@@ -96,7 +96,7 @@ git remote add cnb     https://cnb.cool/MemBook-Flash/MemBook.git   # cnb.cool
 
 ### 5. 工程化能力
 
-- **自动更新**：Tauri Updater + 公钥签名 + 被动安装模式 + 24h 冷却
+- **自动更新**：Tauri Updater + GitHub Releases 清单 + 公钥签名 + 后台自动下载 + 24h 冷却（主页任务栏右上角指示：下载中圆形进度环、就绪后「更新」按钮 → 弹窗确认后重启安装）
 - **错误监控**：Sentry（仅生产环境，敏感信息脱敏）
 - **离线授权**：RSA-PKCS1-v1_5 激活码 + 双锚点试用期（文件 + 注册表）
 - **国际化**：i18next 中英文
@@ -317,8 +317,10 @@ npm run desktop:build:debug # 调试版桌面端
 
 - **前端**：`dist/`（Vite 构建）
 - **桌面安装包**（NSIS，跳过 WiX/MSI 减少依赖）：
-  - `src-tauri/target/release/bundle/nsis/MemBook_1.0.9_x64-setup.exe`（约 13MB）
-- **签名**：`.sig` 文件用于自动更新校验
+  - `src-tauri/target/release/bundle/nsis/MemBook_1.1.1_x64-setup.exe`（约 13MB）
+  - `src-tauri/target/release/bundle/msi/MemBook_1.1.1_x64_zh-CN.msi`（企业部署用）
+- **自动更新包**（`createUpdaterArtifacts: "v1Compatible"`）：每种安装器额外生成压缩更新包 `*.zip (updater)`，供更新器后台下载——`nsis/*.nsis.zip`、`msi/*.msi.zip`
+- **签名**：`.sig` 文件（如 `*.exe.sig` / `*.zip.sig`）用于自动更新校验来源与完整性；生成更新清单由 CI 用私钥签名完成，本地打包需设置 `TAURI_SIGNING_PRIVATE_KEY`（及 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，无密码则省略）环境变量
 
 ### 测试
 

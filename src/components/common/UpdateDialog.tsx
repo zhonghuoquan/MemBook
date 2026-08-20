@@ -23,9 +23,19 @@ function formatDate(dateStr?: string): string {
   }
 }
 
+/** 将 Release 说明按行拆分，供「本次更新内容」列表渲染 */
+function splitNotes(body?: string): string[] {
+  if (!body) return [];
+  return body
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[-*•]\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
- * 更新提示弹窗：新版本已后台下载完成，展示版本信息，用户确认后安装并重启。
+ * 更新提示弹窗：新版本已后台下载完成，展示版本信息与本次更新内容，用户确认后安装并重启。
  * 安装由 installPrepared() 完成（内含 relaunch），仅保留 idle/installing/error 三态。
+ * 层级使用 z-[var(--z-modal)]，确保不被编辑器/书封面等元素遮挡。
  */
 export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
   const { t } = useTranslation();
@@ -54,68 +64,118 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
 
   if (!update) return null;
 
+  const notes = splitNotes(update.body);
+
   return (
-    <div
-      className="fixed inset-0 z-[var(--z-overlay)] flex items-center justify-center"
-    >
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-[var(--color-surface-overlay)] backdrop-blur-sm" onClick={phase === 'idle' ? handleRemindLater : undefined} />
       <div
-        className="relative bg-[var(--color-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-lg)] w-[90vw] max-w-[480px] overflow-hidden border border-[var(--color-border)] animate-[modalFadeIn_0.2s_ease-out]"
+        className="relative bg-[var(--color-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-lg)] w-full max-w-[560px] overflow-hidden border border-[var(--color-border)] animate-[modalFadeIn_0.2s_ease-out]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header — 品牌渐变 + 磨砂玻璃质感 */}
-        <div className="relative px-6 pt-7 pb-5 bg-gradient-to-br from-[var(--color-primary-600)] to-[var(--color-primary-800)] text-white">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-[var(--radius-xl)] bg-white/15 backdrop-blur-md border border-white/20 flex items-center justify-center">
+        {/* Header — 品牌渐变 + 版本徽章 */}
+        <div className="relative px-7 pt-7 pb-6 bg-gradient-to-br from-[var(--color-primary-600)] via-[var(--color-primary-700)] to-[var(--color-primary-800)] text-white overflow-hidden">
+          {/* 装饰圆环 */}
+          <div className="absolute -right-10 -top-12 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
+          <div className="absolute right-24 -bottom-16 w-32 h-32 rounded-full bg-white/5 blur-xl" />
+
+          <div className="relative flex items-start gap-4">
+            {/* 渐变图标徽章 */}
+            <div className="shrink-0 w-12 h-12 rounded-[var(--radius-xl)] bg-white/15 backdrop-blur-md border border-white/25 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" className="w-6 h-6">
-                <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                  strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M12 7v8m0 0l-3-3m3 3l3-3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M12 3l1.2-1.2a1 1 0 012 0L16.5 3l1-1.4a1 1 0 011.9.5l.6 1.6 1.6.6a1 1 0 01.5 1.9l-1.4 1 .7 1.4a1 1 0 01-1.5 1.3L18.5 8.3 17 9.5a1 1 0 01-1.6-1.2l.6-1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.35" />
               </svg>
             </div>
-            <div>
-              <h2 className="text-lg font-[600] tracking-tight">{t('updater.title')}</h2>
-              <p className="text-[12px] text-white/80 mt-0.5">
-                {t('updater.versionLabel')} v{update.version}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-[600] tracking-tight text-white">{t('updater.title')}</h2>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-white/20 border border-white/25 text-[11px] font-[600] text-white">
+                  v{update.version}
+                </span>
+              </div>
+              <p className="text-[12px] text-white/70 mt-1 leading-relaxed">
+                {t('updater.updateComplete')}
               </p>
             </div>
           </div>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4">
-          {/* 版本信息 */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
+        <div className="px-7 py-5 space-y-5">
+          {/* 版本对比 */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
               <div className="text-[11px] text-[var(--color-text-tertiary)] uppercase tracking-wider mb-1">
                 {t('updater.currentVersion')}
               </div>
-              <div className="text-sm font-[600] text-[var(--color-text-primary)] font-mono">
-                v{update.currentVersion}
+              <div className="flex items-center gap-1.5 text-sm font-[600] text-[var(--color-text-primary)]">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-[var(--color-text-tertiary)]">
+                  <path d="M8 12h8M13 8l-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="font-mono">v{update.currentVersion}</span>
               </div>
             </div>
-            <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
-              <div className="text-[11px] text-[var(--color-text-tertiary)] uppercase tracking-wider mb-1">
-                {t('updater.releaseDate')}
+
+            {/* 箭头 */}
+            <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-[var(--color-primary-50)] text-[var(--color-primary-600)]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                <path d="M5 12h14m0 0l-4-4m4 4l-4 4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+
+            <div className="flex-1 p-3 rounded-[var(--radius-lg)] bg-gradient-to-br from-[var(--color-primary-600)]/10 to-[var(--color-primary-700)]/10 border border-[var(--color-primary-500)]/30">
+              <div className="text-[11px] text-[var(--color-primary-600)] uppercase tracking-wider mb-1 font-[600]">
+                {t('updater.versionLabel')}
               </div>
-              <div className="text-sm font-[600] text-[var(--color-text-primary)]">
-                {formatDate(update.date)}
+              <div className="flex items-center gap-1.5 text-sm font-[600] text-[var(--color-primary-700)]">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                  <path d="M20 12v7a1 1 0 01-1 1H5a1 1 0 01-1-1v-7" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M3 12h18M12 3v9m0 0l-3-3m3 3l3-3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="font-mono">v{update.version}</span>
               </div>
             </div>
           </div>
 
-          {/* 更新内容 */}
-          {update.body && (
-            <div>
-              <div className="text-[11px] text-[var(--color-text-tertiary)] uppercase tracking-wider mb-2">
+          {/* 版本元信息 */}
+          <div className="flex items-center gap-2 text-[12px] text-[var(--color-text-tertiary)]">
+            <span className="inline-flex items-center gap-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-3.5 h-3.5">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M8 3v4M16 3v4M3 10h18" strokeLinecap="round" />
+              </svg>
+              {formatDate(update.date)}
+            </span>
+          </div>
+
+          {/* 本次更新内容 */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-[var(--color-primary-600)]">
+                <path d="M9 11l3 3 8-8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="text-[13px] font-[600] text-[var(--color-text-primary)]">
                 {t('updater.releaseNotes')}
-              </div>
-              <div className="max-h-40 overflow-y-auto p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
-                <pre className="text-[13px] text-[var(--color-text-secondary)] whitespace-pre-wrap font-sans leading-relaxed">
-                  {update.body}
-                </pre>
-              </div>
+              </span>
             </div>
-          )}
+
+            <div className="max-h-48 overflow-y-auto ps-scroll rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
+              {notes.length > 0 ? (
+                <ul className="p-3 space-y-1.5">
+                  {notes.map((line, i) => (
+                    <li key={i} className="flex items-start gap-2 text-[13px] text-[var(--color-text-secondary)] leading-relaxed">
+                      <span className="mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--color-primary-400)]" />
+                      <span>{line}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="p-4 text-[13px] text-[var(--color-text-tertiary)]">{t('updater.noNotes')}</p>
+              )}
+            </div>
+          </div>
 
           {/* 正在安装 */}
           {phase === 'installing' && (
@@ -140,12 +200,12 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
         </div>
 
         {/* Footer — 按状态切换按钮 */}
-        <div className="px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-surface-panel)] flex items-center justify-end gap-2">
+        <div className="px-7 py-4 border-t border-[var(--color-border)] bg-[var(--color-surface-panel)] flex items-center justify-end gap-2.5">
           {phase === 'idle' && (
             <>
               <button
                 onClick={handleRemindLater}
-                className="px-4 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[500]
+                className="px-4 py-2 rounded-[var(--radius-2xl)] text-[var(--text-body-sm)] font-[500]
                            border border-[var(--color-border)] bg-white text-[var(--color-gray-700)]
                            hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
               >
@@ -153,12 +213,14 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
               </button>
               <button
                 onClick={handleInstall}
-                className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
+                className="flex items-center gap-1.5 px-5 py-2 rounded-[var(--radius-2xl)] text-[var(--text-body-sm)] font-[600]
                            bg-gradient-to-r from-[var(--color-primary-600)] to-[var(--color-primary-700)]
-                           text-white border-none
-                           hover:opacity-90 transition-opacity cursor-pointer
-                           shadow-sm"
+                           text-white border-none shadow-sm
+                           hover:opacity-90 hover:shadow-[0_4px_12px_var(--color-primary-200)] transition-all cursor-pointer"
               >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M13 2L4.5 12.5H11L10 22l8.5-10.5H12L13 2z" />
+                </svg>
                 {t('updater.installAndRestart')}
               </button>
             </>
@@ -167,7 +229,7 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
           {phase === 'installing' && (
             <button
               disabled
-              className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
+              className="px-5 py-2 rounded-[var(--radius-2xl)] text-[var(--text-body-sm)] font-[600]
                          bg-[var(--color-surface-raised)] text-[var(--color-text-tertiary)]
                          border border-[var(--color-border)] cursor-not-allowed"
             >
@@ -179,7 +241,7 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
             <>
               <button
                 onClick={handleRemindLater}
-                className="px-4 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[500]
+                className="px-4 py-2 rounded-[var(--radius-2xl)] text-[var(--text-body-sm)] font-[500]
                            border border-[var(--color-border)] bg-white text-[var(--color-gray-700)]
                            hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
               >
@@ -187,11 +249,10 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
               </button>
               <button
                 onClick={handleInstall}
-                className="px-5 py-2 rounded-[var(--radius-md)] text-[var(--text-body-sm)] font-[600]
+                className="flex items-center gap-1.5 px-5 py-2 rounded-[var(--radius-2xl)] text-[var(--text-body-sm)] font-[600]
                            bg-gradient-to-r from-[var(--color-primary-600)] to-[var(--color-primary-700)]
-                           text-white border-none
-                           hover:opacity-90 transition-opacity cursor-pointer
-                           shadow-sm"
+                           text-white border-none shadow-sm
+                           hover:opacity-90 hover:shadow-[0_4px_12px_var(--color-primary-200)] transition-all cursor-pointer"
               >
                 {t('common.retry')}
               </button>

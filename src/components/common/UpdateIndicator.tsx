@@ -31,11 +31,9 @@ export function UpdateIndicator() {
                    hover:shadow-[0_0_0_4px_var(--color-primary-100)] transition-all cursor-pointer
                    animate-[updatePulse_2.4s_ease-in-out_infinite]"
       >
-        {/* 下载完成图标 */}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-          <path d="M12 3v10" />
-          <path d="M7.5 9.5 12 14l4.5-4.5" />
-          <path d="M4 19v-2.6a1.4 1.4 0 0 1 1.4-1.4h13.2a1.4 1.4 0 0 1 1.4 1.4V19" />
+        {/* 下载完成图标：闪电升级风格弹头 */}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+          <path d="M13 2L4.5 12.5H11L10 22l8.5-10.5H12L13 2z" />
         </svg>
         <span>{t('updater.update')}</span>
       </button>

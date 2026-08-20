@@ -8,7 +8,7 @@
  *
  * 更新服务器需返回 JSON：
  * {
- *   "version": "1.1.0",
+ *   "version": "1.1.1",
  *   "pub_date": "2026-07-23T10:00:00Z",
  *   "notes": "更新说明",
  *   "platforms": {
@@ -35,6 +35,33 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 /** 24 小时内已检查过的更新不再重复弹窗（避免频繁打扰） */
 const CHECK_COOLDOWN_KEY = 'membook-update-last-check';
 const CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+/** 曾检测到过的最新版本号（localStorage 持久化，用于「重装低版本」时放行冷却） */
+const KNOWN_VERSION_KEY = 'membook-update-known-version';
+
+/** 比较 x.y.z 版本号：a>b 返回正数，a<b 返回负数，相等返回 0 */
+function compareVersions(a: string, b: string): number {
+  const parse = (s: string) => s.split('.').map((n) => parseInt(n, 10) || 0);
+  const A = parse(a);
+  const B = parse(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] ?? 0;
+    const y = B[i] ?? 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+/** 记录曾检测到的最新版本（取历史最高值），供重装低版本时判断是否放行检查 */
+function recordKnownVersion(v: string): void {
+  try {
+    const prev = localStorage.getItem(KNOWN_VERSION_KEY);
+    if (!prev || compareVersions(v, prev) > 0) {
+      localStorage.setItem(KNOWN_VERSION_KEY, v);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * 已下载/待安装的 Update 句柄。
@@ -83,6 +110,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
       pendingUpdate.close().catch(() => {});
     }
     pendingUpdate = update;
+    recordKnownVersion(update.version);
     logger.info(`[updater] 发现新版本 ${update.version}（当前 ${APP_VERSION}）`);
     return toInfo(update);
   } catch (e) {
@@ -101,6 +129,11 @@ export function getPendingUpdateInfo(): UpdateInfo | null {
  */
 export function isWithinCheckCooldown(): boolean {
   try {
+    // 规则：若当前版本低于「曾检测到过的新版本」（如重装低版本），即使冷却期内也放行检查
+    const known = localStorage.getItem(KNOWN_VERSION_KEY);
+    if (known && compareVersions(APP_VERSION, known) < 0) {
+      return false;
+    }
     const last = localStorage.getItem(CHECK_COOLDOWN_KEY);
     if (!last) return false;
     return Date.now() - parseInt(last, 10) < CHECK_COOLDOWN_MS;
