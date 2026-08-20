@@ -84,9 +84,9 @@ jobs:
           }
           $json = $manifest | ConvertTo-Json -Depth 6
           Set-Content -Path "update-windows-x86_64.json" -Value $json -Encoding utf8
-          # 生成 cnb 版清单（url 指向 cnb 下载地址，用于国内加速；仅当配置了 CNB_RELEASE_REPO 时）
+          # 生成 cnb 版清单（url 指向 cnb 固定文件名，用于国内加速；仅当配置了 CNB_RELEASE_REPO 时）
           if ($env:CNB_RELEASE_REPO) {
-            $cnbUrl = "https://cnb.cool/$($env:CNB_RELEASE_REPO)/-/releases/download/latest/${exe}"
+            $cnbUrl = "https://cnb.cool/$($env:CNB_RELEASE_REPO)/-/releases/download/latest/MemBook_x64-setup.exe"
             $cnbManifest = [ordered]@{
               version  = $ver
               pub_date = $pub
@@ -155,16 +155,17 @@ jobs:
             Write-Host "已创建 cnb latest Release: $($release.id)"
           }
 
-          # 2) 上传附件（exe + sig + GitHub 版清单 + cnb 版清单）
-          $files = @(
-            (Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1),
-            (Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe.sig" | Select-Object -First 1),
-            (Get-Item "update-windows-x86_64.json"),
-            (Get-Item "update-cnb-windows-x86_64.json")
+          # 2) 上传附件（用固定文件名，主页/更新清单可直接引用最新文件，不随版本变化）
+          $assets = @(
+            @{ File = (Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1); Name = "MemBook_x64-setup.exe" },
+            @{ File = (Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe.sig" | Select-Object -First 1); Name = "MemBook_x64-setup.exe.sig" },
+            @{ File = (Get-Item "update-windows-x86_64.json"); Name = "update-windows-x86_64.json" },
+            @{ File = (Get-Item "update-cnb-windows-x86_64.json"); Name = "update-cnb-windows-x86_64.json" }
           )
-          foreach ($f in $files) {
+          foreach ($a in $assets) {
+            $f = $a.File
             if (-not $f) { Write-Host "跳过缺失文件"; continue }
-            $fileName = $f.Name
+            $fileName = $a.Name
             # a) 获取预签名上传 URL + verify_url
             $upBody = @{ asset_name = $fileName; size = $f.Length; overwrite = $true } | ConvertTo-Json
             $uploadInfo = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases/$($release.id)/asset-upload-url" -Headers $headers -Body $upBody -ContentType "application/json" -TimeoutSec 30
@@ -254,9 +255,9 @@ jobs:
           }
           $json = $manifest | ConvertTo-Json -Depth 6
           Set-Content -Path "update-darwin-universal.json" -Value $json -Encoding utf8
-          # 生成 cnb 版清单（url 指向 cnb 下载地址，用于国内加速；仅当配置了 CNB_RELEASE_REPO 时）
+          # 生成 cnb 版清单（url 指向 cnb 固定文件名 app.tar.gz，用于国内加速；仅当配置了 CNB_RELEASE_REPO 时）
           if ($env:CNB_RELEASE_REPO) {
-            $cnbUrl = "https://cnb.cool/$($env:CNB_RELEASE_REPO)/-/releases/download/latest/${artifact}"
+            $cnbUrl = "https://cnb.cool/$($env:CNB_RELEASE_REPO)/-/releases/download/latest/MemBook.app.tar.gz"
             $cnbManifest = [ordered]@{
               version   = $ver
               pub_date  = $pub
@@ -327,17 +328,18 @@ jobs:
             Write-Host "已创建 cnb latest Release: $($release.id)"
           }
 
-          # 2) 上传附件（dmg + app.tar.gz + sig + GitHub 版清单 + cnb 版清单）
-          $files = @(
-            (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg" | Select-Object -First 1),
-            (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz" | Select-Object -First 1),
-            (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig" | Select-Object -First 1),
-            (Get-Item "update-darwin-universal.json"),
-            (Get-Item "update-cnb-darwin-universal.json")
+          # 2) 上传附件（用固定文件名，主页/更新清单可直接引用最新文件，不随版本变化）
+          $assets = @(
+            @{ File = (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg" | Select-Object -First 1); Name = "MemBook_universal.dmg" },
+            @{ File = (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz" | Select-Object -First 1); Name = "MemBook.app.tar.gz" },
+            @{ File = (Get-ChildItem "src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig" | Select-Object -First 1); Name = "MemBook.app.tar.gz.sig" },
+            @{ File = (Get-Item "update-darwin-universal.json"); Name = "update-darwin-universal.json" },
+            @{ File = (Get-Item "update-cnb-darwin-universal.json"); Name = "update-cnb-darwin-universal.json" }
           )
-          foreach ($f in $files) {
+          foreach ($a in $assets) {
+            $f = $a.File
             if (-not $f) { Write-Host "跳过缺失文件"; continue }
-            $fileName = $f.Name
+            $fileName = $a.Name
             # a) 获取预签名上传 URL + verify_url
             $upBody = @{ asset_name = $fileName; size = $f.Length; overwrite = $true } | ConvertTo-Json
             $uploadInfo = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases/$($release.id)/asset-upload-url" -Headers $headers -Body $upBody -ContentType "application/json" -TimeoutSec 30
