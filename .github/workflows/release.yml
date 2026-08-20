@@ -146,10 +146,10 @@ jobs:
             $release = $existing
           } catch {
             $body = @{
-              tag_name    = $latestTag
-              commitish   = "main"
-              name        = "latest"
-              description = "MemBook 最新安装包（同步自 GitHub Actions $tag）"
+              tag_name         = $latestTag
+              target_commitish = "main"
+              name             = "latest"
+              description      = "MemBook 最新安装包（同步自 GitHub Actions $tag）"
             } | ConvertTo-Json
             $release = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases" -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 20
             Write-Host "已创建 cnb latest Release: $($release.id)"
@@ -166,7 +166,7 @@ jobs:
             if (-not $f) { Write-Host "跳过缺失文件"; continue }
             $fileName = $f.Name
             # a) 获取预签名上传 URL + verify_url
-            $upBody = @{ filename = $fileName } | ConvertTo-Json
+            $upBody = @{ asset_name = $fileName; size = $f.Length; overwrite = $true } | ConvertTo-Json
             $uploadInfo = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases/$($release.id)/asset-upload-url" -Headers $headers -Body $upBody -ContentType "application/json" -TimeoutSec 30
             Write-Host "获取上传地址: $fileName"
             # b) 将文件 PUT 到预签名地址
@@ -318,10 +318,10 @@ jobs:
             $release = $existing
           } catch {
             $body = @{
-              tag_name    = $latestTag
-              commitish   = "main"
-              name        = "latest"
-              description = "MemBook 最新安装包（同步自 GitHub Actions $tag）"
+              tag_name         = $latestTag
+              target_commitish = "main"
+              name             = "latest"
+              description      = "MemBook 最新安装包（同步自 GitHub Actions $tag）"
             } | ConvertTo-Json
             $release = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases" -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 20
             Write-Host "已创建 cnb latest Release: $($release.id)"
@@ -339,7 +339,7 @@ jobs:
             if (-not $f) { Write-Host "跳过缺失文件"; continue }
             $fileName = $f.Name
             # a) 获取预签名上传 URL + verify_url
-            $upBody = @{ filename = $fileName } | ConvertTo-Json
+            $upBody = @{ asset_name = $fileName; size = $f.Length; overwrite = $true } | ConvertTo-Json
             $uploadInfo = Invoke-RestMethod -Method Post -Uri "$base/$repo/-/releases/$($release.id)/asset-upload-url" -Headers $headers -Body $upBody -ContentType "application/json" -TimeoutSec 30
             Write-Host "获取上传地址: $fileName"
             # b) 将文件 PUT 到预签名地址
