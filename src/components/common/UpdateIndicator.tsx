@@ -24,16 +24,16 @@ export function UpdateIndicator() {
         type="button"
         onClick={() => setUpdateDialog(readyUpdate)}
         title={t('updater.update')}
-        className="group ml-auto flex items-center gap-1.5 px-3 h-8 rounded-full
-                   border border-[var(--color-border)] bg-[var(--color-card)]
-                   text-[var(--color-primary-600)] text-[var(--text-body-sm)] font-[600]
-                   hover:border-[var(--color-primary-500)] hover:bg-[var(--color-primary-50)]
-                   hover:shadow-[0_0_0_4px_var(--color-primary-100)] transition-all cursor-pointer
+        className="group ml-auto flex items-center gap-1.5 px-3.5 h-8 rounded-[var(--radius-lg)]
+                   !bg-[image:var(--gradient-brand)] text-white text-[var(--text-body-sm)] font-[600]
+                   hover:!shadow-[var(--shadow-md)] hover:!-translate-y-px transition-all cursor-pointer
                    animate-[updatePulse_2.4s_ease-in-out_infinite]"
       >
-        {/* 下载完成图标：闪电升级风格弹头 */}
+        {/* 升级箭头图标（圆环内上箭头） */}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-          <path d="M13 2L4.5 12.5H11L10 22l8.5-10.5H12L13 2z" />
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 16V8" />
+          <path d="m8.5 11.5 3.5-3.5 3.5 3.5" />
         </svg>
         <span>{t('updater.update')}</span>
       </button>

@@ -85,6 +85,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEOUVGMThEQUU2MDY0REYKUldUZlpHQ3VqZkdlYlIrNXN5SWw0UEJuV3VHajFrQk05b1pBR0xxVzYyYS9DK1lNSUpxanI1VHEK",
       "endpoints": [
+        "https://cnb.cool/MemBook-Flash/MemMook-Update/-/releases/download/latest/update-cnb-{{target}}-{{arch}}.json",
         "https://github.com/zhonghuoquan/MemBook/releases/latest/download/update-{{target}}-{{arch}}.json"
       ],
       "windows": {

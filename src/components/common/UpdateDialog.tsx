@@ -80,11 +80,12 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
           <div className="absolute right-24 -bottom-16 w-32 h-32 rounded-full bg-white/5 blur-xl" />
 
           <div className="relative flex items-start gap-4">
-            {/* 渐变图标徽章 */}
+            {/* 渐变图标徽章：下载就绪箭头 */}
             <div className="shrink-0 w-12 h-12 rounded-[var(--radius-xl)] bg-white/15 backdrop-blur-md border border-white/25 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">
-              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" className="w-6 h-6">
-                <path d="M12 7v8m0 0l-3-3m3 3l3-3" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M12 3l1.2-1.2a1 1 0 012 0L16.5 3l1-1.4a1 1 0 011.9.5l.6 1.6 1.6.6a1 1 0 01.5 1.9l-1.4 1 .7 1.4a1 1 0 01-1.5 1.3L18.5 8.3 17 9.5a1 1 0 01-1.6-1.2l.6-1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.35" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                <path d="M21 15v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3" />
+                <path d="M7 10l5 5 5-5" />
+                <path d="M12 3v12" />
               </svg>
             </div>
             <div className="min-w-0">
@@ -219,7 +220,8 @@ export function UpdateDialog({ update, onClose }: UpdateDialogProps) {
                            hover:opacity-90 hover:shadow-[0_4px_12px_var(--color-primary-200)] transition-all cursor-pointer"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                  <path d="M13 2L4.5 12.5H11L10 22l8.5-10.5H12L13 2z" />
+                  <path d="M12 3v10m0 0l-3-3m3 3l3-3" />
+                  <path d="M5 21v-2h14v2" />
                 </svg>
                 {t('updater.installAndRestart')}
               </button>

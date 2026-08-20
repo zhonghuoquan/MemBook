@@ -96,11 +96,17 @@ export type UpdateProgress = {
 /**
  * 检查是否有可用更新（不下载，不安装）。
  * 非桌面端直接返回 null。
+ *
+ * 多端点说明（国内优先 cnb，失败回退 GitHub）：
+ * - tauri.conf.json 的 plugins.updater.endpoints 数组按顺序请求；
+ * - Tauri 只有在前一个端点返回非 2XX 或请求失败时才尝试下一个；
+ * - cnb 的清单内 url 指向 cnb 安装包，GitHub 的清单 url 指向 GitHub 安装包，
+ *   从而让国内用户自动走 cnb 下载、海外用户走 GitHub。
  */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   if (!isTauri) return null;
   try {
-    const update = await check();
+    const update = await check({ timeout: 30000 });
     if (!update) {
       logger.info('[updater] 当前已是最新版本');
       return null;
