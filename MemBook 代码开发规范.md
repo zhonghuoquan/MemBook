@@ -3,7 +3,7 @@
 > 本规范基于 MemBook 项目当前代码现状提炼，后续所有代码开发**必须严格执行**本规范。
 > 规范冲突时：硬约束 > 工程约定 > 风格约定。违反规范需在 PR 中显式说明理由。
 
-最后更新：2026-08-15（新增 9.8 封面/封底模板设计规范）
+最后更新：2026-08-22（新增 9.14 照片整理大批量性能优化规范）
 
 ---
 
@@ -467,6 +467,15 @@ const id = `page-${Date.now()}`;
 - **对齐吸附接入**：`buildAlignTargets` 把参考线作为零宽/零高细长 bounds 目标，**仅 `rulerEnabled` 时参与**（避免吸附到隐藏参考线）；吸附生效仍受 `alignEnabled` 门控。
 - **静态辅助线快速开关**：边距辅助线（`showMarginGuide`，安全区虚线）与页面辅助线（`showGuides`，中线/三分线）在底部导航左侧「对齐/标尺」旁提供「边距」「辅助线」胶囊按钮快速切换（直接 `setShowMarginGuide`/`setShowGuides`，存 `albumMetaSlice` 随项目持久化）；画布渲染直接读 store 字段，「页面设置」弹窗打开时从 store 读入本地开关，两处状态保持同源（禁止各自独立维护导致不同步）。
 - **封面页辅助线排除书脊**（2026-08-19）：封面页书脊为左侧物理扩展区，辅助线基准必须用「页面内容实际区域」——`contentX = isCoverLike ? spinePx : 0`、`contentW = isCoverLike ? CANVAS_W - spinePx : CANVAS_W`（`spinePx = spineWidthMm × MM_TO_PX`）；边距框左右边、三分线/中线 X 坐标均基于 `contentX + contentW × 比例`，水平线两端限制在 `[contentX, contentX+contentW]` 不穿书脊，垂直方向不变。普通页/封底 `spinePx=0` 时退化为整画布，禁止再次用含书脊总宽 `CANVAS_W` 当基准。
+
+### 9.14 照片整理大批量性能优化（2026-08-22）
+上万张照片的分析功能（相似分析/去重/人脸识别/截图识别/时间归类）**禁止**把长任务一次性跑在主线程导致 UI 冻结，统一采用「分批让出主线程 + 并发控制 + 只读文件头」策略：
+- **共享工具函数**（[async-utils.ts](file:///f:/N-编程/MenBook开发项目/MemBook/src/photo-tools/async-utils.ts)）：`yieldToMain()`（`setTimeout(0)` 让出主线程）、`runInChunks(items, batch, fn, signal)`（分批处理 + 每批让出）、`mapWithConcurrency(items, fn, concurrency, onProgress, signal)`（工作池并发模式，默认并发 8）。**禁止**在 hash.ts / screenshot.ts / organize.ts 内各自内联重复实现，必须导入共享函数（本地重复实现已删除）。
+- **大批量同步重计算必须分批让出**：人脸检测（`detectFaces` 用 `runInChunks`）、人脸聚类距离矩阵（`agglomerativeCluster` 按行分批 `MATRIX_BATCH_ROWS=200` + 每批 `yieldToMain`）、时间归类构建归类项（`PROCESS_BATCH=50`）等；每批结束更新进度，保证 UI 响应与进度条平滑。
+- **内存与复杂度防护**：聚类距离矩阵用**三角形扁平存储**（`distFlat`）替代 N×N 二维矩阵；complete linkage 用防爆表 + 带生成计数器的检查缓存避免 O(n²) 检查重复计算；去重 Phase 3 全量 SHA256 并发数降为 `FULL_HASH_CONCURRENCY=4` 控制内存峰值。
+- **只读文件头取 EXIF/尺寸**：截图识别/时间归类**禁止**读取整张照片数据——用 `readData(photo, length)` 只读文件头（`HEAD_BYTES = 64KB`）经 `getImageSizeFromHeader(buf)`（JPEG/PNG/WebP/GIF/BMP）解析像素尺寸 + EXIF 时间，大幅降低内存与 IO；`ScreenshotDetectOptions`/`PreviewOrganizeOptions` 的 `readData` 已支持可选 `length` 参数。
+- **单张失败温和降级**：个别照片读取/解码失败 `failedCount++` 不中断整体分析，结尾回调/提示失败张数；**禁止**单张失败抛异常中断整个任务。
+- **异步适配**：`recluster` 已改为异步（内部 `await` agglomerativeCluster），调用处（`clusterFaces`/FaceClusterTool/测试）必须 `await`，禁止按旧同步方式调用。
 
 ---
 

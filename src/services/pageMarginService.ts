@@ -1,4 +1,4 @@
-import type { AlbumPage, SlotOverride, AlbumSize } from '../types';
+import type { AlbumPage, SlotOverride } from '../types';
 import { resolveTemplate, isCoverPage, isBackCoverPage } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { usePhotoStore } from '../store/photoStore';
@@ -63,7 +63,7 @@ export const pageMarginService = {
  */
 export function calcCoverOverrides(
   page: AlbumPage,
-  albumSize: AlbumSize,
+  albumSize: { width: number; height: number },
 ): { overrides: Record<string, SlotOverride>; newPage: AlbumPage } | null {
   const template = resolveTemplate(page);
   if (!template) return null;

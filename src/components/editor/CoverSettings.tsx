@@ -15,7 +15,7 @@ import type { AlbumPage, PageTextElement } from '../../types';
 import { STANDARD_COLORS, PALETTE_COLORS } from '../../constants/colorPalette';
 import { SPINE_DATE_BOTTOM_MM } from '../../utils/sharedRender';
 import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
-import { DEFAULT_SPINE_WIDTH_MM } from './canvas/constants';
+import { DEFAULT_SPINE_WIDTH_MM, SPINE_WIDTH_MIN_MM, SPINE_WIDTH_MAX_MM } from './canvas/constants';
 
 function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
 
@@ -294,13 +294,13 @@ export function CoverSettings() {
                 <div className="flex items-center justify-between text-[10px] font-[500] text-[var(--color-gray-500)]">
                   <span>{t('editor.coverSettings.spineWidth')}</span>
                   <div className="flex items-center gap-1">
-                    <input type="number" min={6} max={60} value={spineWidth}
-                      onChange={(e) => setSpineWidth(clamp(+e.target.value || 0, 6, 60))}
+                    <input type="number" min={SPINE_WIDTH_MIN_MM} max={SPINE_WIDTH_MAX_MM} value={spineWidth}
+                      onChange={(e) => setSpineWidth(clamp(+e.target.value || 0, SPINE_WIDTH_MIN_MM, SPINE_WIDTH_MAX_MM))}
                       className="w-12 h-6 px-1 border border-[var(--color-border)] rounded text-[10px] bg-white outline-none tabular-nums transition-colors focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand)]/15" />
                     <span className="font-[600] tabular-nums text-[10px] text-[var(--color-gray-400)]">mm</span>
                   </div>
                 </div>
-                <input type="range" min={6} max={60} step={1} value={spineWidth}
+                <input type="range" min={SPINE_WIDTH_MIN_MM} max={SPINE_WIDTH_MAX_MM} step={1} value={spineWidth}
                   onChange={(e) => setSpineWidth(+e.target.value)}
                   className="w-full h-1.5 cursor-pointer accent-[var(--color-brand)]" />
               </div>

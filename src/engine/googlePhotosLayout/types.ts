@@ -76,6 +76,8 @@ export type GooglePhotosLayoutResult = {
   }>>;
   /** 每页实际使用的 tierPattern，供预览展示与旧页重排兼容 */
   tierPatterns: TierPattern[];
+  /** 每页 hero 相位系数（跨页强弱节奏），与 pages 一一对应；旧数据缺省视为 1 */
+  heroPhases: number[];
   totalPhotos: number;
   totalPages: number;
 };
@@ -130,6 +132,14 @@ export interface LayoutParams {
   rows: number;
   tierPattern: TierPattern;
   allowSpan: boolean;  // 是否允许竖图跨行
+  /** 本页布局 seed：驱动行分组/左右交替等“布局抖动”决策。
+   *  多版本生成时为每页注入不同 seed，让“换方案”产出肉眼可见差异；
+   *  缺失时回退为按照片内容派生的确定性 seed。 */
+  seed?: number;
+  /** 页面级 hero 相位系数（跨页强弱节奏）：hero 行高 × 该值。
+   *  >1 = 强相页（大图震撼），<1 = 缓相页（细节舒缓），缺省 1 = 中性。
+   *  由 planCrossPageRhythm 按页分配；fillPage 等比归一化后相对高度差保留。 */
+  heroPhase?: number;
 }
 
 export interface PageSpec {

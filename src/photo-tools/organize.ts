@@ -12,6 +12,10 @@ import { readExifDate } from './exif';
 import { parseFilenameDate } from './filename-time';
 import type { PhotoFileInfo, OrganizePreviewItem, ToolProgress, OrganizeMode, LocationLevel } from './types';
 import { logger } from '../utils/logger';
+import { mapWithConcurrency, yieldToMain } from './async-utils';
+
+/** EXIF 时间解析只需读取文件头（EXIF 段位于文件头部），避免读取整张照片字节 */
+const EXIF_HEAD_BYTES = 64 * 1024;
 
 /**
  * 解析照片的拍摄时间
@@ -143,8 +147,8 @@ export function getTargetDirEx(
 
 export interface PreviewOrganizeOptions {
   onProgress?: (p: ToolProgress) => void;
-  /** 异步读取照片数据（用于 EXIF 时间读取），不传则仅用 dateTaken + 文件名 */
-  readData?: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  /** 异步读取照片数据（length 可选：只读文件头取 EXIF，避免整图读取），不传则仅用 dateTaken + 文件名 */
+  readData?: (photo: PhotoFileInfo, length?: number) => Promise<ArrayBuffer | null>;
   /** 无 EXIF 和文件名时间时，是否使用文件修改日期归类 */
   useFileDate?: boolean;
   /** 获取文件修改日期（Tauri 端用 stat 实现） */
@@ -161,6 +165,11 @@ export interface PreviewOrganizeOptions {
 
 /**
  * 预览归类：计算每个文件的目标路径（支持时间/地点/时间+地点模式）
+ *
+ * 大批量优化（上万张照片不卡死）：
+ *   1. 只读文件头（EXIF 段位于头部）取拍摄时间，避免读取整张照片字节
+ *   2. EXIF 时间读取用 mapWithConcurrency 并发（IO 密集，串行会极慢）
+ *   3. 顺序构建归类项时分批 + yieldToMain，UI 保持响应
  */
 export async function previewOrganize(
   photos: PhotoFileInfo[],
@@ -177,93 +186,136 @@ export async function previewOrganize(
   // 正在进行的 geocode 请求（防并发重复请求）
   const inflightGeocode = new Map<string, Promise<string | null>>();
 
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-
-    // 排除已整理的文件（已在"MemBook照片整理/"目录下）
+  // ── Step 1: 同步预筛（排除已整理）+ 收集需要读数据取时间的照片 ──
+  const filtered: PhotoFileInfo[] = [];
+  const needData: PhotoFileInfo[] = [];
+  for (const photo of photos) {
     if (excludeSorted) {
       const relPath = (photo.relativePath || photo.path || '').replace(/\\/g, '/');
       if (relPath.startsWith('MemBook照片整理/') || relPath.includes('/MemBook照片整理/')) {
         continue;
       }
     }
+    filtered.push(photo);
+    // 已有 dateTaken 或文件名可解析出时间 → 无需读数据
+    if (!resolvePhotoDate(photo) && readData) {
+      needData.push(photo);
+    }
+  }
 
-    let date: Date | null = null;
-
-    // 尝试从已有元数据或文件名解析
-    date = resolvePhotoDate(photo);
-
-    // 如果没有时间且有 readData，尝试读 EXIF
-    if (!date && readData) {
-      try {
-        const data = await readData(photo);
-        if (data) {
-          date = await readExifDate(data);
-          if (!date) date = parseFilenameDate(photo.name);
+  // ── Step 2: 并发读取文件头取 EXIF 时间（IO 密集，并发加速） ──
+  const dateByData = new Map<string, Date | null>(); // photoId → 时间
+  if (needData.length > 0) {
+    let doneCount = 0;
+    await mapWithConcurrency(
+      needData,
+      async (p) => {
+        try {
+          const data = await readData!(p, EXIF_HEAD_BYTES);
+          let d: Date | null = null;
+          if (data && data.byteLength > 0) {
+            d = await readExifDate(data);
+          }
+          dateByData.set(p.id, d ?? parseFilenameDate(p.name));
+        } catch {
+          dateByData.set(p.id, parseFilenameDate(p.name));
         }
-      } catch {
-        // 读取失败，跳过
+        doneCount++;
+        try {
+          onProgress?.({
+            phase: 'preview',
+            current: doneCount,
+            total: photos.length,
+            message: `读取拍摄时间 ${doneCount}/${photos.length}`,
+          });
+        } catch {
+          // 忽略进度回调错误
+        }
+      },
+      8,
+      undefined,
+      undefined,
+    );
+  }
+
+  // ── Step 3: 顺序构建归类项（含 geocode 缓存 + 分批让出主线程） ──
+  const PROCESS_BATCH = 50;
+  for (let b = 0; b < filtered.length; b += PROCESS_BATCH) {
+    const end = Math.min(b + PROCESS_BATCH, filtered.length);
+    for (let i = b; i < end; i++) {
+      const photo = filtered[i];
+
+      let date: Date | null = null;
+
+      // 尝试从已有元数据或文件名解析
+      date = resolvePhotoDate(photo);
+      // 从 Step 2 并发读取的 EXIF 时间补全
+      if (!date) date = dateByData.get(photo.id) ?? null;
+
+      // 文件日期回退（无 EXIF 和文件名时间时，使用文件修改日期）
+      if (!date && useFileDate && getFileDate) {
+        try {
+          date = await getFileDate(photo);
+        } catch {
+          // ignore
+        }
       }
-    }
 
-    // 文件日期回退（无 EXIF 和文件名时间时，使用文件修改日期）
-    if (!date && useFileDate && getFileDate) {
-      try {
-        date = await getFileDate(photo);
-      } catch {
-        // ignore
-      }
-    }
+      // 地点模式下无日期也可以继续；时间模式无日期则跳过
+      if (!date && mode === 'time') continue;
 
-    // 地点模式下无日期也可以继续；时间模式无日期则跳过
-    if (!date && mode === 'time') continue;
-
-    // 解析地点（mode 含 location 时）
-    let locationStr: string | undefined;
-    if (mode !== 'time' && photo.gpsLon != null && photo.gpsLat != null && reverseGeocode) {
-      const cacheKey = `${photo.gpsLon.toFixed(4)},${photo.gpsLat.toFixed(4)}`;
-      locationStr = locationCache.get(cacheKey);
-      if (!locationStr) {
-        const existing = inflightGeocode.get(cacheKey);
-        if (existing) {
-          locationStr = await existing ?? undefined;
-        } else {
-          const promise = reverseGeocode(photo.gpsLon, photo.gpsLat)
-            .then(r => { if (r) locationCache.set(cacheKey, r); return r; })
-            .finally(() => inflightGeocode.delete(cacheKey));
-          inflightGeocode.set(cacheKey, promise);
-          try {
-            locationStr = await promise ?? undefined;
-          } catch {
-            // geocode 失败，location 保持 undefined
+      // 解析地点（mode 含 location 时）
+      let locationStr: string | undefined;
+      if (mode !== 'time' && photo.gpsLon != null && photo.gpsLat != null && reverseGeocode) {
+        const cacheKey = `${photo.gpsLon.toFixed(4)},${photo.gpsLat.toFixed(4)}`;
+        locationStr = locationCache.get(cacheKey);
+        if (!locationStr) {
+          const existing = inflightGeocode.get(cacheKey);
+          if (existing) {
+            locationStr = await existing ?? undefined;
+          } else {
+            const promise = reverseGeocode(photo.gpsLon, photo.gpsLat)
+              .then(r => { if (r) locationCache.set(cacheKey, r); return r; })
+              .finally(() => inflightGeocode.delete(cacheKey));
+            inflightGeocode.set(cacheKey, promise);
+            try {
+              locationStr = await promise ?? undefined;
+            } catch {
+              // geocode 失败，location 保持 undefined
+            }
           }
         }
       }
+
+      const targetDir = getTargetDirEx(date, mode, locationStr, locationLevel);
+      const sourcePath = photo.path || photo.name;
+
+      // 检查是否已在目标位置
+      const expectedPath = `${targetDir}/${photo.name}`;
+      const conflictAction: OrganizePreviewItem['conflictAction'] =
+        sourcePath.replace(/\\/g, '/') === expectedPath.replace(/\\/g, '/')
+          ? 'skip'
+          : 'move';
+
+      items.push({
+        sourcePath,
+        targetDir,
+        fileName: photo.name,
+        conflictAction,
+      });
     }
-
-    const targetDir = getTargetDirEx(date, mode, locationStr, locationLevel);
-    const sourcePath = photo.path || photo.name;
-
-    // 检查是否已在目标位置
-    const expectedPath = `${targetDir}/${photo.name}`;
-    const conflictAction: OrganizePreviewItem['conflictAction'] =
-      sourcePath.replace(/\\/g, '/') === expectedPath.replace(/\\/g, '/')
-        ? 'skip'
-        : 'move';
-
-    items.push({
-      sourcePath,
-      targetDir,
-      fileName: photo.name,
-      conflictAction,
-    });
-
-    onProgress?.({
-      phase: 'preview',
-      current: i + 1,
-      total: photos.length,
-      message: `分析 ${i + 1}/${photos.length}`,
-    });
+    // 批间让出主线程，UI 可响应；进度按批次更新（平滑、不逐张刷屏）
+    if (end < filtered.length) await yieldToMain();
+    try {
+      onProgress?.({
+        phase: 'preview',
+        current: end,
+        total: photos.length,
+        message: `分析 ${end}/${photos.length}`,
+      });
+    } catch {
+      // 忽略进度回调错误
+    }
   }
 
   return items;

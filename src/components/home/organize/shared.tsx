@@ -1222,12 +1222,12 @@ function DropdownMenu({
     <>
       {/* 全屏透明遮罩：点击关闭菜单 */}
       <div
-        className="fixed inset-0 z-[60]"
+        className="fixed inset-0 z-[var(--z-modal)]"
         onClick={closeMenu}
         style={{ background: 'transparent' }}
       />
       <div
-        className="fixed z-[70] min-w-[110px] rounded-lg border border-[var(--color-border)] bg-white shadow-lg py-1 animate-[fadeIn_120ms_ease-out]"
+        className="fixed z-[calc(var(--z-modal)+1)] min-w-[110px] rounded-lg border border-[var(--color-border)] bg-white shadow-lg py-1 animate-[fadeIn_120ms_ease-out]"
         style={{ top: pos.top, left: pos.left }}
         onClick={(e) => e.stopPropagation()}
       >

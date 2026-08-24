@@ -494,14 +494,9 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
   const [thumbCache, setThumbCache] = useState<Map<string, string>>(new Map());
   const [executing, setExecuting] = useState(false);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(1); // 默认选中 B 方案
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  // 页面级选择 + 双轴偏压（rhythm/bias 通过 ref 传递，选择/取消选择永不触发 layoutResult 重算）
+  // 页面级选择（rhythm/seed/tierPattern 覆盖通过 ref 传递，选择/取消选择不触发 layoutResult 重算）
   const [selectedPageIdx, setSelectedPageIdx] = useState<number | null>(null);
-  const [biasX, setBiasX] = useState(0);  // -10~+10
-  const [biasY, setBiasY] = useState(0);  // -10~+10
-  const biasRef = useRef({ biasX: 0, biasY: 0 });
-  biasRef.current = { biasX, biasY };
-  // 强制重算 key：切页/偏压变化时自增，确保 layoutResult 使用正确的 ref 值
+  // 强制重算 key：切页/覆盖变化时自增，确保 layoutResult 使用正确的 ref 值
   const [layoutRecalcKey, setLayoutRecalcKey] = useState(0);
 
   // 跨页偏压记忆 + 单页 rhythm/seed/tierPattern 隔离：统一为 pageOverrides，rotation/photoPosition 单独维护
@@ -556,10 +551,6 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
   useEffect(() => {
     const overrides = useUIStore.getState().smartLayoutPerPageOverrides;
     const map = new Map<number, PageOverride>();
-    Object.entries(overrides.bias).forEach(([k, v]) => {
-      const existing = map.get(Number(k)) ?? {};
-      map.set(Number(k), { ...existing, biasX: v.biasX, biasY: v.biasY });
-    });
     Object.entries(overrides.rhythm).forEach(([k, v]) => {
       const existing = map.get(Number(k)) ?? {};
       map.set(Number(k), { ...existing, rhythm: v });
@@ -578,49 +569,7 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
     setLayoutRecalcKey(k => k + 1);
   }, []);
 
-  // ── XY 盘拖拽：ref 提升到组件级避免渲染重建 ──
-  const padRef = useRef<HTMLDivElement | null>(null);
-  const dotRef = useRef<HTMLDivElement | null>(null);
-  const updateBiasFromClient = useCallback((clientX: number, clientY: number) => {
-    const el = padRef.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    let bx = Math.round(((clientX - r.left) / r.width - 0.5) * 200) / 10;
-    let by = Math.round((0.5 - (clientY - r.top) / r.height) * 200) / 10;
-    bx = Math.max(-10, Math.min(10, bx));
-    by = Math.max(-10, Math.min(10, by));
-    if (bx === biasX && by === biasY) return;
-    setBiasX(bx);
-    setBiasY(by);
-    if (selectedPageIdx != null) {
-      const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-      pageOverridesRef.current.set(selectedPageIdx, { ...existing, biasX: bx, biasY: by });
-    }
-    setLayoutRecalcKey(k => k + 1);
-  }, [biasX, biasY, selectedPageIdx]);
-  const onPadMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    updateBiasFromClient(e.clientX, e.clientY);
-    const onMove = (ev: MouseEvent) => { ev.preventDefault(); updateBiasFromClient(ev.clientX, ev.clientY); };
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [updateBiasFromClient]);
-
   const handleSelectPage = (idx: number | null) => {
-    // 保存当前页偏压（用 ref 避免 memo 闭包过期）
-    if (selectedPageIdx != null) {
-      const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-      pageOverridesRef.current.set(selectedPageIdx, { ...existing, ...biasRef.current });
-    }
-    // 加载新页偏压
-    let nextBX = 0, nextBY = 0;
-    if (idx != null) {
-      const saved = pageOverridesRef.current.get(idx);
-      nextBX = saved?.biasX ?? 0;
-      nextBY = saved?.biasY ?? 0;
-    }
-    setBiasX(nextBX);
-    setBiasY(nextBY);
     setSelectedPageIdx(idx);
     setLayoutRecalcKey(k => k + 1);
   };
@@ -631,25 +580,6 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
       pageOverridesRef.current.set(key, rest);
     }
   };
-  const handleBiasChange = (axis: 'X' | 'Y', val: number) => {
-    if (axis === 'X') setBiasX(val);
-    else setBiasY(val);
-    const newBX = axis === 'X' ? val : biasX;
-    const newBY = axis === 'Y' ? val : biasY;
-    if (selectedPageIdx != null) {
-      const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-      pageOverridesRef.current.set(selectedPageIdx, { ...existing, biasX: newBX, biasY: newBY });
-    }
-    setLayoutRecalcKey(k => k + 1);
-  };
-  const handleDensityChange = (d: GooglePhotosDensity) => {
-    setDensitySlider(densityToSlider(d));
-    if (selectedPageIdx != null) {
-      const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-      pageOverridesRef.current.set(selectedPageIdx, { ...existing, density: d });
-    }
-    setLayoutRecalcKey(k => k + 1);
-  };
   const handleDensitySliderChange = (val: number) => {
     setDensitySlider(val);
     if (selectedPageIdx != null) {
@@ -657,18 +587,6 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
       pageOverridesRef.current.set(selectedPageIdx, { ...existing, density: sliderToDensity(val) });
       setLayoutRecalcKey(k => k + 1);
     }
-  };
-  const handleRhythmChange = (rhythm: GooglePhotosLayoutRhythm) => {
-    setRhythmSlider(rhythmToSlider(rhythm));
-    if (selectedPageIdx != null) {
-      const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-      // 节奏变化后，必须移除锁定的 tierPattern，否则版式不会重新选择
-      const { tierPattern: _, ...rest } = existing;
-      pageOverridesRef.current.set(selectedPageIdx, { ...rest, rhythm });
-    } else {
-      clearAllRhythmOverrides();
-    }
-    setLayoutRecalcKey(k => k + 1);
   };
   const handleRhythmSliderChange = (val: number) => {
     setRhythmSlider(val);
@@ -690,7 +608,13 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
       addToast({ message: t('editor.smartLayout.toast.shuffleInsufficient'), type: 'info' });
       return;
     }
-    perPagePhotoPositionSeedMapRef.current.set(pageIdx, Math.floor(Math.random() * 10000));
+    // 随机排版 = 骨架重排：注入新的页级布局 seed，驱动跨行主图/左右侧/行数抖动等重新选取，
+    // 而不仅是同一几何里交换 photoId。generateMultipleLayouts 已尊重已有页级 seed，
+    // 该 seed 会保留下来产生真正不同的版式。
+    const freshSeed = Math.floor(Math.random() * 10000);
+    const existing = pageOverridesRef.current.get(pageIdx) ?? {};
+    pageOverridesRef.current.set(pageIdx, { ...existing, seed: freshSeed });
+    perPagePhotoPositionSeedMapRef.current.set(pageIdx, freshSeed);
     setLayoutRecalcKey(k => k + 1);
   };
   const handleShufflePhotoPositionsClick = () => {
@@ -1187,152 +1111,6 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
                 })}
               </div>
             </div>
-
-            {/* 高级设置（折叠） */}
-            <div className="border border-[var(--color-border)] rounded-xl overflow-hidden">
-              <button
-                onClick={() => setAdvancedOpen((v) => !v)}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white hover:bg-[var(--color-gray-50)] transition-colors cursor-pointer"
-              >
-                <span className="text-[12px] font-[600] text-[var(--color-gray-700)]">{t('editor.smartLayout.advancedSettings')}</span>
-                <svg
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={`w-3.5 h-3.5 text-[var(--color-gray-500)] transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
-                >
-                  <path d="M4 6l4 4 4-4" />
-                </svg>
-              </button>
-              {advancedOpen && (
-                <div className="px-3 pb-3 space-y-4 bg-[var(--color-gray-50)]">
-                  {/* 精确密度 */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-[600] text-[var(--color-gray-600)]">{t('editor.smartLayout.preciseDensity')}</span>
-                      {selectedPageIdx != null && (
-                        <button
-                          onClick={() => {
-                            const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-                            const { density: _, ...rest } = existing;
-                            pageOverridesRef.current.set(selectedPageIdx, rest);
-                            setDensitySlider(densityToSlider(density));
-                            setLayoutRecalcKey(k => k + 1);
-                          }}
-                          className="text-[9px] text-[var(--color-gray-500)] border border-[var(--color-border)] rounded-full px-1.5 py-0.5 hover:text-[var(--color-brand)] hover:border-[var(--color-brand)] transition-colors cursor-pointer"
-                        >
-                          {t('editor.smartLayout.resetGlobal')}
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      {DENSITY_OPTS.map(({ id, labelKey, descKey }) => (
-                        <button
-                          key={id}
-                          onClick={() => handleDensityChange(id)}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                            effectiveDensity === id
-                              ? 'border-[var(--color-brand)] bg-[var(--color-brand-bg)]'
-                              : 'border-transparent bg-white hover:border-[var(--color-border)]'
-                          }`}
-                        >
-                          <span className={`text-[11px] font-[500] ${effectiveDensity === id ? 'text-[var(--color-brand)]' : 'text-[var(--color-gray-700)]'}`}>{t(labelKey)}</span>
-                          <span className="block text-[9px] text-[var(--color-gray-400)]">{t(descKey)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 精确节奏 */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-[600] text-[var(--color-gray-600)]">{t('editor.smartLayout.preciseRhythm')}</span>
-                      {selectedPageIdx != null && (
-                        <button
-                          onClick={() => {
-                            const existing = pageOverridesRef.current.get(selectedPageIdx) ?? {};
-                            const { rhythm: _, tierPattern: __, ...rest } = existing;
-                            pageOverridesRef.current.set(selectedPageIdx, rest);
-                            setRhythmSlider(rhythmToSlider(layoutRhythm));
-                            setLayoutRecalcKey(k => k + 1);
-                          }}
-                          className="text-[9px] text-[var(--color-gray-500)] border border-[var(--color-border)] rounded-full px-1.5 py-0.5 hover:text-[var(--color-brand)] hover:border-[var(--color-brand)] transition-colors cursor-pointer"
-                        >
-                          {t('editor.smartLayout.resetGlobal')}
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      {RHYTHM_OPTS.map(({ id, labelKey, descKey }) => {
-                        const isActive = effectiveRhythm === id;
-                        return (
-                          <button
-                            key={id}
-                            onClick={() => handleRhythmChange(id)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                              isActive
-                                ? 'border-[var(--color-brand)] bg-[var(--color-brand-bg)]'
-                                : 'border-transparent bg-white hover:border-[var(--color-border)]'
-                            }`}
-                          >
-                            <span className={`text-[11px] font-[500] ${isActive ? 'text-[var(--color-brand)]' : 'text-[var(--color-gray-700)]'}`}>{t(labelKey)}</span>
-                            <span className="block text-[9px] text-[var(--color-gray-400)]">{t(descKey)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 排版变化 */}
-                  <div className={selectedPageIdx == null ? 'opacity-40 pointer-events-none' : ''}>
-              {(() => {
-                const padW = padRef.current?.clientWidth ?? 220;
-                const dotX = ((biasX + 10) / 20) * padW;
-                const dotY = ((10 - biasY) / 20) * padW;
-                return (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-[600] text-[var(--color-gray-700)]">
-                        {t('editor.smartLayout.layoutVariation')}{selectedPageIdx != null ? t('editor.smartLayout.pageSuffix', { n: selectedPageIdx + 1 }) : ''}
-                      </span>
-                      <button onClick={() => { handleBiasChange('X', 0); handleBiasChange('Y', 0); }} className="text-[10px] text-[var(--color-gray-500)] border border-[var(--color-border)] rounded-full px-2 py-0.5 hover:text-[var(--color-brand)] hover:border-[var(--color-brand)] transition-colors cursor-pointer">{t('editor.smartLayout.centerReset')}</button>
-                    </div>
-                    <div
-                      ref={padRef}
-                      onMouseDown={onPadMouseDown}
-                      onDoubleClick={() => { handleBiasChange('X', 0); handleBiasChange('Y', 0); }}
-                      className="relative bg-[var(--color-gray-50)] rounded-xl border border-[var(--color-gray-200)] cursor-crosshair select-none w-full aspect-square"
-                      style={{ touchAction: 'none' }}
-                    >
-                      <div className="absolute top-1/2 left-0 right-0 border-t border-dashed border-[var(--color-gray-300)]" style={{ marginTop: -0.5 }} />
-                      <div className="absolute left-1/2 top-0 bottom-0 border-l border-dashed border-[var(--color-gray-300)]" style={{ marginLeft: -0.5 }} />
-                      <span className="absolute top-0 left-0 text-[8px] text-[var(--color-gray-400)] p-0.5">{t('editor.smartLayout.biasTop')}</span>
-                      <span className="absolute top-0 right-0 text-[8px] text-[var(--color-gray-400)] p-0.5">{t('editor.smartLayout.biasRight')}</span>
-                      <span className="absolute bottom-0 left-0 text-[8px] text-[var(--color-gray-400)] p-0.5">{t('editor.smartLayout.biasLeft')}</span>
-                      <span className="absolute bottom-0 right-0 text-[8px] text-[var(--color-gray-400)] p-0.5">{t('editor.smartLayout.biasBottom')}</span>
-                      <div
-                        ref={dotRef}
-                        className="absolute w-4 h-4 rounded-full bg-[var(--color-brand)] border-2 border-white shadow-[0_1px_3px_rgba(0,0,0,0.2)] cursor-grab active:cursor-grabbing"
-                        style={{ left: dotX - 8, top: dotY - 8, transition: 'none' }}
-                      />
-                    </div>
-                    <div className="text-[10px] text-[var(--color-gray-400)]">
-                      {t('editor.smartLayout.biasDisplay', {
-                        x: biasX > 0 ? t('editor.smartLayout.biasRightVal', { v: biasX.toFixed(1) }) : biasX < 0 ? t('editor.smartLayout.biasLeftVal', { v: biasX.toFixed(1) }) : t('editor.smartLayout.biasCenter'),
-                        y: biasY > 0 ? t('editor.smartLayout.biasTopVal', { v: biasY.toFixed(1) }) : biasY < 0 ? t('editor.smartLayout.biasBottomVal', { v: biasY.toFixed(1) }) : t('editor.smartLayout.biasCenter'),
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-                </div>
-            )}
-            </div>
-
 
             {/* 日期分组 */}
             <div>

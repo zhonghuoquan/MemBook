@@ -255,11 +255,13 @@ export function Toolbar({ onBack }: ToolbarProps) {
       <div className="w-px h-4 bg-[var(--color-gray-300)] shrink-0 mx-1" />
 
       {/* ↶ ↷ */}
-      <button data-no-drag className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-gray-500)] cursor-pointer hover:bg-white/50 hover:text-[var(--color-gray-700)] transition-colors" title={t('editor.tooltip.undo')} onClick={handleUndo}>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M5 5L2 8l3 3"/><path d="M2 8h8a4 4 0 0 1 0 8"/></svg>
+      <button data-no-drag className="flex items-center justify-center gap-1 h-8 px-2 rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-gray-500)] text-xs leading-none cursor-pointer hover:bg-white/50 hover:text-[var(--color-gray-700)] transition-colors" title={t('editor.tooltip.undo')} onClick={handleUndo}>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0"><path d="M5 5L2 8l3 3"/><path d="M2 8h8a4 4 0 0 1 0 8"/></svg>
+        {t('common.undo')}
       </button>
-      <button data-no-drag className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-gray-500)] cursor-pointer hover:bg-white/50 hover:text-[var(--color-gray-700)] transition-colors" title={t('editor.tooltip.redo')} onClick={handleRedo}>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M11 5l3 3-3 3"/><path d="M14 8H6a4 4 0 0 0 0 8"/></svg>
+      <button data-no-drag className="flex items-center justify-center gap-1 h-8 px-2 rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-gray-500)] text-xs leading-none cursor-pointer hover:bg-white/50 hover:text-[var(--color-gray-700)] transition-colors" title={t('editor.tooltip.redo')} onClick={handleRedo}>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0"><path d="M11 5l3 3-3 3"/><path d="M14 8H6a4 4 0 0 0 0 8"/></svg>
+        {t('common.redo')}
       </button>
       </>
       )}

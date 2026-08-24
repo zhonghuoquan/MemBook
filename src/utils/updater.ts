@@ -8,7 +8,7 @@
  *
  * 更新服务器需返回 JSON：
  * {
- *   "version": "1.1.0",
+ *   "version": "1.2.0",
  *   "pub_date": "2026-07-23T10:00:00Z",
  *   "notes": "更新说明",
  *   "platforms": {
@@ -125,9 +125,43 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   }
 }
 
-/** 取当前暂存（待下载/已下载）更新的展示信息，无则返回 null */
+/**
+ * 取当前暂存（待下载/已下载）更新的展示信息，无则返回 null */
 export function getPendingUpdateInfo(): UpdateInfo | null {
   return pendingUpdate ? toInfo(pendingUpdate) : null;
+}
+
+/** 手动检查的三种结果：无更新 / 有更新（可下载）/ 检查失败（网络等） */
+export type ManualCheckResult =
+  | { status: 'latest' }
+  | { status: 'update'; info: UpdateInfo }
+  | { status: 'error'; message: string };
+
+/**
+ * 手动检查是否有更新（用户主动触发，规避冷却期）。
+ * 与 checkForUpdate 不同：返回结果能区分「无更新 / 有更新 / 检查失败」，
+ * 供「关于」弹窗据实提示，避免把网络错误误报成「已是最新」。
+ * 非桌面端返回 error。
+ */
+export async function manualCheckForUpdate(): Promise<ManualCheckResult> {
+  if (!isTauri) return { status: 'error', message: '仅桌面端支持' };
+  try {
+    const update = await check({ timeout: 30000 });
+    if (!update) {
+      logger.info('[updater] 手动检查：当前已是最新版本');
+      return { status: 'latest' };
+    }
+    if (pendingUpdate && pendingUpdate !== update) {
+      pendingUpdate.close().catch(() => {});
+    }
+    pendingUpdate = update;
+    recordKnownVersion(update.version);
+    logger.info(`[updater] 手动检查：发现新版本 ${update.version}（当前 ${APP_VERSION}）`);
+    return { status: 'update', info: toInfo(update) };
+  } catch (e) {
+    logger.warn('[updater] 手动检查更新失败:', e);
+    return { status: 'error', message: (e as Error)?.message || String(e) };
+  }
 }
 
 /**

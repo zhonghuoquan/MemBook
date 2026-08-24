@@ -697,8 +697,8 @@ function ImportConfirmDialog({
   const { t } = useTranslation();
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onCancel} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-[var(--z-modal)] bg-black/40" onClick={onCancel} />
+      <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
         <div
           className="bg-white rounded-[var(--radius-xl)] shadow-[var(--shadow-lg)] p-6 max-w-md w-full mx-4 pointer-events-auto"
           onClick={(e) => e.stopPropagation()}
@@ -782,7 +782,7 @@ function OperationProgressOverlay({
 }) {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/45 backdrop-blur-sm">
       <div className="bg-white rounded-[var(--radius-xl)] shadow-[var(--shadow-lg)] p-6 w-[min(420px,90vw)] pointer-events-auto">
         <h3 className="text-[var(--text-body)] font-[600] text-[var(--color-gray-800)] mb-1">{title}</h3>
         <p className="text-[var(--text-body-sm)] text-[var(--color-text-secondary)] mb-4">{message}</p>

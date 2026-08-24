@@ -431,8 +431,8 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
   if (!albumSize) {
     return (
       <>
-        <div className="fixed inset-0 z-40 bg-black/40" style={{ pointerEvents: 'auto' }} onClick={onClose} />
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+        <div className="fixed inset-0 z-[var(--z-modal)] bg-black/40" style={{ pointerEvents: 'auto' }} onClick={onClose} />
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-2xl shadow-2xl p-8 pointer-events-auto">
             <p className="text-sm text-gray-500">{t('editor.smartLayout.createAlbumFirst')}</p>
             <div className="flex justify-center mt-4">
@@ -578,8 +578,8 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
   if (layoutResult.pages.length === 0) {
     return (
       <>
-        <div className="fixed inset-0 z-40 bg-black/40" style={{ pointerEvents: 'auto' }} onClick={onClose} />
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+        <div className="fixed inset-0 z-[var(--z-modal)] bg-black/40" style={{ pointerEvents: 'auto' }} onClick={onClose} />
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-2xl shadow-2xl p-8 pointer-events-auto">
             <p className="text-sm text-gray-500">{t('editor.smartLayout.pageTooSmall')}</p>
             <div className="flex justify-center mt-4">
@@ -597,8 +597,8 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px]" style={{ pointerEvents: 'auto' }} onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-[var(--z-modal)] bg-black/45 backdrop-blur-[2px]" style={{ pointerEvents: 'auto' }} onClick={onClose} />
+      <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
         <div
           ref={dialogRef}
           className="bg-white rounded-2xl shadow-2xl flex flex-row pointer-events-auto overflow-hidden"

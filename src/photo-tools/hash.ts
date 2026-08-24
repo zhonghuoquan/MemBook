@@ -23,10 +23,117 @@
 
 import type { PhotoFileInfo, DedupeGroup, DedupeResult, ToolProgress, SimilarGroup } from './types';
 import { logger } from '../utils/logger';
-import { computePHash, hammingDistance, DEFAULT_PHASH_THRESHOLD } from './perceptual-hash';
+import { hammingDistance, DEFAULT_PHASH_THRESHOLD, PHASH_BITS } from './perceptual-hash';
+import { computePHashSafe } from './phash-pool';
+import { mapWithConcurrency, yieldToMain } from './async-utils';
 
 /** 头部预筛读取字节数 (4KB) */
 const HEAD_SIZE = 4096;
+
+/**
+ * 二次质检拆组的单轮扫描上限：限定每轮最多与此数量的候选做距离比较，
+ * 避免单组上万张时 O(n²) 卡死，剩余候选转为独立子组。同时约束后续
+ * 组内两两距离计算（≤ 限值 + 1）的量级。
+ */
+const SPLIT_SCAN_LIMIT = 300;
+
+/**
+ * 多轮随机桶投影（随机 LSH）参数：
+ * pHash 为 64 位。旧实现把 64 位切成多段 4bit 小块 + 鸽巢原理，桶容量 ≈ M/16，
+ * 2 万张时候选对退化到 O(M²)=4 亿级，导致内存/时间爆炸而"中途消失无结果"。
+ * 本方案：每轮随机抽取 LSH_PROJ_BITS 个 bit 位拼成桶 key（桶容量 ≈ M/2^PROJ_BITS，
+ * 缩小成百倍），LSH_ROUNDS 轮多表 + 桶内精确 hamming 验证来补召回（少许漏检、可接受），
+ * 单桶候选再用 LSH_SAMPLE_MAX 采样上限，防极端连拍桶把单点拖垮。
+ */
+const LSH_ROUNDS = 8;
+const LSH_PROJ_BITS = 12;
+const LSH_SAMPLE_MAX = 64;
+
+/** 确定性伪随机（固定种子，保证同批结果稳定可复现） */
+function createDeterministicRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+/** 生成 LSH_ROUNDS×LSH_PROJ_BITS 个投影位下标（0..PHASH_BITS-1） */
+function buildProjectionBits(): number[] {
+  const rand = createDeterministicRandom(0x5eed);
+  const bits: number[] = [];
+  for (let i = 0; i < LSH_ROUNDS * LSH_PROJ_BITS; i++) {
+    bits.push(Math.floor(rand() * PHASH_BITS));
+  }
+  return bits;
+}
+
+/**
+ * 多轮随机桶投影：构建 LSH_ROUNDS 张哈希表，哈希值落入对应桶，返回候选对并回调 compare。
+ * 相比旧 4bit 小块 LSH，将候选对从 O(M²) 降至可控量级，并按批让出主线程，避免 2 万张卡死。
+ *
+ * @param uniqueHashes 去重后的 pHash 十六进制串数组
+ * @param compare 对候选对 (i,j) 做精确 hamming 判定并合并
+ */
+async function runRandomProjectionCompare(
+  uniqueHashes: string[],
+  compare: (i: number, j: number) => void,
+  onBatch?: (done: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const COMPARE_BATCH = 200;
+  const hashBig: bigint[] = uniqueHashes.map((h) => BigInt(`0x${h}`));
+  const projBits = buildProjectionBits();
+
+  // 建表：tables[r] = Map<桶key, hash下标[]>
+  const tables: Array<Map<number, number[]>> = [];
+  for (let r = 0; r < LSH_ROUNDS; r++) tables.push(new Map());
+  for (let idx = 0; idx < hashBig.length; idx++) {
+    const hb = hashBig[idx];
+    for (let r = 0; r < LSH_ROUNDS; r++) {
+      let key = 0;
+      const base = r * LSH_PROJ_BITS;
+      for (let b = 0; b < LSH_PROJ_BITS; b++) {
+        key = (key << 1) | Number((hb >> BigInt(projBits[base + b])) & 1n);
+      }
+      const arr = tables[r].get(key) ?? [];
+      arr.push(idx);
+      tables[r].set(key, arr);
+    }
+  }
+
+  const compared = new Set<string>(); // "minIdx,maxIdx" 去重，多表间避免重复计算
+  for (let b0 = 0; b0 < uniqueHashes.length; b0 += COMPARE_BATCH) {
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+    const bEnd = Math.min(b0 + COMPARE_BATCH, uniqueHashes.length);
+    for (let idx = b0; idx < bEnd; idx++) {
+      const hb = hashBig[idx];
+      for (let r = 0; r < LSH_ROUNDS; r++) {
+        let key = 0;
+        const base = r * LSH_PROJ_BITS;
+        for (let b = 0; b < LSH_PROJ_BITS; b++) {
+          key = (key << 1) | Number((hb >> BigInt(projBits[base + b])) & 1n);
+        }
+        const arr = tables[r].get(key);
+        if (!arr) continue;
+        // 单桶采样上限：只与紧随 idx 之后的 LSH_SAMPLE_MAX 个候选比较，
+        // 防极端连拍桶把单轮拖垮；跨多轮不同投影互补召回（少许漏检可接受）。
+        let considered = 0;
+        for (const otherIdx of arr) {
+          if (otherIdx <= idx) continue;
+          if (considered >= LSH_SAMPLE_MAX) break;
+          considered++;
+          const pairKey = `${idx},${otherIdx}`;
+          if (compared.has(pairKey)) continue;
+          compared.add(pairKey);
+          compare(idx, otherIdx);
+        }
+      }
+    }
+    onBatch?.(bEnd, uniqueHashes.length);
+    if (bEnd < uniqueHashes.length) await yieldToMain();
+  }
+}
 
 /**
  * 读取 ArrayBuffer 的指定范围
@@ -106,47 +213,7 @@ async function readPhotoData(
 
 // ── 并发读取辅助 ─────────────────────────────────────────
 
-/**
- * 并发执行异步任务（工作池模式）
- *
- * 维持固定数量的 worker 同时处理 items，避免逐个 await 造成的串行 IO。
- * 适用于文件读取等 IO 密集型场景（Tauri readFile / fetch 等）。
- *
- * @param items 待处理项
- * @param fn 单项处理函数（返回 Promise）
- * @param concurrency 并发数（默认 8）
- * @param onProgress 进度回调（已完成数, 总数）
- * @param signal 中止信号
- * @returns 结果数组（顺序与 items 一致）
- */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  fn: (item: T, index: number) => Promise<R>,
-  concurrency = 8,
-  onProgress?: (done: number, total: number) => void,
-  signal?: AbortSignal,
-): Promise<R[]> {
-  const total = items.length;
-  if (total === 0) return [];
-  const results: R[] = new Array(total);
-  let nextIndex = 0;
-  let doneCount = 0;
-
-  async function worker(): Promise<void> {
-    while (true) {
-      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-      const idx = nextIndex++;
-      if (idx >= total) break;
-      results[idx] = await fn(items[idx], idx);
-      doneCount++;
-      onProgress?.(doneCount, total);
-    }
-  }
-
-  const workerCount = Math.min(concurrency, total);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
-}
+// 注：mapWithConcurrency 已抽到 async-utils.ts 共享（hash/screenshot/organize 复用）
 
 // ── 保留优先级评分 ────────────────────────────────────────
 
@@ -337,6 +404,10 @@ export async function deduplicatePhotos(
   }
 
   // ══ Phase 3: 全量 SHA256（精确匹配，并发读取 + 缓存数据供 Phase 4 复用） ══
+  // 大批量优化：全量读取整张照片字节，内存占用大（单图数 MB × 并发数）。
+  // 降低并发数（4）限制峰值内存，避免上万张候选同时驻留内存导致 OOM 卡死；
+  // 读取/哈希均为异步 IO（await），主线程可自然让出，UI 保持响应。
+  const FULL_HASH_CONCURRENCY = 4;
   onProgress?.({ phase: 'full-hash', current: 0, total: headCandidates.length, message: '计算完整 SHA256 哈希...' });
   const fullHashGroups = new Map<string, PhotoFileInfo[]>();
   // 缓存 Phase 3 读取的完整文件数据，供 Phase 4 pHash 复用，避免重复读取
@@ -366,7 +437,7 @@ export async function deduplicatePhotos(
         logger.warn(`[dedupe] 全量哈希失败 ${p.name}:`, err);
       }
     },
-    8,
+    FULL_HASH_CONCURRENCY,
     (done, total) => {
       onProgress?.({
         phase: 'full-hash',
@@ -386,7 +457,7 @@ export async function deduplicatePhotos(
   for (const [hashFull, files] of fullHashGroups) {
     if (files.length < 2) continue;
 
-    const maxSize = Math.max(...files.map((f) => f.size));
+    const maxSize = files.reduce((max, f) => Math.max(max, f.size), -Infinity);
     // 找到保留优先级最高的文件
     let bestIdx = 0;
     let bestScore = -Infinity;
@@ -509,7 +580,7 @@ async function runVisualPhase(
           const result = await readPhotoData(p);
           data = result.data;
         }
-        const phash = await computePHash(data);
+        const phash = await computePHashSafe(data);
         if (phash) {
           phashMap.set(p.id, phash);
         }
@@ -581,67 +652,28 @@ async function runVisualPhase(
   const useLsh = numLshChunks >= 2 && uniqueHashes.length > 1;
 
   if (useLsh) {
-    // 计算各 LSH chunk 的边界 [start, end)
-    const chunkLen = Math.floor(16 / numLshChunks);
-    const remainder = 16 % numLshChunks;
-    const chunkBoundaries: Array<[number, number]> = [];
-    let pos = 0;
-    for (let i = 0; i < numLshChunks; i++) {
-      const size = chunkLen + (i < remainder ? 1 : 0);
-      if (size > 0) {
-        chunkBoundaries.push([pos, pos + size]);
-        pos += size;
-      }
-    }
-
-    // 为每个 chunk 索引建倒排表 Map<chunkKey, hashIndex[]>
-    const lshIndexes: Array<Map<string, number[]>> = chunkBoundaries.map(() => new Map());
-    for (let idx = 0; idx < uniqueHashes.length; idx++) {
-      const h = uniqueHashes[idx];
-      for (let c = 0; c < chunkBoundaries.length; c++) {
-        const [start, end] = chunkBoundaries[c];
-        const key = h.slice(start, end);
-        const map = lshIndexes[c];
-        const arr = map.get(key) ?? [];
-        arr.push(idx);
-        map.set(key, arr);
-      }
-    }
-
-    // 遍历每个 hash，通过 LSH 找候选对，仅对候选对计算汉明距离
-    const compared = new Set<string>(); // "minIdx,maxIdx" 去重
-    for (let idx = 0; idx < uniqueHashes.length; idx++) {
-      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-      const h = uniqueHashes[idx];
-      for (let c = 0; c < chunkBoundaries.length; c++) {
-        const [start, end] = chunkBoundaries[c];
-        const key = h.slice(start, end);
-        const arr = lshIndexes[c].get(key);
-        if (!arr) continue;
-        for (const otherIdx of arr) {
-          if (otherIdx <= idx) continue;
-          const pairKey = `${idx},${otherIdx}`;
-          if (compared.has(pairKey)) continue;
-          compared.add(pairKey);
-          const dist = hammingDistance(h, uniqueHashes[otherIdx]);
-          if (dist <= threshold) {
-            union(
-              phashBuckets.get(uniqueHashes[idx])![0].id,
-              phashBuckets.get(uniqueHashes[otherIdx])![0].id,
-            );
-          }
+    // 多轮随机桶投影：候选对从 O(M²) 降至可控量级（防 2 万张时候选对爆炸"中途消失"）。
+    // 鸽巢原理保证被旧 4bit 小块 LSH 覆盖的代表查不遗漏，这里以少量漏检换取速度（去重阈小，召回足）。
+    await runRandomProjectionCompare(
+      uniqueHashes,
+      (i, j) => {
+        const dist = hammingDistance(uniqueHashes[i], uniqueHashes[j]);
+        if (dist <= threshold) {
+          union(
+            phashBuckets.get(uniqueHashes[i])![0].id,
+            phashBuckets.get(uniqueHashes[j])![0].id,
+          );
         }
-      }
-      // 定期报告进度（避免比对阶段 UI 假死）
-      if ((idx + 1) % 50 === 0 || idx === uniqueHashes.length - 1) {
+      },
+      (done) =>
         onProgress?.({
           phase: 'phash',
-          current: idx + 1,
+          current: done,
           total: uniqueHashes.length,
-          message: `相似度比对 ${idx + 1}/${uniqueHashes.length}（LSH 候选 ${compared.size} 对）`,
-        });
-      }
-    }
+          message: `相似度比对 ${done}/${uniqueHashes.length}（LSH 候选）`,
+        }),
+      signal,
+    );
   } else {
     // Fallback: O(M²) 全比较（threshold 过大或候选过少时）
     const bucketList = uniqueHashes.map((h) => ({ hash: h, photos: phashBuckets.get(h)! }));
@@ -694,7 +726,7 @@ async function runVisualPhase(
       }
     }
 
-    const maxSize = Math.max(...files.map((f) => f.size));
+    const maxSize = files.reduce((max, f) => Math.max(max, f.size), -Infinity);
     // 找到保留优先级最高的文件
     let bestIdx = 0;
     let bestScore = -Infinity;
@@ -769,6 +801,11 @@ export interface FindSimilarOptions {
   maxDistance?: number;
   /** 读取照片数据 */
   readData?: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  /**
+   * 失败统计回调：单张照片读取/解码失败（无法计算 pHash）时累计，
+   * 分析不中断，完成后通过 onFailure(failedCount) 告知调用方。
+   */
+  onFailure?: (failedCount: number) => void;
 }
 
 /**
@@ -790,7 +827,7 @@ export async function findSimilarPhotos(
   photos: PhotoFileInfo[],
   options: FindSimilarOptions = {},
 ): Promise<SimilarGroup[]> {
-  const { onProgress, signal } = options;
+  const { onProgress, signal, onFailure } = options;
   const minDist = options.minDistance ?? 6;
   const maxDist = options.maxDistance ?? 15;
   const readData = options.readData;
@@ -807,6 +844,7 @@ export async function findSimilarPhotos(
   const photoById = new Map<string, PhotoFileInfo>();
 
   let doneCount = 0;
+  let failedCount = 0; // 读取/解码失败的张数（跳过不中断）
   await mapWithConcurrency(
     photos,
     async (p) => {
@@ -814,13 +852,18 @@ export async function findSimilarPhotos(
       try {
         const data = await readData(p);
         if (data) {
-          const phash = await computePHash(data);
+          const phash = await computePHashSafe(data);
           if (phash) {
             phashMap.set(p.id, phash);
             photoById.set(p.id, p);
+          } else {
+            failedCount++; // 解码失败，phash 为空 → 视为失败跳过
           }
+        } else {
+          failedCount++; // 读取失败，无数据 → 视为失败跳过
         }
       } catch (err) {
+        failedCount++; // 读取异常 → 视为失败跳过
         logger.warn(`[findSimilar] pHash 计算失败 ${p.name}:`, err);
       }
       doneCount++;
@@ -863,70 +906,46 @@ export async function findSimilarPhotos(
   const numLshChunks = Math.min(maxDist + 1, 16);
   const useLsh = numLshChunks >= 2 && uniqueHashes.length > 1;
 
+  // 大批量比对批大小与进度回调（LSH / O(M²) 回退共用）
+  const COMPARE_BATCH = 200;
+  const updateCompareProgress = (done: number) => {
+    onProgress?.({ phase: 'compare', current: done, total: uniqueHashes.length, message: `相似度比对 ${done}/${uniqueHashes.length}` });
+  };
+
   if (useLsh) {
-    const chunkLen = Math.floor(16 / numLshChunks);
-    const remainder = 16 % numLshChunks;
-    const chunkBoundaries: Array<[number, number]> = [];
-    let pos = 0;
-    for (let i = 0; i < numLshChunks; i++) {
-      const size = chunkLen + (i < remainder ? 1 : 0);
-      if (size > 0) { chunkBoundaries.push([pos, pos + size]); pos += size; }
-    }
-
-    const lshIndexes: Array<Map<string, number[]>> = chunkBoundaries.map(() => new Map());
-    for (let idx = 0; idx < uniqueHashes.length; idx++) {
-      const h = uniqueHashes[idx];
-      for (let c = 0; c < chunkBoundaries.length; c++) {
-        const [start, end] = chunkBoundaries[c];
-        const key = h.slice(start, end);
-        const arr = lshIndexes[c].get(key) ?? [];
-        arr.push(idx);
-        lshIndexes[c].set(key, arr);
-      }
-    }
-
-    const compared = new Set<string>();
-    for (let idx = 0; idx < uniqueHashes.length; idx++) {
-      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-      const h = uniqueHashes[idx];
-      for (let c = 0; c < chunkBoundaries.length; c++) {
-        const [start, end] = chunkBoundaries[c];
-        const key = h.slice(start, end);
-        const arr = lshIndexes[c].get(key);
-        if (!arr) continue;
-        for (const otherIdx of arr) {
-          if (otherIdx <= idx) continue;
-          const pairKey = `${idx},${otherIdx}`;
-          if (compared.has(pairKey)) continue;
-          compared.add(pairKey);
-          const dist = hammingDistance(h, uniqueHashes[otherIdx]);
-          // 相似但不重复：距离在 (minDist, maxDist] 范围内
-          if (dist > minDist && dist <= maxDist) {
-            const idA = hashToPhotos.get(uniqueHashes[idx])![0].id;
-            const idB = hashToPhotos.get(uniqueHashes[otherIdx])![0].id;
-            union(idA, idB);
-          }
-        }
-      }
-      if ((idx + 1) % 50 === 0 || idx === uniqueHashes.length - 1) {
-        onProgress?.({ phase: 'compare', current: idx + 1, total: uniqueHashes.length, message: `相似度比对 ${idx + 1}/${uniqueHashes.length}` });
-      }
-    }
-  } else {
-    // Fallback: O(M²) 全比较
-    for (let i = 0; i < uniqueHashes.length; i++) {
-      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-      for (let j = i + 1; j < uniqueHashes.length; j++) {
+    // 多轮随机桶投影：解决 2 万张时候选对 O(M²) 爆炸导致"进度条中途消失无结果"。
+    // 以少量漏检（少许漏检可接受）换取速度，批间让出主线程保证 UI 响应。
+    await runRandomProjectionCompare(
+      uniqueHashes,
+      (i, j) => {
         const dist = hammingDistance(uniqueHashes[i], uniqueHashes[j]);
+        // 相似但不重复：距离在 (minDist, maxDist] 范围内
         if (dist > minDist && dist <= maxDist) {
           const idA = hashToPhotos.get(uniqueHashes[i])![0].id;
           const idB = hashToPhotos.get(uniqueHashes[j])![0].id;
           union(idA, idB);
         }
+      },
+      (done) => updateCompareProgress(done),
+      signal,
+    );
+  } else {
+    // Fallback: O(M²) 全比较（也按批处理让出主线程）
+    for (let b0 = 0; b0 < uniqueHashes.length; b0 += COMPARE_BATCH) {
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+      const bEnd = Math.min(b0 + COMPARE_BATCH, uniqueHashes.length);
+      for (let i = b0; i < bEnd; i++) {
+        for (let j = i + 1; j < uniqueHashes.length; j++) {
+          const dist = hammingDistance(uniqueHashes[i], uniqueHashes[j]);
+          if (dist > minDist && dist <= maxDist) {
+            const idA = hashToPhotos.get(uniqueHashes[i])![0].id;
+            const idB = hashToPhotos.get(uniqueHashes[j])![0].id;
+            union(idA, idB);
+          }
+        }
       }
-      if ((i + 1) % 50 === 0 || i === uniqueHashes.length - 1) {
-        onProgress?.({ phase: 'compare', current: i + 1, total: uniqueHashes.length, message: `相似度比对 ${i + 1}/${i + 1}` });
-      }
+      updateCompareProgress(bEnd);
+      if (bEnd < uniqueHashes.length) await yieldToMain();
     }
   }
 
@@ -943,22 +962,37 @@ export async function findSimilarPhotos(
    * 二次质检拆组：并查集通过传递性合并（A≈B、B≈C → A、B、C 同组），
    * 但 A 与 C 的 pHash 距离可能远超 maxDist（链式蔓延）。
    * 对每组按"与基准成员距离 ≤ maxDist"贪心拆分，保证组内任意成员与基准的差异在合理范围。
+   *
+   * 性能保护：单组上万张（同场景连拍大量聚组）时，朴素实现每轮与剩余全部
+   * 两两比会退化 O(n²) 卡死。此处限定每轮最多扫描 SPLIT_SCAN_LIMIT 个候选，
+   * 剩余部分转为独立子组，整体复杂度 O(n·limit)，避免极端大组拖垮分析。
    */
-  function splitRunawayGroup(ids: string[]): string[][] {
+  async function splitRunawayGroup(ids: string[]): Promise<string[][]> {
     const remaining = [...ids];
     const result: string[][] = [];
+    // 每轮处理 SPARSE_BATCH 个基准后就 yield 让出主线程，避免上万张的逐轮扫描冻结 UI
+    let batchDone = 0;
     while (remaining.length > 0) {
       const base = remaining.shift()!;
       const group: string[] = [base];
       const rest: string[] = [];
-      for (const id of remaining) {
+      // 只与"候选样本"比较：大组时采样前 SPLIT_SCAN_LIMIT 个，其余直接留待下轮
+      const scanCount = Math.min(remaining.length, SPLIT_SCAN_LIMIT);
+      for (let i = 0; i < scanCount; i++) {
+        const id = remaining[i];
         const d = hammingDistance(phashMap.get(base)!, phashMap.get(id)!);
         if (d <= maxDist) group.push(id);
         else rest.push(id);
       }
+      for (let i = scanCount; i < remaining.length; i++) {
+        rest.push(remaining[i]);
+      }
       result.push(group);
       remaining.length = 0;
-      remaining.push(...rest);
+      for (const id of rest) remaining.push(id);
+      batchDone++;
+      // 每处理 COMPARE_BATCH 个基准让出一次主线程
+      if (batchDone % COMPARE_BATCH === 0 && remaining.length > 0) await yieldToMain();
     }
     return result;
   }
@@ -969,27 +1003,33 @@ export async function findSimilarPhotos(
   for (const [, ids] of ufGroups) {
     if (ids.length < 2) continue;
     // 二次质检：拆掉链式蔓延的组（组内可能出现差异过大的照片）
-    for (const subIds of splitRunawayGroup(ids)) {
+    for (const subIds of await splitRunawayGroup(ids)) {
       if (subIds.length < 2) continue;
       const groupPhotos = subIds.map((id) => photoById.get(id)!);
 
       // 计算组内两两距离（直接用 pHash 全量计算，覆盖间接合并的成员对）
+      // 超大相似组（同场景连拍上万张）时按行分批计算并让出主线程，避免 O(n²) 同步卡死
       let maxDistInGroup = 0;
       let sumDist = 0;
       let distCount = 0;
-      for (let i = 0; i < subIds.length; i++) {
-        for (let j = i + 1; j < subIds.length; j++) {
-          const d = hammingDistance(phashMap.get(subIds[i])!, phashMap.get(subIds[j])!);
-          maxDistInGroup = Math.max(maxDistInGroup, d);
-          sumDist += d;
-          distCount++;
+      for (let i0 = 0; i0 < subIds.length; i0 += COMPARE_BATCH) {
+        const iEnd = Math.min(i0 + COMPARE_BATCH, subIds.length);
+        for (let i = i0; i < iEnd; i++) {
+          for (let j = i + 1; j < subIds.length; j++) {
+            const d = hammingDistance(phashMap.get(subIds[i])!, phashMap.get(subIds[j])!);
+            if (d > maxDistInGroup) maxDistInGroup = d;
+            sumDist += d;
+            distCount++;
+          }
         }
+        // 非最终行时让出主线程，保持 UI 响应与进度刷新
+        if (iEnd < subIds.length) await yieldToMain();
       }
 
       // 选最佳保留项（复用 computeKeepScore 逻辑）
       let bestIdx = 0;
       let bestScore = -Infinity;
-      const maxFileSize = Math.max(...groupPhotos.map((p) => p.size));
+      const maxFileSize = groupPhotos.reduce((max, p) => Math.max(max, p.size), -Infinity);
       for (let i = 0; i < groupPhotos.length; i++) {
         const score = computeKeepScore(groupPhotos[i], maxFileSize);
         if (score > bestScore) { bestScore = score; bestIdx = i; }
@@ -1006,5 +1046,6 @@ export async function findSimilarPhotos(
   }
 
   onProgress?.({ phase: 'done', current: similarGroups.length, total: similarGroups.length, message: `找到 ${similarGroups.length} 组相似照片` });
+  if (failedCount > 0) onFailure?.(failedCount);
   return similarGroups;
 }

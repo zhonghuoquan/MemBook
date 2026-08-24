@@ -83,7 +83,7 @@ export function ActivationDialog({ open, onClose, hint }: ActivationDialogProps)
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--color-surface-overlay)] backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[calc(var(--z-modal)+1)] flex items-center justify-center bg-[var(--color-surface-overlay)] backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div

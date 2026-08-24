@@ -21,6 +21,10 @@ export const MAX_STROKE_WIDTH = 40;
 /** 封面页默认书脊宽度（mm）：作为页面左侧的物理扩展区，用户可在其上添加文字/形状 */
 export const DEFAULT_SPINE_WIDTH_MM = 18;
 
+/** 书脊宽度可调范围（mm，封面设置 / 导出对话框共用，禁止各自硬编码导致不一致） */
+export const SPINE_WIDTH_MIN_MM = 6;
+export const SPINE_WIDTH_MAX_MM = 60;
+
 /** 书脊背面与封面正面之间的间隙（mm），模拟装订折痕厚度，封面页面呈现为两块 */
 export const SPINE_GAP_MM = 6;
 

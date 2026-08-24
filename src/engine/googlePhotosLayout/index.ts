@@ -42,6 +42,9 @@ import {
   isColorConflictRef,
   generateRowsForSpec,
   detectSpanOpportunities,
+  derivePageSeed,
+  seededPick,
+  seededBool,
   MAX_ASPECT,
   MIN_ASPECT,
 } from './primitives';
@@ -273,7 +276,18 @@ function computeLayoutParams(
       default: return avgAspect < 0.85 ? 1.2 : avgAspect > 1.15 ? 1.8 : 1.5;
     }
   })();
+  // 布局 seed：统一为“显式 seed 或按内容派生”，下放给行数抖动/行分组/跨行等决策，保证多处一致
+  const layoutSeed = seed !== undefined
+    ? Math.floor(seed) >>> 0
+    : derivePageSeed(photos, undefined, pageIdx ?? 0);
+
   let rows = Math.max(1, Math.ceil(photoCount / densityDivisor));
+
+  // ≥5 图：seed 驱动行数上下抖动（-1/0/+1）。同方向大页若行数恒定，
+  // seed 只能影响竖图左右/跨行，骨架变化有限；抖动让「随机排版 / 换方案」翻出疏密不同的骨架。
+  if (photoCount >= 5) {
+    rows = Math.max(1, rows + (seededPick(layoutSeed, 91, 3) - 1));
+  }
 
   const allowSpan = true;  // 始终开放跨行检测，由 heroIds 内部筛选候选项
 
@@ -286,7 +300,7 @@ function computeLayoutParams(
     const allPortrait = photos.every(p => p.width > 0 && p.height > 0 && p.width / p.height < 0.85);
     if (allLandscape || allPortrait || avgAspect > 1.15 || avgAspect < 0.85) {
       rows = 3;
-    } else if (photos[0].id.charCodeAt(1) % 3 === 0) {
+    } else if (seededPick(seed ?? derivePageSeed(photos, undefined, pageIdx ?? 0), 77, 3) === 0) {
       rows = 3;
     }
   }
@@ -304,14 +318,14 @@ function computeLayoutParams(
       : selectTierPattern(photoCount, rows, hasOutstanding, rhythm, seed, photos, recentPatterns)
   );
 
-  return { rows, tierPattern, allowSpan };
+  return { rows, tierPattern, allowSpan, seed: layoutSeed };
 }
 
 /**
- * P1-2 叙事节奏驱动的 pattern 选择：
- * 先用叙事池限定候选，再走原 selectTierPattern 的内容驱动分支细化。
- * 叙事池是"软约束"——若内容驱动分支选出的 pattern 不在叙事池中，
- * 仍接受内容驱动结果（避免"开场段全是竖图却强制 opening"的不合理情况）。
+ * P1-2 叙事节奏驱动的 pattern 选择（2026-08-22 改为叙事段位优先）：
+ * 直接在当前叙事段位（开场/发展/高潮/收尾）的 pattern 池中按行数兼容选取，
+ * 让「排版节奏·智能模式」呈现出明显的阶段变化（开场强冲击→高潮大图→收尾柔束），
+ * 而非被内容驱动选择完全短路。内容驱动仅在叙事池无行数兼容项时才兜底返回。
  */
 function selectTierPatternWithNarrative(
   N: number,
@@ -322,20 +336,15 @@ function selectTierPatternWithNarrative(
   recentPatterns: Set<TierPattern> | undefined,
   albumProgress: number,
 ): TierPattern {
-  // 先走原内容驱动选择
-  const contentDriven = selectTierPattern(N, rows, hasOutstanding, 'auto', seed, photos, recentPatterns);
-  // 拿到当前叙事段位的候选池
+  // 1. 叙事池过滤出行数兼容的候选（叙事段位是硬约束）
   const narrativePool = getNarrativePool(albumProgress);
-  // 若内容驱动结果已在叙事池中，直接采用
-  if (narrativePool.includes(contentDriven)) return contentDriven;
-  // 否则用叙事池过滤行数兼容的 pattern，从中选一个未用过的
   const filtered = filterPatternsByRows(narrativePool, rows);
   if (filtered.length > 0) {
     const idx = seed !== undefined ? Math.abs(seed % 100) : N;
     return pickFromPool(filtered, idx, recentPatterns);
   }
-  // 叙事池过滤后为空（行数不兼容），回退内容驱动结果
-  return contentDriven;
+  // 2. 叙事池过滤后为空（当前段位无行数兼容项）→ 内容驱动兜底
+  return selectTierPattern(N, rows, hasOutstanding, 'auto', seed, photos, recentPatterns);
 }
 
 function buildPageSpecs(scored: PhotoScore[], config: GooglePhotosConfig): PageSpec[] {
@@ -390,8 +399,21 @@ function buildPageSpecs(scored: PhotoScore[], config: GooglePhotosConfig): PageS
       continue;
     }
 
+    // auto 密度（2026-08-22）：为超大日期组预生成「逐页疏密曲线」，
+    // 首页少放 + 后续 ±1 起伏 + 收尾收敛，消除整册恒定每页数的单一感。
+    // 种子优先取本组起始页的页级 seed（A/B/C 换方案 / 随机排版注入的 seed 均落到此处），
+    // 使切片疏密随方案版本变化，否则曲线只跟内容走、换方案密度不变。
+    const autoSeq = density === 'auto'
+      ? buildAutoDensityCounts(
+          group,
+          config.pageOverrides?.get(specs.length)?.seed ?? derivePageSeed(group.map(s => s.photo), undefined, specs.length),
+        )
+      : null;
+
     let idx = 0;
-    const firstCount = Math.min(density === 'large' ? 2 : perPage - 1, N);
+    const firstCount = autoSeq
+      ? autoSeq[0]
+      : Math.min(density === 'large' ? 2 : perPage - 1, N);
     const firstPhotos = group.slice(idx, idx + firstCount).map(s => s.photo);
     const firstProgress = computeProgress();
     const firstLayout = computeLayoutParams(firstPhotos, config, group.slice(idx, idx + firstCount), specs.length, recentPatterns, firstProgress);
@@ -400,24 +422,31 @@ function buildPageSpecs(scored: PhotoScore[], config: GooglePhotosConfig): PageS
     processedPhotos += firstCount;
     idx += firstCount;
 
+    let seqPos = autoSeq ? 1 : -1;
     while (idx < N) {
       const rem = N - idx;
-      const tl = tailLimit(density);
-      if (rem <= Math.max(2, tl)) {
-        const tailPhotos = group.slice(idx).map(s => s.photo);
-        const tailProgress = computeProgress();
-        const tailLayout = computeLayoutParams(tailPhotos, config, group.slice(idx), specs.length, recentPatterns, tailProgress);
-        markPatternUsed(recentPatterns, tailLayout.tierPattern);
-        specs.push({ layout: tailLayout, photos: tailPhotos, scoredPhotos: group.slice(idx) });
-        processedPhotos += rem;
-        break;
+
+      // 非 auto（或曲线已耗尽）：走固定尾限分页
+      if (!autoSeq) {
+        const tl = tailLimit(density);
+        if (rem <= Math.max(2, tl)) {
+          const tailPhotos = group.slice(idx).map(s => s.photo);
+          const tailProgress = computeProgress();
+          const tailLayout = computeLayoutParams(tailPhotos, config, group.slice(idx), specs.length, recentPatterns, tailProgress);
+          markPatternUsed(recentPatterns, tailLayout.tierPattern);
+          specs.push({ layout: tailLayout, photos: tailPhotos, scoredPhotos: group.slice(idx) });
+          processedPhotos += rem;
+          break;
+        }
       }
 
-      // auto 模式：每页动态调整
+      // auto 模式：按疏密曲线逐页取数；曲线耗尽回退到内容基线 perPage
       // P0-1 修复：原代码 `Math.max(2, rem - 2)` 是空语句（计算结果未赋值）
       // 原意是当剩余照片减去本页后只剩 1 张时，缩小本页容量把那 1 张并入，避免尾页只有 1 张
-      let count = density === 'auto' ? autoPageCount(group.slice(idx), rem) : Math.min(perPage, rem);
+      let count = autoSeq ? (autoSeq[seqPos] ?? rem) : Math.min(perPage, rem);
+      if (autoSeq) seqPos++;
       if (rem - count <= 1 && count >= 3) count = Math.max(2, rem - 2);
+      count = Math.max(2, Math.min(count, rem));
       const pagePhotos = group.slice(idx, idx + count).map(s => s.photo);
       const pageProgress = computeProgress();
       const pageLayout = computeLayoutParams(pagePhotos, config, group.slice(idx, idx + count), specs.length, recentPatterns, pageProgress);
@@ -491,6 +520,26 @@ function planCrossPageRhythm(
   let lastHeroColor = getHeroContentInfo(specs[0]);
   let sameCount = 0;
 
+  // P1-fix：跨页 hero 面积强弱节奏——页面级 hero 相位系数。
+  // 背景：pattern 池的 hero 倍率分布严重偏斜（强档 16/20、弱档仅 mosaic 1 个），
+  // 早期"换 pattern 调强弱"方案实际退化为 强↔1.5 的机械摆动（且只有 alternate 可换）。
+  // 现改为直接给每页分配 heroPhase：hero 行高 × 相位（fillPage 等比归一化后相对差保留），
+  // 不动 tierPattern（不打乱模式多样性/位置去重/色彩冲突逻辑）。
+  // 分配策略：strong/calm 交替为骨架 + 页内内容质量微调 + seed 扰动防机械 ABAB。
+  specs.forEach((spec, i) => {
+    const phaseSeed = derivePageSeed(spec.photos, spec.layout.seed, i);
+    const hasOutstanding = spec.scoredPhotos.some(s => s.score >= 8);
+    const wantStrong = i % 2 === 0;
+    let phase = wantStrong ? 1.18 : 0.85;
+    // 内容微调：杰出照片页再抬一档（值得放大），普通内容页再压一档（衬托）
+    if (hasOutstanding && wantStrong) phase = 1.24;
+    if (!hasOutstanding && !wantStrong) phase = 0.8;
+    // seed 扰动：约 20% 概率调制幅度（强弱侧不变）——避免整册严格等幅 ABAB 的机械感，
+    // 同时保证相邻页侧别仍交替（扰动不换侧，不会出现 3 页连续同侧）
+    if (seededBool(phaseSeed, 211, 0.2)) phase = phase > 1 ? 1.06 : 0.94;
+    spec.layout.heroPhase = phase;
+  });
+
   for (let i = 1; i < specs.length; i++) {
     const spec = specs[i];
     const currentPlacement = getHeroPlacement(spec.layout.tierPattern);
@@ -545,25 +594,55 @@ function planCrossPageRhythm(
   return specs;
 }
 
-/** 智能密度：根据内容质量+宽高比+位置决定每页照片数 */
+/** 智能密度：根据内容质量（评分=清晰/人脸/分辨率）+宽高比+位置决定每页照片数 */
 function autoPerPage(scored: PhotoScore[]): number {
   const N = scored.length;
   const photos = scored.map(s => s.photo);
   const avgAspect = N > 0 ? photos.reduce((s, p) => s + (p.width > 0 && p.height > 0 ? p.width / p.height : 1), 0) / N : 1.5;
-  const hasOutstanding = scored.some(s => s.score >= 8);
+  const outstanding = scored.filter(s => s.score >= 8);
+  const strong = scored.filter(s => s.score >= 6);
+  const strongRatio = N > 0 ? strong.length / N : 0;
 
-  if (hasOutstanding && N <= 4) return 3;       // 杰出照片 → 2-3张/页
+  // 强图（清晰/含人脸/高分辨率）占比越高 → 每页越少放，给大图更多呼吸空间，避免“好东西被淹没”
+  if (strongRatio >= 0.75) return 3;            // 几乎全是强图 → 稀疏，突出每一张
+  if (strongRatio >= 0.5 && N <= 6) return 4;   // 强图过半 → 稍稀疏
+  if (outstanding.length > 0 && N <= 4) return 3; // 有杰出照片 → 突出主角
   if (avgAspect < 0.85 && N >= 3) return 4;     // 竖图为主 → 3-4张/页
   if (avgAspect > 1.15 && N >= 8) return 6;     // 横图大量 → 5-6张/页
   return 5;                                       // 默认 4-5张/页
 }
 
-/** auto 模式下每页动态照片数 */
-function autoPageCount(group: PhotoScore[], remaining: number): number {
-  const perPage = autoPerPage(group);
-  // 日期组首页少放
-  if (remaining === group.length) return Math.min(perPage - 1, remaining);
-  return Math.min(perPage, remaining);
+/**
+ * auto 密度「页级疏密曲线」（2026-08-22）：为单个日期组生成逐页照片数序列。
+ *  - 内容基线：autoPerPage 决定 common（强图占比越高越稀疏），曲线在 common±1 间起伏；
+ *  - 首页少放一档（开场留白），随页码 +1/-1 摆动，接近收尾收敛到整页收掉，避免尾页单薄；
+ *  - 序列累和恰为 N，不丢照片；seed 保证确定性 + 换 seed 可翻出不同疏密节奏。
+ */
+function buildAutoDensityCounts(group: PhotoScore[], seed: number): number[] {
+  const N = group.length;
+  const common = Math.max(3, Math.min(6, autoPerPage(group)));
+  const counts: number[] = [];
+  let remaining = N;
+  let pageIdx = 0;
+  while (remaining > 0 && pageIdx < 100) {
+    let target: number;
+    if (pageIdx === 0) {
+      target = common - 1; // 首页少放一档
+    } else {
+      target = seededBool(seed, 200 + pageIdx * 37, 0.5) ? common + 1 : common - 1; // +1/-1 起伏
+    }
+    // 收尾收敛：剩余 ≤ common 时整页收掉，不再起伏，避免尾页过少/反复横跳
+    if (remaining <= common) target = remaining;
+    target = Math.max(2, Math.min(target, remaining));
+    // 防孤立单图尾页：本页后只剩 1 张时并进本页
+    if (remaining - target === 1 && target >= 3) target -= 1;
+    target = Math.max(2, Math.min(target, remaining));
+    counts.push(target);
+    remaining -= target;
+    pageIdx++;
+  }
+  if (remaining > 0) counts.push(remaining); // 防御性兜底，normally 不会触发
+  return counts;
 }
 
 /* ═══════════════════════════════════════
@@ -946,7 +1025,7 @@ export function googlePhotosLayout(
   const contentHeight = pageHeight - margin.top - margin.bottom;
 
   if (contentWidth <= 0 || contentHeight <= 0 || photos.length === 0) {
-    return { pages: [], internalRows: [], layoutRows: [], tierPatterns: [], totalPhotos: 0, totalPages: 0 };
+    return { pages: [], internalRows: [], layoutRows: [], tierPatterns: [], heroPhases: [], totalPhotos: 0, totalPages: 0 };
   }
 
   // 1. 评分（P0-2 集成：传入 contentInfoCache 启用人脸维度）
@@ -963,11 +1042,13 @@ export function googlePhotosLayout(
   const internalRows: Array<{ photoIds: string[]; rowHeight: number }[]> = [];
   const layoutRows: GooglePhotosLayoutResult['layoutRows'] = [];
   const tierPatterns: TierPattern[] = [];
+  const heroPhases: number[] = [];
   const pages = pageSpecs.map((spec, specIdx) => {
-    const rows = generateRowsForSpec(spec, contentWidth, gap);
+    const pageSeed = derivePageSeed(spec.photos, spec.layout.seed, specIdx);
+    const rows = generateRowsForSpec(spec, contentWidth, gap, specIdx);
     const bestScore = Math.max(...spec.scoredPhotos.map(s => s.score));
     const heroIds = new Set(spec.scoredPhotos.filter(s => s.score >= bestScore).map(s => s.photo.id));
-    const spanned = spec.layout.allowSpan ? detectSpanOpportunities(rows, gap, heroIds, specIdx) : rows;
+    const spanned = spec.layout.allowSpan ? detectSpanOpportunities(rows, gap, heroIds, specIdx, pageSeed) : rows;
     const flatIds: { photoIds: string[]; rowHeight: number }[] = [];
     const lr: typeof layoutRows[number] = [];
     for (const item of spanned) {
@@ -993,6 +1074,7 @@ export function googlePhotosLayout(
     internalRows.push(flatIds);
     layoutRows.push(lr);
     tierPatterns.push(spec.layout.tierPattern);
+    heroPhases.push(spec.layout.heroPhase ?? 1);
     // 单页偏压覆盖：仅从 pageOverrides 读取，无条目则 0（其他页不受影响）
     const pageOverride = config.pageOverrides?.get(specIdx);
     const bx = pageOverride?.biasX ?? 0;
@@ -1005,6 +1087,7 @@ export function googlePhotosLayout(
     internalRows,
     layoutRows,
     tierPatterns,
+    heroPhases,
     totalPhotos: photos.length,
     totalPages: pages.length,
   };
@@ -1035,10 +1118,14 @@ export function generateMultipleLayouts(
 
   for (let i = 0; i < versionCount; i++) {
     const seed = i * 37 + 11; // 不同的 seed 产生不同模式选择
-    // 为每页注入 seed，影响 selectTierPattern 的 idx（产生版本差异）
-    const pageOverrides = new Map<number, PageOverride>();
+    // 为每页注入 seed，影响 selectTierPattern 的 idx（产生版本差异）。
+    // 2026-08-22：合并用户已有的单页覆盖（density/rhythm/tierPattern/biasX/biasY），
+    // 并尊重用户手动注入的页级 seed——已有 seed 的页面不再被版本 seed 覆盖，
+    // 否则「随机排版」刚注入的 seed 会被换方案重算清掉，骨架变化无法保留。
+    const pageOverrides = new Map<number, PageOverride>(config.pageOverrides ?? []);
     for (let p = 0; p < pageCount; p++) {
-      pageOverrides.set(p, { seed: seed + p * 7 });
+      const existing = pageOverrides.get(p) ?? {};
+      pageOverrides.set(p, { ...existing, seed: existing.seed ?? (seed + p * 7) });
     }
     const versionedConfig: GooglePhotosConfig = { ...config, pageOverrides };
     const result = i === 0 ? baseline : googlePhotosLayout(photos, versionedConfig);
@@ -1095,6 +1182,35 @@ function evaluateLayoutQuality(
     lastPlacement = placement;
   }
   score -= consecutiveSameCount * 8; // 每次连续相同扣 8 分
+
+  // 2b. 跨页 hero 面积强弱交替（基于页面级 heroPhase 序列）：
+  //     相邻页相位差总和大 = 强弱起伏明显（加分）；连续同相页过多 = 单调（扣分）。
+  {
+    const phases = result.heroPhases ?? [];
+    if (phases.length >= 2) {
+      let swing = 0;          // 相邻页相位差总和（起伏幅度）
+      let sameSideRun = 0;    // 连续同侧（同为强或同为弱）的运行长度
+      let maxSameRun = 0;
+      let prevPh: number | null = null;
+      for (const ph of phases) {
+        if (prevPh !== null) {
+          swing += Math.abs(ph - prevPh);
+          if ((ph >= 1) === (prevPh >= 1)) {
+            sameSideRun++;
+            maxSameRun = Math.max(maxSameRun, sameSideRun + 1);
+          } else {
+            sameSideRun = 0;
+          }
+        }
+        prevPh = ph;
+      }
+      // 归一化起伏（每页平均相位差 0.25+ 拿满分），封顶 +10
+      const avgSwing = swing / (phases.length - 1);
+      score += Math.min(10, Math.round(avgSwing * 40));
+      // 连续同侧超过 2 页开始扣分（机械单调），每多 1 页扣 3，封顶 -9
+      if (maxSameRun > 2) score -= Math.min(9, (maxSameRun - 2) * 3);
+    }
+  }
 
   // 3. 每页照片数分布合理性（每页 3-6 张为佳）
   for (const page of pages) {
@@ -1200,7 +1316,7 @@ export function layoutSinglePage(
   const contentHeight = pageHeight - margin.top - margin.bottom;
 
   if (contentWidth <= 0 || contentHeight <= 0 || photos.length === 0) {
-    return { pages: [], internalRows: [], layoutRows: [], tierPatterns: [], totalPhotos: 0, totalPages: 0 };
+    return { pages: [], internalRows: [], layoutRows: [], tierPatterns: [], heroPhases: [], totalPhotos: 0, totalPages: 0 };
   }
 
   // 1. 评分（P0-2 集成：传入 contentInfoCache 启用人脸维度）
@@ -1217,10 +1333,11 @@ export function layoutSinglePage(
   const spec: PageSpec = { layout, photos, scoredPhotos: scored };
 
   // 3. 行生成 + 跨行检测 + 填充（与 googlePhotosLayout 单页逻辑完全一致）
-  const rows = generateRowsForSpec(spec, contentWidth, gap);
+  const pageSeed = derivePageSeed(spec.photos, spec.layout.seed, 0);
+  const rows = generateRowsForSpec(spec, contentWidth, gap, 0);
   const bestScore = scored.length > 0 ? Math.max(...scored.map(s => s.score)) : 0;
   const heroIds = new Set(scored.filter(s => s.score >= bestScore).map(s => s.photo.id));
-  const spanned = spec.layout.allowSpan ? detectSpanOpportunities(rows, gap, heroIds, 0) : rows;
+  const spanned = spec.layout.allowSpan ? detectSpanOpportunities(rows, gap, heroIds, 0, pageSeed) : rows;
 
   // 序列化 internalRows + layoutRows（与 googlePhotosLayout 对齐）
   const flatIds: { photoIds: string[]; rowHeight: number }[] = [];
@@ -1257,6 +1374,7 @@ export function layoutSinglePage(
     internalRows: [flatIds],
     layoutRows: [lr],
     tierPatterns: [spec.layout.tierPattern],
+    heroPhases: [spec.layout.heroPhase ?? 1],
     totalPhotos: photos.length,
     totalPages: 1,
   };

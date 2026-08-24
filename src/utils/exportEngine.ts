@@ -76,6 +76,9 @@ export interface ExportOptions {
   pageRange: { start: number; end: number };
   projectName: string;
   outputPath?: string;
+  /** 内容页起始页码（默认 1，手动填）：跨相册连续编号续接用。
+   *  仅普通内容页参与累加，封面/封底固定命名为「封面/封底」不占用页码。 */
+  pageNumberStart?: number;
   onProgress?: (current: number, total: number) => void;
   /** 印刷级出血（mm，默认 0）：导出 PDF 时四周扩展出血边，供印刷裁切 */
   bleed?: number;
@@ -1772,7 +1775,10 @@ async function applyGrayscale(src: string): Promise<string> {
 }
 
 export async function exportToPNG(options: ExportOptions): Promise<ExportResult> {
-  const { pageRange, dpi, projectName, outputPath, onProgress } = options;
+  const { pageRange, dpi, projectName, outputPath, onProgress, pageNumberStart } = options;
+  const pageStart = pageNumberStart ?? 1;
+  const bleed = options.bleed ?? 0;
+  const spine = options.spineWidth ?? 0;
   const total = pageRange.end - pageRange.start + 1;
   const task = beginTask();
   const pageMM = getPageSizeMM();
@@ -1790,14 +1796,23 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
   await preheatContentAnalysis(Array.from(new Map(exportPhotosPng.map(p => [p.id, p])).values()));
   const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
   const blobs: Blob[] = [];
+  const names: string[] = [];
+  // 内容页编号计数（封面/封底固定命名、不占用页码）
+  let contentIndex = 0;
 
   for (let i = pageRange.start - 1; i < pageRange.end; i++) {
     if (task.isCancelled) break;
     try {
       const page = pages[i];
       if (!page) continue;
+      const kind = page.pageKind ?? 'content';
+      const name = kind === 'cover'
+        ? `${projectName}_封面`
+        : kind === 'backCover'
+          ? `${projectName}_封底`
+          : `${projectName}_第${pageStart + contentIndex++}页`;
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap);
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
       // 转 PNG
       const img = await loadImage(jpgURL);
       const c = document.createElement('canvas');
@@ -1806,6 +1821,7 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
       const blob = await new Promise<Blob | null>(r => c.toBlob(b => r(b), 'image/png'));
       if (!blob) throw new Error('Canvas toBlob 返回 null（可能被污染）');
       blobs.push(blob);
+      names.push(name);
     } catch (err) {
       task.addWarning({ pageIndex: i, pageLabel: `第 ${i + 1} 页`, message: `${(err as Error).message}` });
     }
@@ -1820,12 +1836,12 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
   let result: SaveFileResult;
   let fileName: string;
   if (blobs.length === 1) {
-    fileName = `${projectName}_第${pageRange.start}页.png`;
+    fileName = `${names[0]}.png`;
     result = await saveFile(blobs[0], fileName, outputPath);
   } else {
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
-    blobs.forEach((b, idx) => zip.file(`${projectName}_第${pageRange.start + idx}页.png`, b));
+    blobs.forEach((b, idx) => zip.file(`${names[idx]}.png`, b));
     fileName = `${projectName}_导出.zip`;
     result = await saveFile(await zip.generateAsync({ type: 'blob' }), fileName, outputPath);
   }
@@ -1833,7 +1849,10 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
 }
 
 export async function exportToJPG(options: ExportOptions): Promise<ExportResult> {
-  const { pageRange, dpi, quality, projectName, outputPath, onProgress } = options;
+  const { pageRange, dpi, quality, projectName, outputPath, onProgress, pageNumberStart } = options;
+  const pageStart = pageNumberStart ?? 1;
+  const bleed = options.bleed ?? 0;
+  const spine = options.spineWidth ?? 0;
   const total = pageRange.end - pageRange.start + 1;
   const task = beginTask();
   const pageMM = getPageSizeMM();
@@ -1851,14 +1870,23 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
   await preheatContentAnalysis(Array.from(new Map(exportPhotosJpg.map(p => [p.id, p])).values()));
   const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
   const blobs: Blob[] = [];
+  const names: string[] = [];
+  // 内容页编号计数（封面/封底固定命名、不占用页码）
+  let contentIndex = 0;
 
   for (let i = pageRange.start - 1; i < pageRange.end; i++) {
     if (task.isCancelled) break;
     try {
       const page = pages[i];
       if (!page) continue;
+      const kind = page.pageKind ?? 'content';
+      const name = kind === 'cover'
+        ? `${projectName}_封面`
+        : kind === 'backCover'
+          ? `${projectName}_封底`
+          : `${projectName}_第${pageStart + contentIndex++}页`;
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap);
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
       if (Math.abs(quality - 92) > 1) {
         const img = await loadImage(jpgURL);
         const c = document.createElement('canvas');
@@ -1867,10 +1895,12 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
         const jpegBlob = await new Promise<Blob | null>(r => c.toBlob(b => r(b), 'image/jpeg', quality / 100));
         if (!jpegBlob) throw new Error('Canvas toBlob 返回 null（可能被污染）');
         blobs.push(jpegBlob);
+        names.push(name);
       } else {
         // P0-fix CSP: jpgURL 是 data: URL，fetch(dataURL) 会触发 CSP connect-src 违规。
         //   用 atob 解码替代 fetch（JS 内存操作，不发起网络请求）。
         blobs.push(dataURLtoBlob(jpgURL));
+        names.push(name);
       }
     } catch (err) {
       task.addWarning({ pageIndex: i, pageLabel: `第 ${i + 1} 页`, message: `${(err as Error).message}` });
@@ -1886,12 +1916,12 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
   let result: SaveFileResult;
   let fileName: string;
   if (blobs.length === 1) {
-    fileName = `${projectName}_第${pageRange.start}页.jpg`;
+    fileName = `${names[0]}.jpg`;
     result = await saveFile(blobs[0], fileName, outputPath);
   } else {
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
-    blobs.forEach((b, idx) => zip.file(`${projectName}_第${pageRange.start + idx}页.jpg`, b));
+    blobs.forEach((b, idx) => zip.file(`${names[idx]}.jpg`, b));
     fileName = `${projectName}_导出.zip`;
     result = await saveFile(await zip.generateAsync({ type: 'blob' }), fileName, outputPath);
   }

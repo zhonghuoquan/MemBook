@@ -1292,8 +1292,8 @@ export function PhotoPanel({ photoImport, onNavigateToSmartLayout }: { photoImpo
       {/* ── 批量删除确认弹窗 ── */}
       {deleteConfirm && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={() => setDeleteConfirm(null)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="fixed inset-0 z-[var(--z-modal)] bg-black/40 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={() => setDeleteConfirm(null)} />
+          <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
             <div
               className="bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] p-6 max-w-md w-full mx-4 pointer-events-auto animate-[scaleIn_200ms_ease-out]"
               onClick={(e) => e.stopPropagation()}

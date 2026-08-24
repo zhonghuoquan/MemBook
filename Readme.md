@@ -3,11 +3,11 @@
 > 一款运行在桌面的电子相册制作工具，所有数据保存在你的设备上，不上传服务器。支持自定义尺寸、一键成册、模板套用、滤镜调色、HEIC 解码、PDF 导出、直连打印等完整工作流。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.1.1-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
-- **版本**：1.1.1
+- **版本**：1.2.0
 - **标识符**：`app.membook.desktop`
 - **技术栈**：Tauri 2 + React 19 + TypeScript + Konva 10 + Zustand 5 + Tailwind 4 + Dexie 4 (IndexedDB) + Rust
 - **平台**：Windows（主要）/ macOS 10.15+ / Linux
@@ -17,7 +17,7 @@
 ## 产品主页
 
 - 产品官网与下载：<https://zhonghuoquan.github.io/membook-home/>
-- 桌面安装包：`download/MemBook_1.1.1_x64-setup.exe`（约 13MB，NSIS）
+- 桌面安装包：`download/MemBook_1.2.0_x64-setup.exe`（约 13MB，NSIS）
 
 ---
 
@@ -82,7 +82,8 @@ git remote add cnb     https://cnb.cool/MemBook-Flash/MemBook.git   # cnb.cool
 
 ### 3. 一键成册
 
-- Google Photos 布局算法自适应照片数量与宽高比
+- Google Photos 布局算法自适应照片数量与宽高比，并感知照片内容质量（清晰/人脸）动态调整每页密度与节奏；「照片密度·智能」为逐页疏密曲线（首页少放 + 后续起伏 + 收尾收敛），「排版节奏·智能」为叙事段位优先（开场/发展/高潮/收尾各取专属 pattern）；多方案由确定性 seed 驱动，点击可翻出明显不同的台型
+- 排版视觉优化：2/3/4 图及方图多结构骨架（并排/叠放/对称/hero/错落/跨行），≥5 图由 seed 驱动行数疏密抖动，页面级 hero 相位系数驱动跨页「大图震撼→细节舒缓」强弱节奏，末行竖图保护避免主体被裁
 - 一键成册整本相册
 
 ### 4. 照片管理
@@ -317,8 +318,8 @@ npm run desktop:build:debug # 调试版桌面端
 
 - **前端**：`dist/`（Vite 构建）
 - **桌面安装包**（NSIS，跳过 WiX/MSI 减少依赖）：
-  - `src-tauri/target/release/bundle/nsis/MemBook_1.1.1_x64-setup.exe`（约 13MB）
-  - `src-tauri/target/release/bundle/msi/MemBook_1.1.1_x64_zh-CN.msi`（企业部署用）
+  - `src-tauri/target/release/bundle/nsis/MemBook_1.2.0_x64-setup.exe`（约 13MB）
+  - `src-tauri/target/release/bundle/msi/MemBook_1.2.0_x64_zh-CN.msi`（企业部署用）
 - **自动更新包**（`createUpdaterArtifacts: "v1Compatible"`）：每种安装器额外生成压缩更新包 `*.zip (updater)`，供更新器后台下载——`nsis/*.nsis.zip`、`msi/*.msi.zip`
 - **签名**：`.sig` 文件（如 `*.exe.sig` / `*.zip.sig`）用于自动更新校验来源与完整性；生成更新清单由 CI 用私钥签名完成，本地打包需设置 `TAURI_SIGNING_PRIVATE_KEY`（及 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，无密码则省略）环境变量
 

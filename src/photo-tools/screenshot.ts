@@ -30,6 +30,13 @@ import type {
 } from './types';
 import { readExifFull } from './exif';
 import { logger } from '../utils/logger';
+import { mapWithConcurrency } from './async-utils';
+
+/**
+ * EXIF 解析只需读取文件头（EXIF 段位于文件头部），
+ * 避免读取整张照片字节——上万张照片时 IO/内存开销巨大。
+ */
+const HEAD_BYTES = 64 * 1024;
 
 // ── 文件名截图关键词（大小写不敏感，匹配文件名主体） ──
 const FILENAME_KEYWORDS = [
@@ -112,22 +119,79 @@ export function isScreenRatio(w: number, h: number): boolean {
 }
 
 /**
- * 解码图片并获取其像素尺寸（宽高）
- * 通过 createImageBitmap 读取原始尺寸，失败返回 null。
+ * 从文件头字节解析图片像素尺寸（宽高）
+ *
+ * 支持 JPEG / PNG / WebP / GIF / BMP。相比 createImageBitmap 整图解码，
+ * 只解析文件头即可获取尺寸：不占用主线程解码、不加载整张照片进内存，
+ * 上万张照片识别时避免卡死。解析失败返回 null。
  */
-async function getImageSize(data: ArrayBuffer): Promise<{ width: number; height: number } | null> {
-  let bitmap: ImageBitmap | null = null;
-  try {
-    bitmap = await createImageBitmap(new Blob([data]));
-    return { width: bitmap.width, height: bitmap.height };
-  } catch (err) {
-    logger.debug('[screenshot] 图片解码失败', err);
-    return null;
-  } finally {
-    if (bitmap) {
-      try { bitmap.close(); } catch { /* ignore */ }
+export function getImageSizeFromHeader(buf: ArrayBuffer): { width: number; height: number } | null {
+  const b = new Uint8Array(buf);
+
+  // JPEG：扫描 SOF 段（标记 0xC0~0xCF，排除 C4 哈夫曼表 / C8 JPG / CC 差分表）
+  if (b.length >= 2 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const marker = b[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        const height = (b[i + 5] << 8) | b[i + 6];
+        const width = (b[i + 7] << 8) | b[i + 8];
+        return width > 0 && height > 0 ? { width, height } : null;
+      }
+      const segLen = (b[i + 2] << 8) | b[i + 3];
+      if (segLen === 0) break;
+      i += 2 + segLen;
     }
+    return null;
   }
+
+  // PNG：IHDR 位于固定偏移 16~23（宽/高各 4 字节大端）
+  if (b.length >= 24 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+    const width = ((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]) >>> 0;
+    const height = ((b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]) >>> 0;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  // WebP：RIFF....WEBP + 子块
+  if (b.length >= 30 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+    && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+    const fourcc = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (fourcc === 'VP8 ' && b.length >= 28) {
+      // 无损关键帧帧头：偏移 23-25 起始码，24-27 各 14 位宽高
+      const width = ((b[24] | ((b[25] & 0x3f) << 8)) & 0x3fff) + 1;
+      const height = ((b[26] | ((b[27] & 0x3f) << 8)) & 0x3fff) + 1;
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    if (fourcc === 'VP8L' && b.length >= 25) {
+      const b0 = b[21], b1 = b[22], b2 = b[23], b3 = b[24];
+      const width = 1 + (((b1 & 0x3f) << 8) | b0);
+      const height = 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6));
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    if (fourcc === 'VP8X' && b.length >= 30) {
+      const width = 1 + (b[24] | (b[25] << 8) | (b[26] << 16));
+      const height = 1 + (b[27] | (b[28] << 8) | (b[29] << 16));
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    return null;
+  }
+
+  // GIF：逻辑屏幕描述符，6-9 各 2 字节小端宽高
+  if (b.length >= 10 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) {
+    const width = b[6] | (b[7] << 8);
+    const height = b[8] | (b[9] << 8);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  // BMP：位图信息头，18-25 各 4 字节小端宽高
+  if (b.length >= 26 && b[0] === 0x42 && b[1] === 0x4d) {
+    const width = b[18] | (b[19] << 8) | (b[20] << 16) | (b[21] << 24);
+    const height = b[22] | (b[23] << 8) | (b[24] << 16) | (b[25] << 24);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  return null;
 }
 
 /**
@@ -136,7 +200,7 @@ async function getImageSize(data: ArrayBuffer): Promise<{ width: number; height:
  */
 async function analyzePhoto(
   photo: PhotoFileInfo,
-  readData: (p: PhotoFileInfo) => Promise<ArrayBuffer | null>,
+  readData: (p: PhotoFileInfo, length?: number) => Promise<ArrayBuffer | null>,
 ): Promise<{ signals: ScreenshotSignal[]; readFailed: boolean }> {
   const signals: ScreenshotSignal[] = [];
   let readFailed = false;
@@ -148,7 +212,8 @@ async function analyzePhoto(
 
   let data: ArrayBuffer | null = null;
   try {
-    data = await readData(photo);
+    // 只读文件头（EXIF 段 + 尺寸解析所需均位于头部），避免读取整张照片字节
+    data = await readData(photo, HEAD_BYTES);
   } catch (err) {
     logger.warn(`[screenshot] 读取 ${photo.name} 失败:`, err);
   }
@@ -183,12 +248,11 @@ async function analyzePhoto(
       signals.push('software');
     }
 
-    // 信号4/5：分辨率特征
+    // 信号4/5：分辨率特征（EXIF 未提供尺寸时，从文件头解析，无需整图解码）
     let w = typeof exifWidth === 'number' ? exifWidth : 0;
     let h = typeof exifHeight === 'number' ? exifHeight : 0;
     if (w <= 0 || h <= 0) {
-      // EXIF 未提供尺寸时，解码获取
-      const size = await getImageSize(data);
+      const size = getImageSizeFromHeader(data);
       if (size) {
         w = size.width;
         h = size.height;
@@ -239,38 +303,6 @@ export function classify(signals: ScreenshotSignal[]): { confidence: 'high' | 's
     confidence: high ? 'high' : 'suspect',
     reasons: signals,
   };
-}
-
-/**
- * 并发执行异步任务（与 hash.ts 保持一致的工作池模式）
- */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  fn: (item: T, index: number) => Promise<R>,
-  concurrency: number,
-  onProgress?: (done: number, total: number) => void,
-  signal?: AbortSignal,
-): Promise<R[]> {
-  const total = items.length;
-  if (total === 0) return [];
-  const results: R[] = new Array(total);
-  let nextIndex = 0;
-  let doneCount = 0;
-
-  async function worker(): Promise<void> {
-    while (true) {
-      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-      const idx = nextIndex++;
-      if (idx >= total) break;
-      results[idx] = await fn(items[idx], idx);
-      doneCount++;
-      onProgress?.(doneCount, total);
-    }
-  }
-
-  const workerCount = Math.min(concurrency, total);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
 }
 
 /**

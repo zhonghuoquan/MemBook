@@ -224,7 +224,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
 
       // 检测完成，立即聚类
       setProgress({ phase: 'clustering', current: 0, total: det.faces.length, message: `聚类 ${det.faces.length} 个人脸...` });
-      const res = recluster(det, threshold, photos);
+      const res = await recluster(det, threshold, photos);
       setResult(res);
 
       // 上报结果摘要（供“一键分析结果报告页”展示）
@@ -308,9 +308,9 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   }, [autoRunToken, isAutoRunTarget]);
 
   /** 调整阈值后即时重聚类（使用缓存的检测结果，毫秒级） */
-  const handleRecluster = useCallback(() => {
+  const handleRecluster = useCallback(async () => {
     if (!detection) return;
-    const res = recluster(detection, threshold, photos);
+    const res = await recluster(detection, threshold, photos);
     setResult(res);
     setSelectedIds(new Set());
     setSelectedClusters(new Set());

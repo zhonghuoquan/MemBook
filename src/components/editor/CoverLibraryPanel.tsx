@@ -4,13 +4,13 @@ import { useEditorStore, useUIStore } from '../../store';
 import { COVER_TEMPLATES, getTemplateName } from '../../types/cover-templates';
 import type { Template } from '../../types';
 import { CoverPreview } from '../common/CoverPreview';
-import { Modal } from '../common/Modal';
+import { CoverPreviewOverlay } from '../common/CoverPreviewOverlay';
 
 /**
  * CoverLibraryPanel —— 编辑器左侧「封面」面板
  * ─────────────────────────────────────────
  * 展示封面模板（含书脊 + 真实图片占位 + 预设文字/形状的真实预览）：
- *   - 卡片左上角眼睛图标：点击弹出大图，同时查看封面页与配套封底页。
+ *   - 卡片左上角眼睛图标：点击弹出大图，封面↔封底翻转切换（与主页封面设计库共用 CoverPreviewOverlay）。
  *   - 卡片本体点击：进入编辑——
  *       * 当前页是封面：切换封面模板（保留已填照片）
  *       * 当前页是普通页：插入封面页
@@ -62,25 +62,13 @@ export function CoverLibraryPanel() {
         </div>
       </div>
 
-      {/* 封面大图预览：同时展示封面页与配套封底页 */}
-      <Modal open={!!previewTemplate} onClose={() => setPreviewTemplate(null)} maxWidth="960px" title={previewTemplate ? t('editor.coverLibrary.previewTitle') : ''}>
-        {previewTemplate && (
-          <div className="grid grid-cols-2 gap-10 py-4">
-            <PreviewPair
-              label={t('editor.coverLibrary.previewCover')}
-              template={previewTemplate}
-            />
-            {previewTemplate.backCover ? (
-              <PreviewPair
-                label={t('editor.coverLibrary.previewBack')}
-                template={previewTemplate.backCover}
-              />
-            ) : (
-              <div />
-            )}
-          </div>
-        )}
-      </Modal>
+      {/* 封面大图预览：共用 - 封面↔封底翻转切换（与主页封面设计库一致） */}
+      <CoverPreviewOverlay
+        open={!!previewTemplate}
+        template={previewTemplate}
+        onClose={() => setPreviewTemplate(null)}
+        title={t('editor.coverLibrary.previewTitle')}
+      />
     </aside>
   );
 }
@@ -90,20 +78,6 @@ function Section({ label, children }: { label: string; children: React.ReactNode
     <div>
       <div className="text-[12px] font-[600] text-[var(--color-gray-700)] mb-3 px-1">{label}</div>
       {children}
-    </div>
-  );
-}
-
-/** 大图预览对：单张封面/封底缩略预览 + 底部说明 */
-function PreviewPair({ label, template }: { label: string; template: Template }) {
-  return (
-    <div>
-      <div className="grid place-items-center">
-        <div className="w-full">
-          <CoverPreview template={template} />
-        </div>
-      </div>
-      <div className="mt-4 text-center text-[12px] font-[600] text-[var(--color-gray-700)]">{label}</div>
     </div>
   );
 }

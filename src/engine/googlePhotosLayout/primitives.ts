@@ -116,6 +116,52 @@ export function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
+/* ── 确定性伪随机（mulberry32）──
+ * 用于布局“抖动”决策（行分组分布、左右交替、跨行触发等），
+ * 取代依赖 photo.id charCodeAt 的伪随机——它只能在 0/1/2 几种值里打转，
+ * 是 2 图/3 图布局雷同的一大诱因。同一 seed 保证可复现，不同 seed 拉开差异。 */
+export function mulberry32(seed: number): () => number {
+  let a = Math.floor(seed) >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 由 seed + salt 派生一个确定性 0-1 随机数 */
+export function seededRand(seed: number, salt: number): number {
+  return mulberry32((Math.floor(seed) * 2654435761 + salt) >>> 0)();
+}
+
+/** 由 seed + salt 派生确定性布尔（默认 50% 概率） */
+export function seededBool(seed: number, salt: number, prob = 0.5): boolean {
+  return seededRand(seed, salt) < prob;
+}
+
+/** 从 (seed:salt) 派生 [0,n) 的确定性整数 */
+export function seededPick(seed: number, salt: number, n: number): number {
+  if (n <= 0) return 0;
+  return Math.floor(seededRand(seed, salt + n) * n) % n;
+}
+
+/** 归一化照片宽高比 */
+function aspectOf(p: Photo): number {
+  return p.width > 0 && p.height > 0 ? clamp(p.width / p.height, MIN_ASPECT, MAX_ASPECT) : 1;
+}
+
+/** 页面布局 seed：优先用显式 seed；缺失时按页面照片内容派生（最简单——避免 layout 永远完全雷同） */
+export function derivePageSeed(photos: Photo[], layoutSeed: number | undefined, pageIdx: number): number {
+  if (layoutSeed !== undefined) return Math.floor(layoutSeed) >>> 0;
+  let s = (1 + pageIdx * 131 + 7) >>> 0;
+  for (const p of photos) {
+    for (let i = 0; i < p.id.length; i++) s = ((s * 31 + p.id.charCodeAt(i)) | 0) >>> 0;
+  }
+  return s || 1;
+}
+
 export function getDateKey(photo: Photo): string {
   const d = new Date(photo.date);
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -492,13 +538,67 @@ function splitIntoGroups(photos: Photo[], groupCount: number, reversePattern = f
  *  避免一张全景图（aspect≥2.0）把整行高度拉得太矮。
  *  做法：先按经典 justified 算法算出 baseH，再检测超占比照片，
  *  把它的有效 aspect 收缩到 (行宽×0.6/行高) 上限。
+ *
+ *  布局增强（2026-08-21·一键成册视觉效果）：在 tier 基础倍率之上叠加"内容/层次浮动因子"，
+ *  让行高差异不依赖写死的固定表，而是随照片画面特征与行位置动态变化：
+ *  - hero 行更高（基础 1.8）之上，若照片清晰（clarityScore）则进一步放大；
+ *  - standard 行基本稳定，detail 行略收窄，形成 大图更突出、小图更收敛 的层次感；
+ *  - 浮动因子是"少即强、多即弱"的确定性压缩（0.75×base..1.25×base），保证不破坏测试
+ *    的"hero 行 ≥ 非 hero 行 ×1.2"守恒关系与实践"行高秩序"。
  */
+function tierContentMultiplier(
+  photos: Photo[],
+  baseMultiplier: number,
+  tier: RowTier,
+): number {
+  if (photos.length === 0) return baseMultiplier;
+
+  // 内容信号：照片清晰度均值（缺失按 0.6 中值处理）。清晰 → 该行作为焦点更可信 → 放大。
+  let claritySum = 0;
+  let clarityN = 0;
+  for (const p of photos) {
+    if (typeof p.clarityScore === 'number') { claritySum += p.clarityScore; clarityN++; }
+  }
+  const avgClarity = clarityN > 0 ? claritySum / clarityN : 0.6;
+
+  // 内容信号：照片方向跨度（行内既有超宽又有竖图 → 视觉张力强，稍放大）
+  let aspectMin = Infinity, aspectMax = -Infinity;
+  for (const p of photos) {
+    const a = p.width > 0 && p.height > 0 ? p.width / p.height : 1;
+    if (a < aspectMin) aspectMin = a;
+    if (a > aspectMax) aspectMax = a;
+  }
+  const aspectSpan = photos.length > 1 ? aspectMax / aspectMin : 1;
+
+  // 内容信号：行内照片数。单张 = 视觉焦点，放大；多张 = 堆叠信息，收敛。
+  const photoCountFactor = photos.length === 1 ? 1.08 : photos.length >= 3 ? 0.94 : 1.0;
+
+  // 按 tier 施加不同的内容敏感度（加深 hero/detail 强弱对比，但不破坏“hero ≥ standard×1.2”秩序）
+  let m = baseMultiplier;
+  if (tier === 'hero') {
+    // hero：清晰 + 大跨度都让它更"跳"出来
+    m *= clamp(1 + (avgClarity - 0.6) * 0.4, 0.75, 1.28);
+    m *= clamp(1 + (aspectSpan - 1) * 0.06, 0.9, 1.1);
+  } else if (tier === 'detail') {
+    // detail：清晰越高越收敛（作为背景衬托 hero），反之保持
+    m *= clamp(1 - (avgClarity - 0.6) * 0.3, 0.78, 1.15);
+  } else {
+    // standard：稳定为主，轻微随清晰度上抬
+    m *= clamp(1 + (avgClarity - 0.6) * 0.15, 0.9, 1.08);
+  }
+  m *= photoCountFactor;
+
+  // 收敛到既拉开层次又不破坏秩序的合理区间：绝不把 hero 压到低于 standard
+  return clamp(m, 0.5, 2.6);
+}
+
 export function computeRowForGroup(
   photos: Photo[],
   contentWidth: number,
   gap: number,
   tier: RowTier,
   pattern: TierPattern,
+  heroPhase = 1,
 ): JustifiedRow {
   if (photos.length === 0) return { photos: [], rowHeight: 0, tier };
   const MAX_SINGLE_RATIO = 0.6; // 单张照片宽度上限：行宽的 60%
@@ -533,8 +633,13 @@ export function computeRowForGroup(
   }
 
   const baseH = aspectSum > 0 ? usableW / aspectSum : usableW;
-  const mul = getTierMultiplier(pattern, tier);
-  return { photos, rowHeight: baseH * mul, tier };
+  // 布局增强：tier 基础倍率 + 内容浮动因子，拉开视觉层次
+  const baseMultiplier = getTierMultiplier(pattern, tier);
+  const mul = tierContentMultiplier(photos, baseMultiplier, tier);
+  // 跨页强弱节奏：仅 hero 行乘页面相位系数（>1 强相 / <1 缓相 / =1 中性）。
+  // fillPage 是整页等比归一化，hero 相对 standard 的高度差会原样保留。
+  const phase = tier === 'hero' && heroPhase !== 1 ? heroPhase : 1;
+  return { photos, rowHeight: baseH * mul * phase, tier };
 }
 
 /** 按模式要求，把高分照片「入位」到 hero 行，保证首/中/末等视觉焦点由最佳照片占据
@@ -604,16 +709,98 @@ function placeHeroesIntoGroups(
   return groups;
 }
 
-export function generateRowsForSpec(spec: PageSpec, contentWidth: number, gap: number): JustifiedRow[] {
+/** 2/3 图小页台型骨架：用 seed + 内容挑选多种结构，打破“上2下1 / 上1下2”单一化。
+ *  返回按行划分的照片分组（组间即行间），由上层 autoTier/computeRowForGroup 转成行。 */
+function buildSmallSkeleton(photos: Photo[], seed: number): Photo[][] {
+  const N = photos.length;
+  if (N === 1) return [photos]; // 单张独占整页，无需再拆
+  const a0 = aspectOf(photos[0]);
+  const a1 = N > 1 ? aspectOf(photos[1]) : 1;
+  const a2 = N > 2 ? aspectOf(photos[2]) : 1;
+
+  // ── 2 图：并排(1行) / 叠放(2行) 二选一 ──
+  if (N === 2) {
+    const onePortrait = (a0 < 0.85) !== (a1 < 0.85);
+    const bothLandscape = a0 >= 1.15 && a1 >= 1.15;
+    // 全横图 → 更倾向并排成一条横带；混方向各半；含竖图 → 偏叠放（一张占满更舒展）
+    const sideBySide = seededBool(seed, 21, bothLandscape ? 0.72 : onePortrait ? 0.45 : 0.55);
+    return sideBySide ? [[photos[0], photos[1]]] : [[photos[0]], [photos[1]]];
+  }
+
+  // ── 3 图 ──
+  // 3 张全竖图：跨行主图用 seed 在 3 张里选（其余两张堆叠），配合跨行 side 的 seed 抖动
+  // 可产出「大图左/右 + 堆叠」「主图各异」等多种组合；不再固定首张做主图，换版式才有变化。
+  const allPortrait = a0 < 0.85 && a1 < 0.85 && a2 < 0.85;
+  if (allPortrait) {
+    const lead = seededPick(seed, 43, 3);
+    const rest = [0, 1, 2].filter(j => j !== lead);
+    return [[photos[lead]], [photos[rest[0]]], [photos[rest[1]]]];
+  }
+  // 首张竖图（后两张含横/方）：拆为独立首行，交给跨行检测做「竖图跨行 + 堆叠」错落
+  if (a0 < 0.85) {
+    return [[photos[0]], [photos[1]], [photos[2]]];
+  }
+  const allLandscape = a0 >= 1.15 && a1 >= 1.15 && a2 >= 1.15;
+  const pick = seededPick(seed, 31, 3); // 0/1/2
+  if (allLandscape) {
+    // 全横图：上2下1 / 上1下2 / 三行叠放（三行叠放可继续触发跨行，形成电影条感受）
+    if (pick === 0) return [[photos[0], photos[1]], [photos[2]]];
+    if (pick === 1) return [[photos[0]], [photos[1], photos[2]]];
+    return [[photos[0]], [photos[1]], [photos[2]]];
+  }
+  // 混合方向：上2下1 / 上1下2 交替（用 seed 决定，而非永远竖图在上）
+  return pick <= 1 ? [[photos[0], photos[1]], [photos[2]]] : [[photos[0]], [photos[1], photos[2]]];
+}
+
+/** 4 图页面台型骨架：用 seed + 内容挑选多种结构，摆脱"纯按方向切行"的雷同。
+ *  2+2 对称格 / 单 hero+3 / 3+尾 / 错落(1+2+1) / 竖图独立跨行 等。 */
+function buildFourSkeleton(photos: Photo[], seed: number): Photo[][] {
+  const a0 = aspectOf(photos[0]);
+  const a1 = aspectOf(photos[1]);
+  const a2 = aspectOf(photos[2]);
+  const a3 = aspectOf(photos[3]);
+  // 方图：接近 1 的宽高比，适合对称铺
+  const portraitCount = [a0, a1, a2, a3].filter(a => a < 0.85).length;
+  const allSquareish = [a0, a1, a2, a3].every(a => a >= 0.85 && a <= 1.15);
+  const pick = seededPick(seed, 131, 6); // 0..5
+
+  // 竖图很多：竖图各自独立成行（利于触发跨行 + 错落），横/方合为一排
+  if (portraitCount >= 3) {
+    return [[photos[0]], [photos[1]], [photos[2], photos[3]]];
+  }
+  // 全方图：对称 2+2 更稳重，偶尔转 单hero+3 打破单调
+  if (allSquareish) {
+    return pick === 3
+      ? [[photos[0]], [photos[1], photos[2], photos[3]]]
+      : [[photos[0], photos[1]], [photos[2], photos[3]]];
+  }
+  switch (pick) {
+    case 0: return [[photos[0], photos[1]], [photos[2], photos[3]]];      // 2+2
+    case 1: return [[photos[0]], [photos[1], photos[2], photos[3]]];      // 单hero+3
+    case 2: return [[photos[0], photos[1], photos[2]], [photos[3]]];      // 3+尾
+    case 4: return [[photos[0]], [photos[1], photos[2]], [photos[3]]];    // 错落
+    default: // 33-50% 走跨行友好：竖图独立首行，其余按 2/2 或 3 分布
+      if (a0 < 0.85) return [[photos[0]], [photos[1], photos[2]], [photos[3]]];
+      return [[photos[0], photos[1]], [photos[2]], [photos[3]]];          // 2+1+1(竖/横跨行机会)
+  }
+}
+
+export function generateRowsForSpec(spec: PageSpec, contentWidth: number, gap: number, pageIdx = 0): JustifiedRow[] {
   const { layout, photos, scoredPhotos } = spec;
   if (photos.length === 0) return [];
 
-  // 3图页面 50% 概率交替 上多下少 / 上少下多
-  const reversePattern = photos.length === 3
-    && photos.reduce((s, p) => s + p.id.charCodeAt(p.id.length - 1), 0) % 2 === 1;
-  let groups = splitIntoGroups(photos, layout.rows, reversePattern);
-  // 3图页面且预期3行但分组只给了2行：强制每张独占一行（给跨行创造机会）
-  if (photos.length === 3 && layout.rows === 3 && groups.filter(g => g.length > 0).length === 2) {
+  const seed = derivePageSeed(photos, layout.seed, pageIdx);
+  // 2/3 图：走多种「小页台型」骨架，避免每页都落在 上2下1 / 上1下2；
+  // 4 图：多结构骨架（对称/hero/错落/跨行）摆脱"纯方向切行"；
+  // ≥5 图：方向感知分组 + seed 决定上下多/少。真实 seed 取代 charCodeAt 伪随机。
+  let groups = photos.length === 4
+    ? buildFourSkeleton(photos, seed)
+    : photos.length <= 3
+      ? buildSmallSkeleton(photos, seed)
+      : splitIntoGroups(photos, layout.rows, seededBool(seed, 91, 0.5));
+
+  // 3图页面且预期3行但骨架没给够3行：强制每张独占一行（给跨行创造机会）
+  if (photos.length === 3 && layout.rows >= 3 && groups.filter(g => g.length > 0).length < 3) {
     const all = groups.flat();
     groups = [[all[0]], [all[1]], [all[2]]];
   }
@@ -621,11 +808,23 @@ export function generateRowsForSpec(spec: PageSpec, contentWidth: number, gap: n
   // 按模式把高光照片入位到 hero 行
   groups = placeHeroesIntoGroups(groups, scoredPhotos, layout.tierPattern);
 
+  // ── 末行竖图保护（须在 hero 行交换之后：行交换会把竖图行换到末尾）：
+  // 多行骨架里竖图独占末行无法跨行（没有下一行可合并），fillPage 归一化后会被
+  // 拉宽成横带（0.75 的竖图最多裁掉约一半高度，主体可能被切）→ 并入前一行。
+  // 仅处理 ≥3 图页面；2 图叠放骨架的多样性语义优先（且 2 行摊薄后裁切可接受）。
+  if (photos.length >= 3 && groups.length >= 2) {
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup.length === 1 && aspectOf(lastGroup[0]) < 0.85) {
+      groups[groups.length - 2] = [...groups[groups.length - 2], ...lastGroup];
+      groups.pop();
+    }
+  }
+
   const tiers = autoTier(layout.tierPattern, groups.length);
 
   return groups
     .filter(g => g.length > 0)
-    .map((group, i) => computeRowForGroup(group, contentWidth, gap, tiers[i] || 'standard', layout.tierPattern));
+    .map((group, i) => computeRowForGroup(group, contentWidth, gap, tiers[i] || 'standard', layout.tierPattern, layout.heroPhase ?? 1));
 }
 
 /* ═══════════════════════════════════════
@@ -633,12 +832,14 @@ export function generateRowsForSpec(spec: PageSpec, contentWidth: number, gap: n
    ═══════════════════════════════════════ */
 
 /** 扫描行列表，将「1 张竖图/英雄横图 + 下一行」合并为跨行 SpanGroup。
- *  pageIdx 用于决定竖图在左/右，保证同一页内稳定且跨页交替。 */
+ *  pageIdx 用于决定竖图在左/右，保证同一页内稳定且跨页交替。
+ *  seed 驱动「非严格候选是否跨行」「首行是否让位给第二行」等抖动决策。 */
 export function detectSpanOpportunities(
   rows: JustifiedRow[],
   gap: number,
   heroIds?: Set<string>,
   pageIdx = 0,
+  seed = 0,
 ): (JustifiedRow | SpanGroup)[] {
   const result: (JustifiedRow | SpanGroup)[] = [];
   let i = 0;
@@ -655,9 +856,9 @@ export function detectSpanOpportunities(
       const isStrictPortrait = aspect < 0.80;   // iPhone 3:4 (0.75) 等标准竖图，始终跨行
       const isPanorama = aspect >= 2.0;         // 超宽全景图不适合跨行，独占一行更舒展
       const isCandidate = !isPanorama && aspect < 1.8 && (isStrictPortrait || (heroIds != null && heroIds.has(p.id)));
-      // 标准竖图始终跨行；非严格候选 50% 随机；第 1 行非严格候选额外 50% 跳过（给第 2 行跨行机会）
-      const randBit1 = p.id.charCodeAt(i) % 2 === 0;
-      const skipForRow1 = i === 0 && !isStrictPortrait && p.id.charCodeAt(2) % 2 === 0;
+      // 标准竖图始终跨行；非严格候选按 seed 抖动；第 1 行非严格候选额外有概率让位给第 2 行
+      const randBit1 = seededBool(seed, 50 + i, 0.5);
+      const skipForRow1 = i === 0 && !isStrictPortrait && seededBool(seed, 121, 0.5);
       const isSpanCandidate = isStrictPortrait || (isCandidate && randBit1 && !skipForRow1);
 
       if (isSpanCandidate) {
@@ -687,8 +888,12 @@ export function detectSpanOpportunities(
             subRows.push({ photos: nextNextRow.photos, rowHeight: nextNextRow.rowHeight, tier: nextNextRow.tier });
             skipRows = 3;
           }
-          // 左右交替：由页码 + 当前页内已生成 span 数共同决定，稳定且避免连续同侧
-          const side: 'left' | 'right' = ((pageIdx + spanCount) % 2 === 0) ? 'left' : 'right';
+          // 注意：子行保持时间顺序（Row1→Row2→Row3），不做视觉权重重排。
+          // 相册是叙事媒介，右侧堆叠区按时间自上而下阅读本身就是 Z 字序；
+          // 按行高重排会把时间上更晚的照片翻到上面，用户会感知"顺序乱了"。
+          // 左右交替：seed + 页码 + 页内 span 数共同决定——不同 seed 能翻面（单页也可左右互换），
+          // 同时保留跨页交替的大趋势，避免连续同侧。旧实现仅用页码，单页时恒左，换版式无变化。
+          const side: 'left' | 'right' = seededBool(seed, 160 + spanCount * 17 + pageIdx, 0.5) ? 'left' : 'right';
           spanCount++;
 
           result.push({

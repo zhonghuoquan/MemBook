@@ -87,7 +87,7 @@ export function LibraryPickerDialog({ open, onClose, onSelect }: LibraryPickerDi
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-label={t('home.organize.libraryPicker.ariaLabel')}

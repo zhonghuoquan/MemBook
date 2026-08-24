@@ -323,8 +323,8 @@ export interface ScreenshotDetectResult {
 
 /** 截图识别选项 */
 export interface ScreenshotDetectOptions {
-  /** 读取照片数据（统一入口） */
-  readData: (photo: PhotoFileInfo) => Promise<ArrayBuffer | null>;
+  /** 读取照片数据（统一入口，length 可选：只读文件头若干字节，供 EXIF 解析，避免整图读取） */
+  readData: (photo: PhotoFileInfo, length?: number) => Promise<ArrayBuffer | null>;
   /** 进度回调 */
   onProgress?: (p: ToolProgress) => void;
   /** 中止信号 */

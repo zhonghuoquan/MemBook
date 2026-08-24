@@ -1,9 +1,13 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { APP_VERSION, BUILD_DATE } from '../../version';
 import { Logo } from './Logo';
 import { useLicenseStore } from '../../license';
 import { useUIStore } from '../../store';
+import {
+  getPendingUpdateInfo, manualCheckForUpdate, startAutoDownload,
+} from '../../utils/updater';
+import { logger } from '../../utils/logger';
 
 interface AboutDialogProps {
   open: boolean;
@@ -61,8 +65,47 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
   const openActivationDialog = useLicenseStore((s) => s.openDialog);
   const clearActivation = useLicenseStore((s) => s.clear);
   const addToast = useUIStore((s) => s.addToast);
+  const setAutoUpdate = useUIStore((s) => s.setAutoUpdate);
+  const setAutoUpdateProgress = useUIStore((s) => s.setAutoUpdateProgress);
+  const setReadyUpdate = useUIStore((s) => s.setReadyUpdate);
+  const setUpdateDialog = useUIStore((s) => s.setUpdateDialog);
   const [teleStatus, setTeleStatus] = useState<'checking' | 'ok' | 'unavailable'>('checking');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  // 手动检查更新：规避冷却期。无更新/失败 → toast；有更新 → 自动下载并直接弹安装确认窗
+  const handleCheckUpdate = useCallback(async () => {
+    if (checkingUpdate) return;
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+      addToast({ type: 'error', message: t('about.checkUpdateUnsupported') });
+      return;
+    }
+    setCheckingUpdate(true);
+    try {
+      const res = await manualCheckForUpdate();
+      if (res.status === 'latest') {
+        addToast({ type: 'success', message: t('about.checkUpdateLatest') });
+      } else if (res.status === 'error') {
+        addToast({ type: 'error', message: t('about.checkUpdateFailed') });
+      } else {
+        setAutoUpdate({ phase: 'downloading', version: res.info.version, progress: null });
+        try {
+          await startAutoDownload((p) =>
+            setAutoUpdateProgress({ downloaded: p.downloaded ?? 0, total: p.total ?? 0 }),
+          );
+          setAutoUpdate(null);
+          setReadyUpdate(getPendingUpdateInfo());
+          setUpdateDialog(getPendingUpdateInfo());
+        } catch (e) {
+          logger.warn('[updater] 手动检查后自动下载失败:', e);
+          setAutoUpdate(null);
+          addToast({ type: 'error', message: t('about.checkUpdateFailed') });
+        }
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }, [checkingUpdate, addToast, t, setAutoUpdate, setAutoUpdateProgress, setReadyUpdate, setUpdateDialog]);
 
   const features = useMemo(
     () => FEATURE_KEYS.map((f) => ({ icon: f.icon, title: t(f.titleKey), desc: t(f.descKey) })),
@@ -148,6 +191,30 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
             <span className="px-2.5 py-1 rounded-full bg-white/15 text-white font-mono backdrop-blur-sm border border-white/15">
               v{APP_VERSION}
             </span>
+            <button
+              type="button"
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              title={t('about.checkUpdate')}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/15 text-white backdrop-blur-sm border border-white/15 cursor-pointer hover:bg-white/25 transition-colors disabled:opacity-70 disabled:cursor-wait"
+            >
+              {checkingUpdate ? (
+                <>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" className="w-3 h-3 animate-spin">
+                    <path d="M10 2v3m0 10v3M3.2 5.6l2.1 2.1m9.4 4.6l2.1 2.1M2 10h3m10 0h3m-9.4 6.4l2.1-2.1m2.1-9.4l-4.6 4.6" strokeLinecap="round" />
+                  </svg>
+                  {t('about.checkUpdateChecking')}
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                    <path d="M10 14V4m0 0L6.5 7.5M10 4l3.5 3.5" />
+                    <path d="M4 12v2a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                  </svg>
+                  {t('about.checkUpdate')}
+                </>
+              )}
+            </button>
             <span className="px-2.5 py-1 rounded-full bg-white/15 text-white backdrop-blur-sm border border-white/15">
               {t('about.builtOn', { date: BUILD_DATE })}
             </span>

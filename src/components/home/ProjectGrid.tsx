@@ -36,8 +36,8 @@ function DeleteConfirmDialog({
   const { t } = useTranslation();
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onCancel} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-[var(--z-modal)] bg-black/40" onClick={onCancel} />
+      <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center pointer-events-none">
         <div
           className="bg-white rounded-[var(--radius-xl)] shadow-[var(--shadow-lg)] p-6 max-w-md w-full mx-4 pointer-events-auto"
           onClick={(e) => e.stopPropagation()}

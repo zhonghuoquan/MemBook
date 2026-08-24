@@ -1,15 +1,17 @@
-import type { AlbumSize, PageMarginSettings, AlbumPage, PageTextElement, AlbumGuideLine } from '../../types';
+import type { AlbumSize, PageMarginSettings, AlbumPage, PageTextElement, AlbumGuideLine, SlotOverride } from '../../types';
 import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, isGooglePhotosPage, isCoverOrBackCoverPage } from '../../types';
-import { pageMarginService } from '../../services/pageMarginService';
+import { pageMarginService, calcCoverOverrides } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot } from './helpers';
 import { fitTextSize } from '../../components/editor/canvas/TextDomNode';
 import { coverElementSize, coverAnchorPosition, isMaskShape } from '../../utils/coverScale';
+import { SPINE_DATE_BOTTOM_MM } from '../../utils/sharedRender';
 import type { EditorSlice, AlbumMetaSlice } from './types';
 
 /**
  * 切换相册尺寸时，封面/封底页的文字/形状元素按新旧尺寸等比重映射，保证在不同尺寸页面上布局协调、文字不裁剪。
  * - 正文元素：x 先减去书脊偏移锚点(spX = spineAnchorMm)按 kx 缩放再加回（折线位置固定，不随页面缩放）；y/height 按 ky；fontSize 按 kx。
- * - 书脊元素（spine-text-*）：书脊宽度固定，沿高度方向排列，x 保持、y/height/fontSize 按 ky。
+ * - 书脊元素（spine-text-*）：书脊宽度固定，水平保持书脊居中(数据 x 不变)；**字号/盒宽高不变**，
+ *   仅按新页高重排垂直位置——相册名纵向居中于新页中线，日期底边距固定 SPINE_DATE_BOTTOM_MM(15mm)。
  * - 形状：中心 x 含/不含偏移按上方规则处理，width/height 缩放。
  * - 文字重映射后重新 fitTextSize 撑高，避免切换尺寸后超框裁剪。
  */
@@ -23,13 +25,22 @@ function rescaleCoverDecorations(
   const spX = page.spineAnchorMm ?? page.spineWidth ?? 0;
   const textElements = (page.textElements || []).map((el) => {
     const isSpine = el.id.startsWith('spine-text-');
+    if (isSpine) {
+      // 书脊宽固定：字号/盒宽高不变，仅按新页高重排垂直位置；水平保持书脊居中（x 不变）
+      const isDate = el.id.includes('date');
+      const h = el.height || 0;
+      return {
+        ...el,
+        y: isDate ? newSize.height - SPINE_DATE_BOTTOM_MM - h : newSize.height / 2 - h / 2,
+      };
+    }
     const scaled: PageTextElement = {
       ...el,
-      x: isSpine ? el.x : spX + (el.x - spX) * kx,
+      x: spX + (el.x - spX) * kx,
       y: el.y * ky,
-      width: Math.max(el.width * (isSpine ? ky : kx), 0.5),
+      width: Math.max(el.width * kx, 0.5),
       height: el.height * ky,
-      fontSize: el.fontSize * (isSpine ? ky : kx),
+      fontSize: el.fontSize * kx,
     };
     if (scaled.text) {
       const fitted = fitTextSize(scaled);
@@ -60,6 +71,42 @@ function rescaleCoverDecorations(
   return { ...page, textElements, shapeElements };
 }
 
+/**
+ * 封面/封底照片槽位自适应合并：对每个槽，若用户手动拖/改过（与模板坐标不一致），
+ * 按 kx/ky 等比缩放保留手动位置，避免尺寸变更时用户微调被模板重建覆盖而跳变；
+ * 否则采用模板坐标（与 calcCoverOverrides 输出一致）。
+ * @param manual      用户当前 slotOverrides（未包含的槽用模板）
+ * @param template    新尺寸下模板驱动的 slotOverrides
+ * @param oldTemplate 旧尺寸下模板驱动的 slotOverrides（用于判定是否"手动改过"）
+ * @param kx ky       缩放系数（尺寸未变传 1）
+ */
+function mergeManualSlotOverrides(config: {
+  manual: Record<string, SlotOverride> | undefined;
+  template: Record<string, SlotOverride>;
+  oldTemplate: Record<string, SlotOverride>;
+  kx: number;
+  ky: number;
+}): Record<string, SlotOverride> {
+  const out: Record<string, SlotOverride> = {};
+  const near = (a: number, b: number) => Math.abs(a - b) <= 0.5;
+  for (const id of Object.keys(config.template)) {
+    const t = config.template[id];
+    const m = config.manual?.[id];
+    const ot = config.oldTemplate[id];
+    // 手动改过：与旧模板坐标四边任一明显不同
+    const isManual = !!m && !!ot && (
+      !near(m.x, ot.x) || !near(m.y, ot.y) ||
+      !near(m.width, ot.width) || !near(m.height, ot.height)
+    );
+    out[id] = isManual && config.kx === 1 && config.ky === 1
+      ? m
+      : isManual
+        ? { x: m.x * config.kx, y: m.y * config.ky, width: m.width * config.kx, height: m.height * config.ky }
+        : t;
+  }
+  return out;
+}
+
 /* ── 相册元数据 slice ── */
 export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => ({
   albumSize: null,
@@ -86,9 +133,25 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
         if (isGooglePhotosPage(p)) {
           return { ...p, googlePhotosBasePageSize: { width: size.width, height: size.height } };
         }
-        // 封面/封底页：文字/形状按新旧尺寸等比重映射（+ 文字撑高），保证不同尺寸下布局协调不溢出
+        // 封面/封底页：文字/形状按新旧尺寸等比重映射（+ 文字撑高），书脊文字按新页高重排；
+        // 照片槽位同步用新尺寸重算（保留用户手动微调），避免槽位停留在旧尺寸绝对像素而照片不随尺寸自适应。
         if (isCoverOrBackCoverPage(p) && hasOld) {
-          return rescaleCoverDecorations(p, { width: oldSize.width, height: oldSize.height }, { width: size.width, height: size.height });
+          const scaled = rescaleCoverDecorations(p, { width: oldSize.width, height: oldSize.height }, { width: size.width, height: size.height });
+          const oldCov = calcCoverOverrides(p, { width: oldSize.width, height: oldSize.height });
+          const newCov = calcCoverOverrides(p, size);
+          if (newCov) {
+            return {
+              ...scaled,
+              slotOverrides: mergeManualSlotOverrides({
+                manual: p.slotOverrides,
+                template: newCov.overrides,
+                oldTemplate: oldCov?.overrides ?? {},
+                kx: size.width / oldSize.width,
+                ky: size.height / oldSize.height,
+              }),
+            };
+          }
+          return scaled;
         }
         // 模板页面：清除 slotOverrides，触发等比缩放 fallback + dirty 重算
         if (p.slotOverrides) {
@@ -96,8 +159,11 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
         }
         return p;
       });
-      // 标记所有页面为 dirty，翻页时按新尺寸重算 margin overrides
+      // 标记所有页面为 dirty，翻页时按新尺寸重算 margin overrides。
+      // 封面/封底页已在上方用新尺寸同步重算（含手动微调保留），不再标记 dirty，
+      // 避免翻页重算时把封面手动微调的照片槽位覆盖掉造成跳变。
       for (let i = 0; i < newPages.length; i++) {
+        if (isCoverOrBackCoverPage(newPages[i])) continue;
         dirtyMarginPageIds.add(i);
       }
       return { albumSize: size, pages: newPages };
@@ -140,8 +206,19 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
           const np = [...s.pages];
           const cp = np[currentPageIndex];
           if (cp) {
-            np[currentPageIndex] = result
-              ? { ...result.newPage, ...(isCover ? {} : { slotCornerRadius: cornerRadius }) }
+            // 封面/封底页：保留用户手动拖改的照片槽位（尺寸未变，kx=ky=1 时原样保留），其余用模板坐标，
+            // 避免重新计算 slotOverrides 时把用户微调照片位置覆盖掉导致跳变；且不写入圆角。
+            const coverMerged = isCover && result
+              ? { ...result.newPage, slotOverrides: mergeManualSlotOverrides({
+                  manual: cp.slotOverrides,
+                  template: result.overrides ?? {},
+                  oldTemplate: result.overrides ?? {},
+                  kx: 1,
+                  ky: 1,
+                }) }
+              : result?.newPage;
+            np[currentPageIndex] = coverMerged
+              ? { ...coverMerged, ...(isCover ? {} : { slotCornerRadius: cornerRadius }) }
               : (isCover ? cp : { ...cp, slotCornerRadius: cornerRadius });
           }
           return { pages: np };

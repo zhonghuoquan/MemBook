@@ -63,12 +63,14 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
     setMarkedDelete({});
 
     try {
+      let failedCount = 0;
       const res = await findSimilarPhotos(photos, {
         signal: abortRef.current.signal,
         onProgress: setProgress,
         minDistance: MIN_DISTANCE,
         maxDistance,
         readData: readPhotoData,
+        onFailure: (count) => { failedCount = count; },
       });
       setGroups(res);
       setScanned(true);
@@ -85,6 +87,13 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
         targetTool: 'similar',
         color: 'amber',
       });
+      // 单张失败温和降级：部分照片读取/解码失败不中断，其余正常分析，完成后提示
+      if (failedCount > 0) {
+        addToast({
+          type: 'warning',
+          message: t('home.organize.similar.toastSomeFailed', { failed: failedCount }),
+        });
+      }
       if (res.length > 0) {
         addToast({
           type: 'info',

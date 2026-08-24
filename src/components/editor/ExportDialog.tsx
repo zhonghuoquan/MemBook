@@ -1,10 +1,11 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore } from '../../store';
 import type { ExportOptions, ExportFormat, ExportResult } from '../../utils/exportEngine';
 import { exportToPNG, exportToJPG, exportToPDF, cancelExport } from '../../utils/exportEngine';
 import { useDraggable } from '../../hooks/useDraggable';
 import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
+import { SPINE_WIDTH_MIN_MM, SPINE_WIDTH_MAX_MM } from './canvas/constants';
 import { logger } from '../../utils/logger';
 
 interface ExportDialogProps {
@@ -150,6 +151,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [pageRange, setPageRange] = useState<'all' | 'range'>('all');
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1);
+  // 内容页起始页码（跨相册连续编号用，手动填；默认 1）
+  const [startPageNumber, setStartPageNumber] = useState(1);
   const [quality, setQuality] = useState(90);
   const [dpi, setDpi] = useState(300);
   const [bleed, setBleed] = useState(0);
@@ -165,6 +168,15 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const pages = useEditorStore((s) => s.pages);
   const albumSize = useEditorStore((s) => s.albumSize);
   const addToast = useUIStore((s) => s.addToast);
+
+  // 读取页面设置中书脊宽度（封面页 spineWidth），打开对话框时同步到导出设置，避免默认 0 与页面不一致
+  const coverSpineWidth = useMemo(
+    () => pages.find((p) => p.pageKind === 'cover')?.spineWidth ?? 0,
+    [pages],
+  );
+  useEffect(() => {
+    if (isOpen) setSpineWidth(coverSpineWidth);
+  }, [isOpen, coverSpineWidth]);
   const drag = useDraggable(isOpen && !isExporting);
   const cancellingRef = useRef(false);
 
@@ -242,6 +254,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       dpi,
       pageRange: pageRange === 'all' ? { start: 1, end: pages.length } : { start: startPage, end: endPage },
       projectName: (fileName || defaultName),
+      pageNumberStart: Number.isFinite(startPageNumber) && startPageNumber >= 1 ? startPageNumber : 1,
       outputPath: exportPath || undefined,
       bleed,
       spineWidth,
@@ -286,7 +299,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       setIsExporting(false);
       setProgress(0);
     }
-  }, [format, quality, dpi, bleed, spineWidth, pageRange, startPage, endPage, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
+  }, [format, quality, dpi, bleed, spineWidth, pageRange, startPage, endPage, startPageNumber, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
 
   const handleOpenFile = useCallback(async () => {
     if (!exportResult?.path) return;
@@ -428,8 +441,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   </div>
                 )}
 
-                {/* 印刷增强：出血 + 书脊（仅 PDF） */}
-                {format === 'pdf' && (
+                {/* 印刷增强：出血 + 书脊（PDF / PNG / JPG 通用） */}
+                {(format === 'pdf' || format === 'png' || format === 'jpg') && (
                   <div className="pt-2 border-t border-[var(--color-border-light)]">
                     <div className="text-[12px] font-[600] text-[var(--color-gray-700)] mb-2">{t('editor.exportDialog.printEnhance')}</div>
                     <div className="space-y-3">
@@ -442,7 +455,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                       </div>
                       <div>
                         <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-600)] mb-1">{t('editor.print.spine')} · <span className="text-[var(--color-primary-600)]">{spineWidth} mm</span></label>
-                        <input type="range" min={0} max={20} step={1} value={spineWidth}
+                        <input type="range" min={SPINE_WIDTH_MIN_MM} max={SPINE_WIDTH_MAX_MM} step={1} value={spineWidth}
                           onChange={(e) => setSpineWidth(Number(e.target.value))}
                           className="w-full accent-[var(--color-brand)]" />
                         <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.spineHint')}</p>
@@ -477,6 +490,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                         className="w-14 h-8 px-1.5 text-center border border-[var(--color-border)] rounded-[var(--radius-sm)] text-[var(--text-body-sm)] outline-none focus:border-[var(--color-primary-400)]" />
                     </div>
                   )}
+                </div>
+
+                {/* 内容页起始页码：跨相册连续编号续接用（封面/封底不计页码） */}
+                <div>
+                  <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-700)] mb-1">{t('editor.exportDialog.startPageNumber')}</label>
+                  <input type="number" min={1} value={startPageNumber} onChange={(e) => setStartPageNumber(Number(e.target.value))}
+                    className="h-8 w-20 px-2 border border-[var(--color-border)] rounded-[var(--radius-sm)] text-[var(--text-body-sm)] text-[var(--color-gray-800)] outline-none focus:border-[var(--color-primary-400)]" />
+                  <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-1">{t('editor.exportDialog.startPageNumberHint')}</p>
                 </div>
               </div>
             </div>

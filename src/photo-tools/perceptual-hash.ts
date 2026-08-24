@@ -57,16 +57,34 @@ export async function computePHash(data: ArrayBuffer): Promise<string | null> {
 }
 
 /**
- * 从 ImageBitmap 计算 pHash（已解码后的位图）
+ * 从 ImageBitmap 计算 pHash（已解码后的位图）。
+ * 主线程版本使用 document canvas。
  */
 export async function computePHashFromBitmap(bitmap: ImageBitmap): Promise<string | null> {
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = HASH_SIZE;
-    canvas.height = HASH_SIZE;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = HASH_SIZE;
+  canvas.height = HASH_SIZE;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  return computePHashFromBitmapCtx(bitmap, ctx);
+}
 
+/**
+ * Worker 安全的 pHash（用 OffscreenCanvas，供 Web Worker 调用）。
+ * 与 computePHashFromBitmap 共用同一算法核心，保证结果一致。
+ */
+export async function computePHashFromBitmapOffscreen(bitmap: ImageBitmap): Promise<string | null> {
+  const canvas = new OffscreenCanvas(HASH_SIZE, HASH_SIZE);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  return computePHashFromBitmapCtx(bitmap, ctx);
+}
+
+type HashCanvasCtx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+
+/** 位图 → pHash 公共核心（主线程 / Worker 共用，物理结果逐位一致） */
+async function computePHashFromBitmapCtx(bitmap: ImageBitmap, ctx: Exclude<HashCanvasCtx, null>): Promise<string | null> {
+  try {
     ctx.drawImage(bitmap, 0, 0, HASH_SIZE, HASH_SIZE);
     const imageData = ctx.getImageData(0, 0, HASH_SIZE, HASH_SIZE);
     const gray = new Float64Array(HASH_SIZE * HASH_SIZE);

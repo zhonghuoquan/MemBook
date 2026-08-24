@@ -36,7 +36,7 @@ function photo(id: string, name = `${id}.jpg`): PhotoFileInfo {
 }
 
 describe('recluster', () => {
-  it('无检测结果时返回空聚类', () => {
+  it('无检测结果时返回空聚类', async () => {
     const photos = [photo('p1'), photo('p2')];
     const detection: FaceDetectionResult = {
       faces: [],
@@ -45,14 +45,14 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 2,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(0);
     expect(res.noFacePhotos).toHaveLength(2);
     expect(res.totalPhotos).toBe(2);
     expect(res.photosWithFaces).toBe(0);
   });
 
-  it('同一人（相似 descriptor）聚为一组', () => {
+  it('同一人（相似 descriptor）聚为一组', async () => {
     // 两张几乎相同的 face descriptor → 属于同一人
     const f1 = face([0.1, 0.2, 0.3, 0.4, 0.5], 'p1');
     const f2 = face([0.11, 0.21, 0.31, 0.41, 0.51], 'p2');
@@ -64,14 +64,14 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 2,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     // 距离很小，应合并为 1 组
     expect(res.clusters).toHaveLength(1);
     expect(res.clusters[0].photoCount).toBe(2);
     expect(res.noFacePhotos).toHaveLength(0);
   });
 
-  it('不同人（差异大 descriptor）分为多组', () => {
+  it('不同人（差异大 descriptor）分为多组', async () => {
     // 两个差异很大的 descriptor → 分为 2 组
     const f1 = face([0.9, 0.9, 0.9, 0.9, 0.9], 'p1');
     const f2 = face([0.1, 0.1, 0.1, 0.1, 0.1], 'p2');
@@ -83,11 +83,11 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 2,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(2);
   });
 
-  it('单张照片只有一个人脸时成单组', () => {
+  it('单张照片只有一个人脸时成单组', async () => {
     const f1 = face([0.5, 0.5, 0.5, 0.5], 'p1');
     const photos = [photo('p1')];
     const detection: FaceDetectionResult = {
@@ -97,13 +97,13 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 1,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(1);
     expect(res.clusters[0].photoCount).toBe(1);
     expect(res.noFacePhotos).toHaveLength(0);
   });
 
-  it('无任何人脸时所有照片归入无人脸列表', () => {
+  it('无任何人脸时所有照片归入无人脸列表', async () => {
     const photos = [photo('p1'), photo('p2'), photo('p3')];
     const detection: FaceDetectionResult = {
       faces: [],
@@ -112,13 +112,13 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 3,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(0);
     expect(res.noFacePhotos.map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
     expect(res.failedPhotos).toBe(1);
   });
 
-  it('代表性人脸选择面积最大且置信度最高的', () => {
+  it('代表性人脸选择面积最大且置信度最高的', async () => {
     // 同一组内，较大人脸应被选为代表
     const small = face([0.5, 0.5, 0.5, 0.5, 0.5], 'p1', { width: 0.2, height: 0.2, score: 0.5 });
     const big = face([0.5, 0.5, 0.5, 0.5, 0.5], 'p2', { width: 0.8, height: 0.8, score: 0.9 });
@@ -130,14 +130,14 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 2,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(1);
     // 代表性人脸应是较大的人脸
     expect(res.clusters[0].representativeFace.width).toBe(0.8);
     expect(res.clusters[0].representativeFace.height).toBe(0.8);
   });
 
-  it('同一照片多个人脸时照片在组内去重', () => {
+  it('同一照片多个人脸时照片在组内去重', async () => {
     // p1 有两个人脸，p2 有一个人脸，全部相似
     const f1 = face([0.5, 0.5, 0.5, 0.5], 'p1');
     const f2 = face([0.5, 0.5, 0.5, 0.5], 'p1');
@@ -150,14 +150,14 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 2,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     expect(res.clusters).toHaveLength(1);
     // 照片去重：p1 只出现一次
     expect(res.clusters[0].photos.map((p) => p.id).sort()).toEqual(['p1', 'p2']);
     expect(res.clusters[0].photoCount).toBe(2);
   });
 
-  it('没有对应照片的 face 记录被过滤', () => {
+  it('没有对应照片的 face 记录被过滤', async () => {
     // p1 有 face，但 p2 在 photos 列表中不存在
     const f1 = face([0.5, 0.5, 0.5, 0.5], 'p1');
     const fGhost = face([0.5, 0.5, 0.5, 0.5], 'ghost');
@@ -169,7 +169,7 @@ describe('recluster', () => {
       modelLoadFailed: false,
       totalPhotos: 1,
     };
-    const res = recluster(detection, 0.5, photos);
+    const res = await recluster(detection, 0.5, photos);
     // ghost 无对应照片，被过滤后只剩 p1 一组
     expect(res.clusters.some((c) => c.photos.some((p) => p.id === 'ghost'))).toBe(false);
     expect(res.noFacePhotos).toHaveLength(0);

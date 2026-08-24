@@ -47,6 +47,67 @@ function formatDateForInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+/**
+ * 单张照片转 JPEG：读取原图 → convertToJpg → 写回（folder+Tauri）或其他模式仅下载。
+ * 供单行“转格式”按钮与“全部转换”共用的底层操作（单一来源）。
+ * @returns 若为写回模式则返回更新后的 PhotoFileInfo，非写回模式返回 null（仅下载，不更新列表）。
+ */
+async function convertPhotoToJpeg(
+  photo: PhotoFileInfo,
+  readPhotoData: ToolProps['readPhotoData'],
+  sourceMode: ToolProps['sourceMode'],
+): Promise<{ updated: PhotoFileInfo | null }> {
+  const data = await readPhotoData(photo);
+  if (!data) throw new Error('readFailed');
+  const { blob } = await convertToJpg(data, photo.ext, { quality: 0.95, filePath: photo.path });
+  const jpgName = photo.name.replace(/\.[^.]+$/, '.jpg');
+  if (isTauri() && photo.path && sourceMode === 'folder') {
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    const { invoke } = await import('@tauri-apps/api/core');
+    const jpgPath = photo.path.replace(/\.[^.]+$/, '.jpg');
+    const buf = await blob.arrayBuffer();
+    await writeFile(jpgPath, new Uint8Array(buf));
+    // 仅当新路径与原路径不同时才删除原文件（JPG 重编码时路径相同，无需删除）
+    if (jpgPath !== photo.path) {
+      try { await invoke('trash_files', { paths: [photo.path] }); } catch { /* ignore */ }
+    }
+    return {
+      updated: {
+        ...photo,
+        name: jpgName,
+        ext: '.jpg',
+        mimeType: 'image/jpeg',
+        path: jpgPath,
+        relativePath: photo.relativePath ? photo.relativePath.replace(/\.[^.]+$/, '.jpg') : photo.relativePath,
+        size: buf.byteLength,
+      },
+    };
+  }
+  downloadBlob(blob, jpgName);
+  return { updated: null };
+}
+
+/**
+ * 单张照片写入拍摄日期 EXIF。
+ * 供单行“修改”按钮与“全部修改”共用的底层操作（单一来源）。
+ */
+async function writeDateToPhoto(
+  photo: PhotoFileInfo,
+  date: Date,
+  readPhotoData: ToolProps['readPhotoData'],
+  sourceMode: ToolProps['sourceMode'],
+): Promise<void> {
+  const data = await readPhotoData(photo);
+  if (!data) throw new Error('readFailed');
+  const modified = await writeExifDate(data, photo.ext, date, undefined);
+  if (isTauri() && photo.path && sourceMode === 'folder') {
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    await writeFile(photo.path, new Uint8Array(modified));
+  } else {
+    downloadBlob(new Blob([modified], { type: photo.mimeType || 'image/jpeg' }), photo.name);
+  }
+}
+
 export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature }: ToolProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'date' | 'gps'>('date');
@@ -83,6 +144,34 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
   const [convertingAll, setConvertingAll] = useState(false);
   const [writingAll, setWritingAll] = useState(false);
 
+  // 无日期列表中各行的当前可执行状态（由 NoDatePhotoRow 上报）：
+  // convertTargets = 已出现「转格式」按钮的照片 id；modifyQueue = 已输入日期的照片 id → Date
+  const [convertTargets, setConvertTargets] = useState<Set<string>>(new Set());
+  const [modifyQueue, setModifyQueue] = useState<Map<string, Date>>(new Map());
+
+  // 子行状态上报：转换候选 / 已输入日期是否变化，驱动「全部转换 / 全部修改」的可点性
+  const handleReport = useCallback(
+    (id: string, r: { convert: boolean; date: Date | null }) => {
+      setConvertTargets((prev) => {
+        if (r.convert === prev.has(id)) return prev;
+        const n = new Set(prev);
+        if (r.convert) n.add(id);
+        else n.delete(id);
+        return n;
+      });
+      setModifyQueue((prev) => {
+        const prevDate = prev.get(id) ?? null;
+        // 按时间值比较（r.date 每次渲染都是新 Date 引用，不能用 ===）
+        if ((prevDate?.getTime() ?? null) === (r.date?.getTime() ?? null)) return prev;
+        const n = new Map(prev);
+        if (r.date) n.set(id, r.date);
+        else n.delete(id);
+        return n;
+      });
+    },
+    [],
+  );
+
   // 通知父组件工具执行状态（running/geocoding/批量操作），用于禁用标签切换
   const busy = running || geocoding || convertingAll || writingAll;
   useEffect(() => {
@@ -98,6 +187,18 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     }
     return true;
   });
+
+  // 当前待转换 / 待写入日期的候选照片（用于按钮禁用态与批量执行）
+  // 候选由 NoDatePhotoRow 经 handleReport 上报，必须列在 writablePhotos 之后定义
+  const convertCandidates = useMemo(
+    () => writablePhotos.filter((p) => convertTargets.has(p.id)),
+    [writablePhotos, convertTargets],
+  );
+  const modifyCandidates = useMemo(
+    () => writablePhotos.filter((p) => modifyQueue.has(p.id) && !!modifyQueue.get(p.id)),
+    [writablePhotos, modifyQueue],
+  );
+
   const parsedDate = mode === 'date' ? parseDateInput(dateInput) : null;
 
   // 按是否已有拍摄日期分组统计
@@ -206,10 +307,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     }
   };
 
-  // 全部转换：批量把所有「无日期且已识别到日期」的照片转为 JPEG
-  // 转换后照片 ext/path 更新为 jpg，用户可继续点「全部修改」写入日期
+  // 全部转换：逐张转换列表中已出现「转格式」按钮的照片（非 JPEG / 修改失败过的 JPEG）
+  // 目标来自 NoDatePhotoRow 上报的 convertTargets，确保「一键转换」只作用在用户可见的转换项上
   const handleConvertAll = useCallback(async () => {
-    const targets = photosWithoutDate.filter((p) => parseFilenameDate(p.name));
+    const targets = convertCandidates; // 点击时的快照，避免执行中因列表变化导致循环失真
     if (targets.length === 0) {
       addToast({ type: 'info', message: t('home.organize.exif.convertAllNoTarget') });
       return;
@@ -224,34 +325,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       for (let i = 0; i < targets.length; i++) {
         const photo = targets[i];
         try {
-          const data = await readPhotoData(photo);
-          if (!data) throw new Error(t('home.organize.exif.readFailed'));
-
-          const { blob } = await convertToJpg(data, photo.ext, { quality: 0.95, filePath: photo.path });
-          const jpgName = photo.name.replace(/\.[^.]+$/, '.jpg');
-
-          if (isTauri() && photo.path && sourceMode === 'folder') {
-            const { writeFile } = await import('@tauri-apps/plugin-fs');
-            const { invoke } = await import('@tauri-apps/api/core');
-            const jpgPath = photo.path.replace(/\.[^.]+$/, '.jpg');
-            const buf = await blob.arrayBuffer();
-            await writeFile(jpgPath, new Uint8Array(buf));
-            // 仅当新路径与原路径不同时才删除原文件（JPG 重编码时路径相同，无需删除）
-            if (jpgPath !== photo.path) {
-              try { await invoke('trash_files', { paths: [photo.path] }); } catch { /* ignore */ }
-            }
-            // 更新照片信息
-            onPhotosUpdate((prev) => prev.map((item) => item.id === photo.id ? {
-              ...item,
-              name: jpgName,
-              ext: '.jpg',
-              mimeType: 'image/jpeg',
-              path: jpgPath,
-              relativePath: item.relativePath ? item.relativePath.replace(/\.[^.]+$/, '.jpg') : item.relativePath,
-              size: buf.byteLength,
-            } : item));
-          } else {
-            downloadBlob(blob, jpgName);
+          const { updated } = await convertPhotoToJpeg(photo, readPhotoData, sourceMode);
+          if (updated) {
+            // 更新照片信息（原生路径变化，照片移出时 NoDatePhotoRow 会自动撤销 convert 上报）
+            onPhotosUpdate((prev) => prev.map((item) => (item.id === photo.id ? updated : item)));
           }
           ok++;
         } catch (err) {
@@ -270,15 +347,12 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       setConvertingAll(false);
       setProgress(null);
     }
-  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
+  }, [convertCandidates, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
 
-  // 全部修改：批量把所有「无日期、已识别到日期、且已是 JPEG」的照片写入拍摄日期
-  // 非 JPEG 照片需先点「全部转换」，转换后再点「全部修改」
+  // 全部修改：逐张写入列表中「已录入/识别到有效日期」照片的拍摄日期（来自 modifyQueue）
+  // 与单行「修改」按钮共用 writeDateToPhoto，确保批量与单文件行为一致
   const handleWriteAll = useCallback(async () => {
-    const targets = photosWithoutDate.filter((p) => {
-      const d = parseFilenameDate(p.name);
-      return d && (p.ext === '.jpg' || p.ext === '.jpeg');
-    });
+    const targets = modifyCandidates; // 点击时的快照
     if (targets.length === 0) {
       addToast({ type: 'info', message: t('home.organize.exif.writeAllNoTarget') });
       return;
@@ -292,22 +366,12 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     try {
       for (let i = 0; i < targets.length; i++) {
         const photo = targets[i];
-        const parsedDate = parseFilenameDate(photo.name);
+        const parsedDate = modifyQueue.get(photo.id);
         if (!parsedDate) { fail++; continue; }
         try {
-          const data = await readPhotoData(photo);
-          if (!data) throw new Error(t('home.organize.exif.readFailed'));
-
-          const modified = await writeExifDate(data, photo.ext, parsedDate, undefined);
-
-          if (isTauri() && photo.path && sourceMode === 'folder') {
-            const { writeFile } = await import('@tauri-apps/plugin-fs');
-            await writeFile(photo.path, new Uint8Array(modified));
-          } else {
-            downloadBlob(new Blob([modified], { type: 'image/jpeg' }), photo.name);
-          }
+          await writeDateToPhoto(photo, parsedDate, readPhotoData, sourceMode);
           // 更新照片 dateTaken，照片会被移出无日期列表
-          onPhotosUpdate((prev) => prev.map((item) => item.id === photo.id ? { ...item, dateTaken: parsedDate.toISOString() } : item));
+          onPhotosUpdate((prev) => prev.map((item) => (item.id === photo.id ? { ...item, dateTaken: parsedDate.toISOString() } : item)));
           ok++;
         } catch (err) {
           logger.warn(`[exif-writeall] ${photo.name}`, err);
@@ -325,7 +389,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
       setWritingAll(false);
       setProgress(null);
     }
-  }, [photosWithoutDate, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
+  }, [modifyCandidates, modifyQueue, readPhotoData, sourceMode, onPhotosUpdate, addToast, t, proFeature, checkProFeature]);
 
   const isDesktop = isTauri();
 
@@ -431,6 +495,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                               sourceMode={sourceMode}
                               readPhotoData={readPhotoData}
                               addToast={addToast}
+                              onReport={handleReport}
                               onDateUpdated={(newDate) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, dateTaken: newDate } : item)))}
                               onPhotoConverted={(updated) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? updated : item)))}
                             />
@@ -444,10 +509,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                     {photosWithoutDate.length > 0 && (
                       <div className="mt-2 space-y-1.5">
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* 全部转换：把已识别日期的照片转为 JPEG */}
+                          {/* 全部转换：一键转换列表中已出现「转格式」按钮的照片（无目标时禁用） */}
                           <button
                             onClick={handleConvertAll}
-                            disabled={convertingAll || busy}
+                            disabled={convertingAll || busy || convertCandidates.length === 0}
                             className="px-3 py-1.5 rounded-lg text-xs font-[600] border-none cursor-pointer transition-all
                                        bg-orange-500 text-white hover:opacity-90
                                        disabled:opacity-40 disabled:cursor-not-allowed
@@ -462,10 +527,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                             </svg>
                             {convertingAll ? t('home.organize.exif.convertingAll') : t('home.organize.exif.convertAll')}
                           </button>
-                          {/* 全部修改：把已识别日期的 JPEG 照片批量写入日期 */}
+                          {/* 全部修改：一键写入列表中已录入/识别到日期的照片（无目标时禁用） */}
                           <button
                             onClick={handleWriteAll}
-                            disabled={writingAll || busy}
+                            disabled={writingAll || busy || modifyCandidates.length === 0}
                             className="px-3 py-1.5 rounded-lg text-xs font-[600] border-none cursor-pointer transition-all
                                        bg-[var(--color-brand)] text-white hover:opacity-90
                                        disabled:opacity-40 disabled:cursor-not-allowed
@@ -478,6 +543,13 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
                             {writingAll ? t('home.organize.exif.writingAll') : t('home.organize.exif.writeAll')}
                           </button>
                         </div>
+                        {/* 无目标时的禁用原因提示 */}
+                        {convertCandidates.length === 0 && (
+                          <p className="text-[10px] text-orange-500 leading-tight">{t('home.organize.exif.convertAllNoTarget')}</p>
+                        )}
+                        {modifyCandidates.length === 0 && (
+                          <p className="text-[10px] text-orange-500 leading-tight">{t('home.organize.exif.writeAllNoTarget')}</p>
+                        )}
                         <p className="text-[10px] text-[var(--color-gray-400)] leading-tight">
                           {t('home.organize.exif.batchHint')}
                         </p>
@@ -615,13 +687,15 @@ interface NoDatePhotoRowProps {
   sourceMode: import('../../../photo-tools').DataSourceMode;
   readPhotoData: (photo: PhotoFileInfo, length?: number) => Promise<ArrayBuffer | null>;
   addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void;
+  /** 向父组件上报本行的「可转换 / 已录入日期」状态，驱动「全部转换 / 全部修改」候选与禁用态 */
+  onReport: (id: string, r: { convert: boolean; date: Date | null }) => void;
   /** 日期写入成功后回调，传入新的 dateTaken ISO 字符串 */
   onDateUpdated: (newDateIso: string) => void;
   /** 转换格式成功后回调，传入更新后的 PhotoFileInfo（ext/path/name 变为 jpg） */
   onPhotoConverted: (updated: PhotoFileInfo) => void;
 }
 
-function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onDateUpdated, onPhotoConverted }: NoDatePhotoRowProps) {
+function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, onDateUpdated, onPhotoConverted }: NoDatePhotoRowProps) {
   const { t } = useTranslation();
   // 从文件名自动识别日期（parseFilenameDate 支持 9 种常见命名格式）
   const recognizedDate = useMemo(() => parseFilenameDate(photo.name), [photo.name]);
@@ -639,6 +713,13 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onDateUpda
   const canModify = !!parsedDate && !modifying && !done && !converting;
   // 非 JPEG 格式或修改失败时显示转格式按钮（JPEG 已可正常写 EXIF）
   const showConvertBtn = (modifyFailed || photo.ext !== '.jpg') && !done && !converting;
+  // 上报用标记：忽略 converting 瞬时态，保证转换期间候选不丢失；完成/移出列表后清空
+  const reportConvert = (modifyFailed || photo.ext !== '.jpg') && !done;
+
+  // 向父组件上报本行候选状态（deps 用 dateInput 原始串而非 parsedDate，避免每次渲染的新 Date 引用引发父组件死循环）
+  useEffect(() => {
+    onReport(photo.id, { convert: reportConvert, date: done ? null : parsedDate });
+  }, [photo.id, reportConvert, done, dateInput, onReport]);
 
   const handleModify = useCallback(async () => {
     if (!parsedDate || modifying || done) return;

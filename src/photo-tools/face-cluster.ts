@@ -24,6 +24,7 @@ import type { PhotoFileInfo, FaceRecord, FaceCluster, FaceClusterResult, FaceDet
 import { logger } from '../utils/logger';
 import { ensureSupportedFormat } from '../engine/storage/heic-converter';
 import { isHeicFile } from '../engine/storage/utils';
+import { runInChunks, yieldToMain } from './async-utils';
 
 // ── face-api.js 类型定义（仅声明用到的部分） ────────────────
 
@@ -418,25 +419,39 @@ function euclideanDistance(a: Float32Array, b: Float32Array): number {
 // ── 层次聚类（Complete Linkage） ──────────────────────────
 
 /**
+ * 三角形距离矩阵中 (i<j) 的扁平下标
+ * 行优先存储仅上三角：idx = i*n - i*(i+1)/2 - i - 1 + j
+ */
+function pairIndex(i: number, j: number, n: number): number {
+  return i * n - (i * (i + 1)) / 2 - i - 1 + j;
+}
+
+/**
  * 对人脸 descriptor 进行层次聚类（complete linkage）
  *
  * complete linkage：两个簇合并当且仅当它们之间所有 face pair 的距离都 <= 阈值
  * 相比 single linkage，能防止"链式效应"（A~B, B~C → ABC 同组，即使 A 和 C 差异大）
  *
- * 实现：最小生成树（Prim）+ 阈值切边
- * 但切边时不仅看 MST 边，还检查簇间最小距离（complete linkage 语义）
- *
- * 复杂度 O(n²)，n < 5000 可接受
+ * 大批量优化（上万张人脸不卡死）：
+ * 1. 距离矩阵 O(n²) 计算改为分批，每批之间 yieldToMain 让出主线程
+ * 2. 矩阵用三角形扁平存储（仅保留 i<j），内存减半
+ * 3. 「防爆表」：只收集距离 <= 阈值的 pair（距离更大的 pair 本就不可能合并），
+ *    且用类型化数组存储 + 距离升序索引排序，避免原先「构建 O(n²) 个对象再 sort」
+ *    的内存/时间爆炸；超过 MAX_CLOSE_PAIRS 时按比例截断人脸集并告警
+ * 4. complete linkage 跨簇检查用「簇成员表 + 生成计数器 memo」：
+ *    同一对簇首次检查后缓存结果，簇成员变化（gen 变化）才重算，
+ *    避免 O(³) 的全量两两重扫（历史爆表主因）
+ * 5. 合并循环分批 + yieldToMain，处理中 UI 保持响应
  */
-function agglomerativeCluster(
+async function agglomerativeCluster(
   faces: FaceRecord[],
   threshold: number,
-): FaceRecord[][] {
+): Promise<FaceRecord[][]> {
   const n = faces.length;
   if (n === 0) return [];
   if (n === 1) return [faces];
 
-  // 硬限制：人脸数超过 5000 时截断
+  // 硬限制：人脸数超过上限时截断
   const MAX_FACES = 5000;
   if (n > MAX_FACES) {
     logger.warn(`[face-cluster] 人脸数 ${n} 超过上限 ${MAX_FACES}，截断前 ${MAX_FACES} 个`);
@@ -444,96 +459,168 @@ function agglomerativeCluster(
   }
 
   const limitedN = faces.length;
+  const totalPairs = (limitedN * (limitedN - 1)) / 2;
 
-  // 预计算距离矩阵（对称），O(n²)
-  // 必须先初始化所有行，再填充距离值。
-  // 否则当 i=0, j=1 时 distMatrix[1] 还是 undefined，
-  // 执行 distMatrix[1][0] = dist 会抛 "Cannot set properties of undefined (setting '0')"
-  const distMatrix: Float32Array[] = new Array(limitedN);
-  for (let i = 0; i < limitedN; i++) {
-    distMatrix[i] = new Float32Array(limitedN);
-  }
-  for (let i = 0; i < limitedN; i++) {
-    for (let j = i + 1; j < limitedN; j++) {
-      const dist = euclideanDistance(faces[i].descriptor, faces[j].descriptor);
-      distMatrix[i][j] = dist;
-      distMatrix[j][i] = dist;
-    }
-  }
-
-  // ── 并查集 ──
-  const parent: number[] = Array.from({ length: limitedN }, (_, i) => i);
-  const find = (x: number): number => {
-    while (parent[x] !== x) {
-      parent[x] = parent[parent[x]];
-      x = parent[x];
-    }
-    return x;
-  };
-  const union = (a: number, b: number): void => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[ra] = rb;
-  };
-
-  // ── Complete linkage 聚类 ──
-  // 按距离从小到大排序所有 pair，依次尝试合并
-  // 合并条件：两簇间所有 pair 距离都 <= threshold
-  // 实现：按距离升序处理 pair，合并时检查跨簇最小距离是否 <= threshold
-
-  // 收集所有 pair 并按距离升序排序
-  const pairs: Array<{ i: number; j: number; dist: number }> = [];
-  for (let i = 0; i < limitedN; i++) {
-    for (let j = i + 1; j < limitedN; j++) {
-      pairs.push({ i, j, dist: distMatrix[i][j] });
-    }
-  }
-  pairs.sort((a, b) => a.dist - b.dist);
-
-  // 按距离升序合并：只合并距离 <= threshold 的 pair
-  // complete linkage：合并前检查两簇间最大距离是否 <= threshold
-  // 由于按距离升序处理，当前 pair 的距离是两簇间最小的未处理距离
-  // 如果当前 pair 距离已 > threshold，后续 pair 只会更大，跳过
-  for (const { i, j, dist } of pairs) {
-    if (dist > threshold) break; // 后续 pair 距离更大，全部跳过
-
-    const ri = find(i);
-    const rj = find(j);
-    if (ri === rj) continue; // 已在同簇
-
-    // Complete linkage 检查：两簇间所有 pair 的最大距离是否 <= threshold
-    // 收集两簇所有成员
-    const membersI: number[] = [];
-    const membersJ: number[] = [];
-    for (let k = 0; k < limitedN; k++) {
-      if (find(k) === ri) membersI.push(k);
-      else if (find(k) === rj) membersJ.push(k);
-    }
-
-    // 检查跨簇最大距离
-    let maxDist = 0;
-    for (const mi of membersI) {
-      for (const mj of membersJ) {
-        if (distMatrix[mi][mj] > maxDist) maxDist = distMatrix[mi][mj];
+  // ── 距离矩阵分批计算（三角形扁平存储，O(n²) 分批让出主线程） ──
+  const distFlat = new Float32Array(totalPairs);
+  const MATRIX_BATCH_ROWS = 200; // 每批计算多少行，批间让出主线程
+  for (let r0 = 0; r0 < limitedN; r0 += MATRIX_BATCH_ROWS) {
+    const rEnd = Math.min(r0 + MATRIX_BATCH_ROWS, limitedN);
+    for (let i = r0; i < rEnd; i++) {
+      const fi = faces[i].descriptor;
+      for (let j = i + 1; j < limitedN; j++) {
+        distFlat[pairIndex(i, j, limitedN)] = euclideanDistance(fi, faces[j].descriptor);
       }
     }
+    if (rEnd < limitedN) await yieldToMain();
+  }
 
-    if (maxDist <= threshold) {
-      union(i, j);
+  // ── 收集距离 <= 阈值的 pair（防爆表） ──
+  // 先统计数量，再分配类型化数组填充，避免动态 push 开销
+  let closeCount = 0;
+  for (let k = 0; k < totalPairs; k++) {
+    if (distFlat[k] <= threshold) closeCount++;
+  }
+
+  /** 防爆上限：最多收集 300 万对（约 24MB×2 + 排序索引 12MB），超限降级截断 */
+  const MAX_CLOSE_PAIRS = 3_000_000;
+  if (closeCount > MAX_CLOSE_PAIRS) {
+    // 极端情况：几乎所有人脸都互相接近（如全部同一个人）。为保证内存/时间有界，
+    // 只保留前 K 个人脸参与聚类（K(K-1)/2 <= MAX_CLOSE_PAIRS），其余忽略并告警。
+    const reducedN = Math.floor((1 + Math.sqrt(1 + 8 * MAX_CLOSE_PAIRS)) / 2);
+    logger.warn(
+      `[face-cluster] 阈值内 pair 数 ${closeCount} 超过上限 ${MAX_CLOSE_PAIRS}，聚类人脸截断为前 ${Math.min(reducedN, limitedN)} 个`,
+    );
+    if (reducedN < limitedN) {
+      faces = faces.slice(0, reducedN);
+      return agglomerativeCluster(faces, threshold);
     }
-    // 如果 maxDist > threshold，不合并，继续处理下一个 pair
-    // 后续可能有更近的 pair 能合并其他簇
+  }
+
+  // 分配类型化数组 + 索引排序（避免构建 O(n²) 对象数组导致内存爆炸）
+  const pairI = new Uint32Array(closeCount);
+  const pairJ = new Uint32Array(closeCount);
+  const order = new Uint32Array(closeCount);
+  let pi = 0;
+  for (let i = 0; i < limitedN; i++) {
+    for (let j = i + 1; j < limitedN; j++) {
+      const d = distFlat[pairIndex(i, j, limitedN)];
+      if (d <= threshold) {
+        pairI[pi] = i;
+        pairJ[pi] = j;
+        pi++;
+      }
+    }
+  }
+  for (let k = 0; k < closeCount; k++) order[k] = k;
+  // 按距离升序排序（浮点差值排序，稳定）
+  order.sort((a, b) => distFlat[pairIndex(pairI[a], pairJ[a], limitedN)] - distFlat[pairIndex(pairI[b], pairJ[b], limitedN)]);
+
+  // ── 并查集 + 簇成员表 ──
+  const parent = new Uint32Array(limitedN);
+  for (let i = 0; i < limitedN; i++) parent[i] = i;
+  const members: number[][] = faces.map((_, i) => [i]);
+  /** 每簇生成计数器：簇成员变化（合并）时自增，用于使缓存失效 */
+  const gen = new Uint32Array(limitedN);
+
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    // 路径压缩
+    while (parent[x] !== root) {
+      const next = parent[x];
+      parent[x] = root;
+      x = next;
+    }
+    return root;
+  };
+
+  /** 合并两簇，小簇并入大簇，更新成员表与生成计数器 */
+  const unionWithMembers = (a: number, b: number): void => {
+    let ra = find(a);
+    let rb = find(b);
+    if (ra === rb) return;
+    if (members[ra].length < members[rb].length) {
+      const tmp = ra;
+      ra = rb;
+      rb = tmp;
+    }
+    parent[rb] = ra;
+    for (const m of members[rb]) members[ra].push(m);
+    members[rb] = [];
+    gen[ra]++;
+    gen[rb]++;
+  };
+
+  // ── Complete linkage 跨簇检查（带 memo，防爆表） ──
+  // 同一对簇的检查结果缓存；任一簇成员变化（gen 变化）后自动失效重算
+  const mergeMemo = new Map<string, { genA: number; genB: number; result: boolean }>();
+  const checkMergeable = (raIn: number, rbIn: number): boolean => {
+    if (raIn === rbIn) return true;
+    const ra = raIn < rbIn ? raIn : rbIn;
+    const rb = raIn < rbIn ? rbIn : raIn;
+    const key = `${ra},${rb}`;
+    const memo = mergeMemo.get(key);
+    if (memo && memo.genA === gen[ra] && memo.genB === gen[rb]) {
+      return memo.result;
+    }
+    const listA = members[ra];
+    const listB = members[rb];
+    let maxCross = 0;
+    let allClose = true;
+    outer:
+    for (let x = 0; x < listA.length; x++) {
+      const ax = listA[x];
+      for (let y = 0; y < listB.length; y++) {
+        const by = listB[y];
+        const d = distFlat[pairIndex(Math.min(ax, by), Math.max(ax, by), limitedN)];
+        if (d > maxCross) {
+          maxCross = d;
+          if (d > threshold) {
+            allClose = false;
+            break outer;
+          }
+        }
+      }
+    }
+    // memo 有界：过大时清空（牺牲一点缓存命中换取内存安全）
+    if (mergeMemo.size > 200_000) mergeMemo.clear();
+    mergeMemo.set(key, { genA: gen[ra], genB: gen[rb], result: allClose });
+    return allClose;
+  };
+
+  // ── 按距离升序合并（分批 + 让出主线程） ──
+  const MERGE_CHUNK = 100_000;
+  for (let start = 0; start < closeCount; start += MERGE_CHUNK) {
+    const end = Math.min(start + MERGE_CHUNK, closeCount);
+    for (let k = start; k < end; k++) {
+      const i = pairI[order[k]];
+      const j = pairJ[order[k]];
+      const ri = find(i);
+      const rj = find(j);
+      if (ri === rj) continue; // 已在同簇
+      if (checkMergeable(ri, rj)) {
+        unionWithMembers(i, j);
+      }
+      // 距离 > 阈值的 pair 未收集，无需 break
+    }
+    if (end < closeCount) await yieldToMain();
   }
 
   // 按 root 分组得到簇
-  const groups = new Map<number, FaceRecord[]>();
+  const rootToIndex = new Map<number, number>();
+  const groups: FaceRecord[][] = [];
   for (let i = 0; i < limitedN; i++) {
     const root = find(i);
-    const arr = groups.get(root) ?? [];
-    arr.push(faces[i]);
-    groups.set(root, arr);
+    let gi = rootToIndex.get(root);
+    if (gi === undefined) {
+      gi = groups.length;
+      rootToIndex.set(root, gi);
+      groups.push([]);
+    }
+    groups[gi].push(faces[i]);
   }
-  return [...groups.values()];
+  return groups;
 }
 
 // ── 人脸检测（分离检测与聚类） ────────────────────────────
@@ -567,7 +654,7 @@ export async function detectFaces(
       return { faces: [], photosWithFacesSet: new Set(), failedCount: 0, modelLoadFailed: true, totalPhotos: photos.length, loadErrorMessage: lastLoadError ?? '未知错误' };
     }
 
-    // 顺序提取 descriptor（串行）
+    // 顺序提取 descriptor（分批串行 + 让出主线程）
     //
     // 为什么必须串行：tfjs 推理依赖全局可变执行状态（graph runner、当前 tensor、内存管理器）。
     // 若并发执行 detectAllFaces→withFaceLandmarks→withFaceDescriptors，多个推理任务
@@ -577,37 +664,47 @@ export async function detectFaces(
     //
     // 且 JS 为单线程：CPU 后端下"并发"只是时间片切换，无真实并行，反而因状态竞争更慢；
     // WebGL 后端也是通过主线程串行提交到 GPU。因此串行既不损失速度，又彻底消除竞态。
+    //
+    // 大批量优化：每批照片之间 yieldToMain 让出主线程，UI 可渲染/响应输入事件，
+    // 避免上万张照片时主线程长时间被占导致"卡死"；进度按批次更新（平滑、不逐张刷屏）。
+    const FACE_DETECT_BATCH = 10; // 每批处理照片数，批间让出主线程
     onProgress?.({ phase: 'detecting', current: 0, total: photos.length, message: '检测人脸...' });
     const allFaces: FaceRecord[] = [];
     const photosWithFacesSet = new Set<string>();
     let failedCount = 0;
     let doneCount = 0;
 
-    for (const photo of photos) {
-      if (signal?.aborted) break;
-      try {
-        const faces = await extractFaceDescriptors(photo, readData, inputSize, scoreThreshold);
-        if (faces.length > 0) {
-          allFaces.push(...faces);
-          photosWithFacesSet.add(photo.id);
+    await runInChunks(
+      photos,
+      FACE_DETECT_BATCH,
+      async (batch) => {
+        for (const photo of batch) {
+          try {
+            const faces = await extractFaceDescriptors(photo, readData, inputSize, scoreThreshold);
+            if (faces.length > 0) {
+              allFaces.push(...faces);
+              photosWithFacesSet.add(photo.id);
+            }
+          } catch (err) {
+            logger.warn(`[face-cluster] 处理失败 ${photo.name}:`, err);
+            failedCount++;
+          }
+          doneCount++;
         }
-      } catch (err) {
-        logger.warn(`[face-cluster] 处理失败 ${photo.name}:`, err);
-        failedCount++;
-      }
-      doneCount++;
-      // onProgress 放在 try/catch 内部，防止回调错误逃逸到顶层 catch
-      try {
-        onProgress?.({
-          phase: 'detecting',
-          current: doneCount,
-          total: photos.length,
-          message: `检测人脸 ${doneCount}/${photos.length}`,
-        });
-      } catch {
-        // 忽略进度回调错误（如 React state 更新异常）
-      }
-    }
+        // onProgress 放在 try/catch 内部，防止回调错误逃逸到顶层 catch
+        try {
+          onProgress?.({
+            phase: 'detecting',
+            current: doneCount,
+            total: photos.length,
+            message: `检测人脸 ${doneCount}/${photos.length}`,
+          });
+        } catch {
+          // 忽略进度回调错误（如 React state 更新异常）
+        }
+      },
+      signal,
+    );
 
     if (signal?.aborted) {
       throw new DOMException('已取消', 'AbortError');
@@ -654,12 +751,12 @@ export async function detectFaces(
 /**
  * 重新聚类：基于已检测的 descriptor 重新聚类（调阈值时调用，毫秒级）
  */
-export function recluster(
+export async function recluster(
   detection: FaceDetectionResult,
   threshold: number,
   photos: PhotoFileInfo[],
-): FaceClusterResult {
-  const clusteredGroups = agglomerativeCluster(detection.faces, threshold);
+): Promise<FaceClusterResult> {
+  const clusteredGroups = await agglomerativeCluster(detection.faces, threshold);
 
   const photoById = new Map<string, PhotoFileInfo>();
   for (const p of photos) photoById.set(p.id, p);
@@ -724,7 +821,7 @@ export async function clusterFaces(
 
   onProgress?.({ phase: 'clustering', current: 0, total: detection.faces.length, message: `聚类 ${detection.faces.length} 个人脸...` });
 
-  const result = recluster(detection, threshold, photos);
+  const result = await recluster(detection, threshold, photos);
 
   onProgress?.({
     phase: 'done',
