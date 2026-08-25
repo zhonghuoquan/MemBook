@@ -8,6 +8,7 @@
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc -b && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
+    "lint:baseline": "node scripts/check-eslint-baseline.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "test": "vitest run",

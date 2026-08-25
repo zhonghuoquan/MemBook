@@ -21,14 +21,15 @@ import {
   ToolCard,
   ProgressBar,
   PrimaryButton,
-  AddToAlbumButton,
   PhotoCard,
   deletePhotos,
-  useTabCachedResult,
+  useLazyList,
   type ToolProps,
 } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
-import { AlbumBridgeDialog } from './AlbumBridgeDialog';
+
+/** 截图结果懒加载每批数量 */
+const SCREENSHOT_BATCH = 24;
 
 /** 判定依据信号 → i18n key 后缀 */
 const SIGNAL_KEY: Record<string, string> = {
@@ -40,35 +41,44 @@ const SIGNAL_KEY: Record<string, string> = {
   pngNoExif: 'pngNoExif',
 };
 
+/** 截图识别面板级结果状态（与 OrganizePanel 的 ScreenshotPanelState 结构一致） */
+export interface ScreenshotPanelState {
+  scanned: boolean;
+  screenshots: ScreenshotItem[];
+  suspects: ScreenshotItem[];
+  normalPhotos: PhotoFileInfo[];
+  failedPhotos: number;
+}
+
 interface ScreenshotToolProps extends ToolProps {
   /** “一键分析”触发令牌（递增触发一次自动运行） */
   autoRunToken?: number;
   /** 当前是否为“一键分析”的目标工具（仅目标工具自动运行） */
   isAutoRunTarget?: boolean;
+  /** 面板级持久化的截图识别结果（切换标签/离开面板不丢） */
+  screenshotResult?: ScreenshotPanelState;
+  onScreenshotStateChange?: (s: ScreenshotPanelState) => void;
 }
 
 export function ScreenshotTool({
-  photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId,
-  autoRunToken, isAutoRunTarget,
+  photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate,
+  screenshotResult, onScreenshotStateChange,
+  autoRunToken, isAutoRunTarget, albumActive, onAlbumChange,
 }: ScreenshotToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  // 识别结果按标签缓存，切换路径时保留各路径的截图识别结果
-  const [scanned, setScanned] = useTabCachedResult<boolean>(tabId, false);
-  // 识别结果
-  const [screenshots, setScreenshots] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
-  const [suspects, setSuspects] = useTabCachedResult<ScreenshotItem[]>(tabId, []);
-  const [normalPhotos, setNormalPhotos] = useTabCachedResult<PhotoFileInfo[]>(tabId, []);
-  const [failedPhotos, setFailedPhotos] = useTabCachedResult<number>(tabId, 0);
+  // 识别结果提升到面板级（受控，由父组件持久化）
+  const scanned = screenshotResult?.scanned ?? false;
+  const screenshots = screenshotResult?.screenshots ?? [];
+  const suspects = screenshotResult?.suspects ?? [];
+  const normalPhotos = screenshotResult?.normalPhotos ?? [];
+  const failedPhotos = screenshotResult?.failedPhotos ?? 0;
+  const updateScreenshot = useCallback((next: ScreenshotPanelState) => { onScreenshotStateChange?.(next); }, [onScreenshotStateChange]);
   // 当前展示 Tab
   const [tab, setTab] = useState<'screenshots' | 'suspects' | 'normal'>('screenshots');
   // 多选（勾选）的照片 ID
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // 加入相册
-  const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
-  // 加入相册的目标照片
-  const [albumTarget, setAlbumTarget] = useState<PhotoFileInfo[]>([]);
   // 大图预览
   const [previewList, setPreviewList] = useState<PhotoFileInfo[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
@@ -86,11 +96,7 @@ export function ScreenshotTool({
     if (photos.length === 0) return;
     abortRef.current = new AbortController();
     setRunning(true);
-    setScanned(false);
-    setScreenshots([]);
-    setSuspects([]);
-    setNormalPhotos([]);
-    setFailedPhotos(0);
+    updateScreenshot({ scanned: false, screenshots: [], suspects: [], normalPhotos: [], failedPhotos: 0 });
     setSelectedIds(new Set());
 
     try {
@@ -99,11 +105,7 @@ export function ScreenshotTool({
         onProgress: setProgress,
         readData: readPhotoData,
       });
-      setScreenshots(res.screenshots);
-      setSuspects(res.suspects);
-      setNormalPhotos(res.normalPhotos);
-      setFailedPhotos(res.failedPhotos);
-      setScanned(true);
+      updateScreenshot({ scanned: true, screenshots: res.screenshots, suspects: res.suspects, normalPhotos: res.normalPhotos, failedPhotos: res.failedPhotos });
       setTab(res.screenshots.length > 0 ? 'screenshots' : res.suspects.length > 0 ? 'suspects' : 'normal');
 
       // 上报结果摘要（供“一键分析结果报告页”展示）
@@ -184,15 +186,14 @@ export function ScreenshotTool({
     (photo: PhotoFileInfo) => {
       void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
       // 从结果中移除
-      setScreenshots((prev) => prev.filter((s) => s.photo.id !== photo.id));
-      setSuspects((prev) => prev.filter((s) => s.photo.id !== photo.id));
+      updateScreenshot({ scanned, screenshots: screenshots.filter((s) => s.photo.id !== photo.id), suspects: suspects.filter((s) => s.photo.id !== photo.id), normalPhotos, failedPhotos });
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.delete(photo.id);
         return next;
       });
     },
-    [sourceMode, onPhotosUpdate, addToast, t],
+    [sourceMode, onPhotosUpdate, addToast, t, scanned, screenshots, suspects, normalPhotos, failedPhotos, updateScreenshot],
   );
 
   // 删除当前 tab 下所有照片
@@ -202,10 +203,9 @@ export function ScreenshotTool({
     const targets = list.map((s) => s.photo);
     void deletePhotos(targets, sourceMode, onPhotosUpdate, addToast, t);
     const ids = new Set(targets.map((p) => p.id));
-    setScreenshots((prev) => prev.filter((s) => !ids.has(s.photo.id)));
-    setSuspects((prev) => prev.filter((s) => !ids.has(s.photo.id)));
+    updateScreenshot({ scanned, screenshots: screenshots.filter((s) => !ids.has(s.photo.id)), suspects: suspects.filter((s) => !ids.has(s.photo.id)), normalPhotos, failedPhotos });
     setSelectedIds(new Set());
-  }, [tab, screenshots, suspects, sourceMode, onPhotosUpdate, addToast, t]);
+  }, [tab, scanned, screenshots, suspects, normalPhotos, failedPhotos, updateScreenshot, sourceMode, onPhotosUpdate, addToast, t]);
 
   // 勾选/取消勾选
   const toggleSelect = useCallback((id: string) => {
@@ -224,6 +224,10 @@ export function ScreenshotTool({
     return [];
   }, [tab, screenshots, suspects]);
 
+  // 懒加载：截图/疑似/普通结果列表按批渲染，滚动到底自动追加
+  const { visibleCount: shotVisible, sentinelRef: shotSentinel } = useLazyList(currentList.length, SCREENSHOT_BATCH);
+  const { visibleCount: normalVisible, sentinelRef: normalSentinel } = useLazyList(normalPhotos.length, SCREENSHOT_BATCH);
+
   // 删除选中照片
   const handleDeleteSelected = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -233,31 +237,14 @@ export function ScreenshotTool({
     if (targets.length === 0) return;
     void deletePhotos(targets, sourceMode, onPhotosUpdate, addToast, t);
     const ids = new Set(targets.map((p) => p.id));
-    setScreenshots((prev) => prev.filter((s) => !ids.has(s.photo.id)));
-    setSuspects((prev) => prev.filter((s) => !ids.has(s.photo.id)));
+    updateScreenshot({ scanned, screenshots: screenshots.filter((s) => !ids.has(s.photo.id)), suspects: suspects.filter((s) => !ids.has(s.photo.id)), normalPhotos, failedPhotos });
     setSelectedIds(new Set());
-  }, [selectedIds, currentList, sourceMode, onPhotosUpdate, addToast, t]);
+  }, [selectedIds, currentList, scanned, screenshots, suspects, normalPhotos, failedPhotos, updateScreenshot, sourceMode, onPhotosUpdate, addToast, t]);
 
-  // 加入相册：选中的照片（勾选）
-  const handleAddSelectedToAlbum = useCallback(() => {
-    if (selectedIds.size === 0) return;
-    const targets = currentList
-      .filter((s) => selectedIds.has(s.photo.id))
-      .map((s) => s.photo);
-    if (targets.length === 0) return;
-    setAlbumTarget(targets);
-    setAlbumBridgeOpen(true);
-  }, [selectedIds, currentList]);
-
-  // 加入相册：正常照片（非截图）
-  const handleAddNormalToAlbum = () => {
-    if (normalPhotos.length === 0) {
-      addToast({ type: 'warning', message: t('home.organize.albumBridge.selectPhotosFirst') });
-      return;
-    }
-    setAlbumTarget(normalPhotos);
-    setAlbumBridgeOpen(true);
-  };
+  // 上报「当前有效结果集」：识别为普通照片的（非截图），并入相册候选
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(scanned && normalPhotos.length > 0 ? normalPhotos : null);
+  }, [albumActive, onAlbumChange, scanned, normalPhotos]);
 
   // 切换 Tab 时清空勾选
   const switchTab = (next: 'screenshots' | 'suspects' | 'normal') => {
@@ -332,7 +319,7 @@ export function ScreenshotTool({
             e.stopPropagation();
             if (window.confirm(t('home.organize.shared.deleteConfirm', { name: photo.name }))) {
               void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
-              setNormalPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+              updateScreenshot({ scanned, screenshots, suspects, normalPhotos: normalPhotos.filter((p) => p.id !== photo.id), failedPhotos });
             }
           }}
           className="absolute top-1 right-1 z-20 w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-red-500/90 transition-all cursor-pointer border-none"
@@ -348,11 +335,15 @@ export function ScreenshotTool({
     );
   };
 
-  // 渲染结果网格
+  // 渲染结果网格（懒加载：每次渲染 shotVisible 张，滚动到底自动追加）
   const renderGrid = (list: ScreenshotItem[]) => (
-    <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
-      {list.map((item, idx) => renderThumb(item, list, idx))}
-    </div>
+    <>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
+        {list.slice(0, shotVisible).map((item, idx) => renderThumb(item, list, idx))}
+      </div>
+      {/* 懒加载哨兵：滚动进入视口时追加下一批 */}
+      {shotVisible < list.length && <div ref={shotSentinel} className="h-2" />}
+    </>
   );
 
   return (
@@ -370,13 +361,6 @@ export function ScreenshotTool({
         </svg>
       }
     >
-      {/* 固定“加入相册”浮动按钮（把保留的正常照片加入相册，与相似/人脸识别一致） */}
-      {scanned && tab === 'normal' && normalPhotos.length > 0 && (
-        <div className="absolute top-4 right-4 z-20">
-          <AddToAlbumButton count={normalPhotos.length} onClick={handleAddNormalToAlbum} />
-        </div>
-      )}
-
       {/* 识别操作区 */}
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-[var(--color-text-secondary)]">
@@ -461,8 +445,10 @@ export function ScreenshotTool({
               <div className="space-y-2">
                 <p className="text-[11px] text-[var(--color-gray-500)]">{t('home.organize.screenshot.normalDesc')}</p>
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
-                  {normalPhotos.map((p, idx) => renderNormalThumb(p, normalPhotos, idx))}
+                  {normalPhotos.slice(0, normalVisible).map((p, idx) => renderNormalThumb(p, normalPhotos, idx))}
                 </div>
+                {/* 懒加载哨兵 */}
+                {normalVisible < normalPhotos.length && <div ref={normalSentinel} className="h-2" />}
               </div>
             )}
           </div>
@@ -473,9 +459,6 @@ export function ScreenshotTool({
               <span className="text-xs text-[var(--color-gray-600)]">
                 {t('home.organize.screenshot.selectedCount', { count: selectedIds.size, defaultValue: '已选 {{count}} 张' })}
               </span>
-              <PrimaryButton onClick={handleAddSelectedToAlbum}>
-                {t('home.organize.albumBridge.buttonLabel', { defaultValue: '加入相册' })}
-              </PrimaryButton>
               <PrimaryButton variant="danger" onClick={handleDeleteSelected}>
                 {t('home.organize.screenshot.deleteSelected', { count: selectedIds.size, defaultValue: '删除选中 ({{count}})' })}
               </PrimaryButton>
@@ -518,15 +501,6 @@ export function ScreenshotTool({
         />
       )}
 
-      {/* 加入相册对话框 */}
-      <AlbumBridgeDialog
-        open={albumBridgeOpen}
-        onClose={() => { setAlbumBridgeOpen(false); setAlbumTarget([]); }}
-        photos={albumTarget}
-        sourceMode={sourceMode}
-        addToast={addToast}
-        readPhotoData={readPhotoData}
-      />
     </ToolCard>
   );
 }

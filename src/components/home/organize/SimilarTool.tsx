@@ -11,7 +11,7 @@
  * - 删除操作仅 Tauri folder 模式可用（移入系统回收站，可恢复）
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   findSimilarPhotos,
@@ -20,27 +20,46 @@ import {
   type SimilarGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, AddToAlbumButton, PhotoCard, useTabCachedResult, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, RangeSlider, PhotoCard, useDeleteUndo, UndoBar, useLazyList, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
-import { AlbumBridgeDialog } from './AlbumBridgeDialog';
 
-export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, tabId, proFeature, checkProFeature, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+/** 相似照片面板级结果状态（与 OrganizePanel 的 SimilarPanelState 结构一致） */
+export interface SimilarPanelState {
+  scanned: boolean;
+  groups: SimilarGroup[];
+  marked: Record<string, Set<number>>;
+}
+
+/** 相似组懒加载每批数量 */
+const SIMILAR_GROUP_BATCH = 10;
+
+interface SimilarToolProps extends ToolProps {
+  autoRunToken?: number;
+  isAutoRunTarget?: boolean;
+  /** 面板级持久化的相似分析结果（切换标签/离开面板不丢） */
+  similarResult?: SimilarPanelState;
+  onSimilarStateChange?: (s: SimilarPanelState) => void;
+}
+
+export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, checkWritePermission, similarResult, onSimilarStateChange, autoRunToken, isAutoRunTarget, albumActive, onAlbumChange }: SimilarToolProps) {
   const { t } = useTranslation();
+  // 写操作一致性：删除可撤销（与去重/人脸/日历统一）
+  const { lastDeleted, runDelete, undoDelete } = useDeleteUndo({ sourceMode, addToast, onPhotosUpdate });
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  // 相似分组 / 是否已扫描 / 标记删除 均按标签缓存，切换路径时保留各路径结果
-  const [groups, setGroups] = useTabCachedResult<SimilarGroup[]>(tabId, []);
+  // 相似分组 / 是否已扫描 / 标记删除 均提升到面板级（受控，由父组件持久化）
+  const groups = similarResult?.groups ?? [];
+  const scanned = similarResult?.scanned ?? false;
+  const markedDelete = similarResult?.marked ?? {};
+  const updateSimilar = useCallback((next: SimilarPanelState) => { onSimilarStateChange?.(next); }, [onSimilarStateChange]);
   const [deleting, setDeleting] = useState(false);
-  const [scanned, setScanned] = useTabCachedResult<boolean>(tabId, false);
   // 相似程度：只用一个滑块调节上限（越严格/越宽松）。
   // 下限固定为 6（≤6 属于“重复”，交给照片去重功能处理），用户无需调节。
   const MIN_DISTANCE = 6;
   const [maxDistance, setMaxDistance] = useState(15);
-  // 加入相册对话框
-  const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
-  // 用户标记删除的索引：groupId → Set<文件索引>（按标签缓存）
-  const [markedDelete, setMarkedDelete] = useTabCachedResult<Record<string, Set<number>>>(tabId, {});
   const abortRef = useRef<AbortController | null>(null);
+  // 懒加载：相似组多时按批渲染，滚动到底自动追加
+  const { visibleCount: groupVisible, sentinelRef: groupSentinel } = useLazyList(groups.length, SIMILAR_GROUP_BATCH);
 
   // 通知父组件工具执行状态（running / deleting），用于禁用标签切换
   const busy = running || deleting;
@@ -52,15 +71,11 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
   /** 查找相似照片 */
   const handleStart = async () => {
     if (photos.length < 2) return;
-    // Pro 授权守卫：点击“开始扫描”时才检查并提示激活
-    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
-      return;
-    }
+    // 分析对全部用户开放（含 Free）：相似照片组可查看、可标记；
+    // 落地删除操作才由 checkWritePermission 收口到 Pro。
     abortRef.current = new AbortController();
     setRunning(true);
-    setScanned(false);
-    setGroups([]);
-    setMarkedDelete({});
+    updateSimilar({ scanned: false, groups: [], marked: {} });
 
     try {
       let failedCount = 0;
@@ -72,8 +87,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
         readData: readPhotoData,
         onFailure: (count) => { failedCount = count; },
       });
-      setGroups(res);
-      setScanned(true);
+      updateSimilar({ scanned: true, groups: res, marked: {} });
       // 上报结果摘要（供“一键分析结果报告页”展示）
       const photoCount = res.reduce((s, g) => s + g.files.length, 0);
       onResultSummary?.({
@@ -138,22 +152,16 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
   /** 切换某张照片的标记删除状态 */
   const toggleMark = useCallback(
     (g: SimilarGroup, idx: number) => {
-      setMarkedDelete((prev) => {
-        const cur = new Set(prev[g.groupId] ?? []);
-        if (cur.has(idx)) {
-          cur.delete(idx);
-        } else {
-          // 每组至少保留 1 张（避免整组误删）
-          if (cur.size >= g.files.length - 1) {
-            addToast({ type: 'warning', message: t('home.organize.similar.keepAtLeastOne') });
-            return prev;
-          }
-          cur.add(idx);
-        }
-        return { ...prev, [g.groupId]: cur };
-      });
+      const cur = new Set(markedDelete[g.groupId] ?? []);
+      if (cur.has(idx)) {
+        cur.delete(idx);
+      } else {
+        // 允许整组全部标记删除（不再强制保留一张）
+        cur.add(idx);
+      }
+      updateSimilar({ scanned, groups, marked: { ...markedDelete, [g.groupId]: cur } });
     },
-    [t, addToast],
+    [scanned, groups, markedDelete, updateSimilar],
   );
 
   // 标记删除的照片列表（每轮渲染重新计算）
@@ -163,21 +171,17 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
     return g.files.filter((_, i) => marks.has(i));
   });
 
-  // 保留的照片列表（未标记删除的，供“加入相册”使用）
-  const keptList: PhotoFileInfo[] = groups.flatMap((g) => {
+  // 保留的照片列表（未标记删除的，供“加入相册”使用；memo 保持引用稳定避免上报触发面板重渲染）
+  const keptList: PhotoFileInfo[] = useMemo(() => groups.flatMap((g) => {
     const marks = markedDelete[g.groupId];
     if (!marks) return g.files;
     return g.files.filter((_, i) => !marks.has(i));
-  });
+  }), [groups, markedDelete]);
 
-  // 加入相册
-  const handleAddToAlbum = () => {
-    if (keptList.length === 0) {
-      addToast({ type: 'warning', message: t('home.organize.albumBridge.selectPhotosFirst') });
-      return;
-    }
-    setAlbumBridgeOpen(true);
-  };
+  // 上报「当前有效结果集」：相似组中保留的照片可统一加入相册
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(groups.length > 0 ? keptList : null);
+  }, [albumActive, onAlbumChange, groups.length, keptList]);
 
   // 统计：总组数 / 涉及照片数 / 已标记删除数
   const totalGroups = groups.length;
@@ -190,43 +194,18 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
   /** 删除用户标记的照片（移入系统回收站） */
   const handleDelete = async () => {
     if (deleting || markedCount === 0) return;
+    // 写操作授权：删除照片需 Pro（激活或试用期内）；Free 弹激活窗并中止
+    if (checkWritePermission && !checkWritePermission()) return;
     if (!canDelete) {
       addToast({ type: 'warning', message: t('home.organize.similar.deleteDisabled') });
       return;
     }
     setDeleting(true);
-    let ok = 0, fail = 0;
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const paths = markedList.map((f) => f.path).filter((p): p is string => Boolean(p));
-      if (paths.length > 0) {
-        try {
-          await invoke('trash_files', { paths });
-          ok = paths.length;
-          fail = markedList.length - paths.length;
-        } catch {
-          // 批量失败时逐个移入回收站，定位失败文件
-          for (const f of markedList) {
-            try {
-              if (f.path) { await invoke('trash_files', { paths: [f.path] }); ok++; } else fail++;
-            } catch { fail++; }
-          }
-        }
-      } else {
-        fail = markedList.length;
-      }
-
-      addToast({
-        type: fail > 0 ? 'warning' : 'success',
-        message: fail > 0
-          ? t('home.organize.similar.toastDeletedWithFail', { ok, fail })
-          : t('home.organize.similar.toastDeleted', { ok }),
-      });
-
+      // 统一走共享删除（library 移除 / folder 进回收站），并记录最近删除供撤销
+      await runDelete(markedList);
       // 删除成功后清空结果（与去重工具一致，用户可重新扫描）
-      setGroups([]);
-      setMarkedDelete({});
-      setScanned(false);
+      updateSimilar({ scanned: false, groups: [], marked: {} });
       // 删除完成后重新上报摘要，同步更新报告页数据
       onResultSummary?.({
         tool: 'similar',
@@ -255,16 +234,6 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
         </svg>
       }
     >
-      {/* 固定“加入相册”浮动按钮（与日历/人脸聚类一致：右上角，样式统一） */}
-      {groups.length > 0 && (
-        <div className="absolute top-4 right-4 z-20">
-          <AddToAlbumButton
-            count={keptList.length}
-            onClick={handleAddToAlbum}
-          />
-        </div>
-      )}
-
       {/* 相似程度设置 + 查找按钮（单滑块调节上限，下限固定为 6，交由去重功能处理重复照片） */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex-1 min-w-[240px]">
@@ -308,7 +277,7 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
       {/* 相似组列表 */}
       {groups.length > 0 && (
         <div className="mt-3 space-y-3 max-h-[600px] overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar">
-          {groups.map((g, gi) => (
+          {groups.slice(0, groupVisible).map((g, gi) => (
             <div key={g.groupId} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
               {/* 组头：编号 + 照片数 + 平均距离 */}
               <div className="flex items-center gap-2 px-3 py-2 bg-[var(--color-gray-50)] text-xs">
@@ -340,6 +309,8 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
               </div>
             </div>
           ))}
+          {/* 懒加载哨兵：滚动进入视口时追加下一批相似组 */}
+          {groupVisible < groups.length && <div ref={groupSentinel} className="h-2" />}
         </div>
       )}
 
@@ -358,6 +329,9 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
         </div>
       )}
 
+      {/* 删除撤销提示栏（与去重/人脸/日历统一） */}
+      <UndoBar count={lastDeleted?.length ?? 0} onUndo={undoDelete} />
+
       {/* 照片大图预览 */}
       {previewGroup && (
         <PhotoQuickView
@@ -367,16 +341,6 @@ export function SimilarTool({ photos, readPhotoData, addToast, onBusyChange, onR
           readPhotoData={readPhotoData}
         />
       )}
-
-      {/* 加入相册对话框 */}
-      <AlbumBridgeDialog
-        open={albumBridgeOpen}
-        onClose={() => setAlbumBridgeOpen(false)}
-        photos={keptList}
-        sourceMode={sourceMode}
-        addToast={addToast}
-        readPhotoData={readPhotoData}
-      />
     </ToolCard>
   );
 }

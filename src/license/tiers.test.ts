@@ -26,20 +26,20 @@ describe('isFeatureAvailableForTier', () => {
   });
 
   it('Free 档：Pro 专属功能不可用', () => {
-    // smartLayout / timeWatermark / dataImport 及照片整理高阶能力为 Pro 专属
+    // smartLayout / timeWatermark 及照片整理高阶能力为 Pro 专属
     expect(isFeatureAvailableForTier(false, 'smartLayout')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'timeWatermark')).toBe(false);
-    expect(isFeatureAvailableForTier(false, 'dataImport')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'faceCluster')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'similar')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'convert')).toBe(false);
     expect(isFeatureAvailableForTier(false, 'exifBatch')).toBe(false);
   });
 
-  it('Free 档：基础功能仍可用（含导出）', () => {
-    // createProject / exportFile 为免费基础能力
+  it('Free 档：基础功能仍可用（含导出/基础导入）', () => {
+    // createProject / exportFile / dataImport 为免费基础能力（dataImport 开放基础导入）
     expect(isFeatureAvailableForTier(false, 'createProject')).toBe(true);
     expect(isFeatureAvailableForTier(false, 'exportFile')).toBe(true);
+    expect(isFeatureAvailableForTier(false, 'dataImport')).toBe(true);
   });
 });
 

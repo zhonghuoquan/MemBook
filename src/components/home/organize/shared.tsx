@@ -2,7 +2,7 @@
  * 整理工具共享组件与工具函数
  */
 
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PhotoFileInfo, ToolProgress, ToolResultSummary, DataSourceMode } from '../../../photo-tools';
@@ -65,9 +65,18 @@ export function useTabCachedResult<T>(tabId: string | undefined, initial: T): [T
  * @param batch 每批加载条数（初始批 + 滚动增量批）
  * @returns visibleCount 当前应渲染的条数；sentinelRef 挂到列表末尾哨兵元素上
  */
-export function useLazyList(total: number, batch: number) {
+export function useLazyList(total: number, batch: number, resetKey?: unknown) {
   const [visibleCount, setVisibleCount] = useState(Math.min(batch, total));
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const prevResetKey = useRef(resetKey);
+
+  // resetKey 变化（如切换筛选）时重置回第一批，避免上一个列表收敛后的 visibleCount 导致新列表首屏为空
+  useEffect(() => {
+    if (prevResetKey.current !== resetKey) {
+      prevResetKey.current = resetKey;
+      setVisibleCount(Math.min(batch, total));
+    }
+  }, [resetKey, batch, total]);
 
   // 总数减少（照片被修改/移除移出列表）时收敛已加载数量，避免渲染越界
   useEffect(() => {
@@ -215,6 +224,23 @@ export interface ToolProps {
   proFeature?: LicenseFeature;
   /** Pro 授权守卫：返回该功能是否可用；不可用时弹出激活窗口并返回 false */
   checkProFeature?: (feature: LicenseFeature, hint?: string) => boolean;
+  /**
+   * 结果写操作授权守卫：删除照片 / 合并人脸组等对结果的写操作需 Pro。
+   * 供去重 / 人脸识别 / 相似照片共用——哪怕工具分析本身 Free 可跑，
+   * 落地到真实文件/结果的修改也必须激活。不可用时弹出激活窗口并返回 false。
+   */
+  checkWritePermission?: () => boolean;
+  /**
+   * 当前工具是否处于活跃状态（照片整理面板顶部统一「加入相册」入口用）。
+   * 工具在 `albumActive` 翻转为 true 或有效结果集变化时，通过 `onAlbumChange`
+   * 上报「当前有效结果集」；面板据此渲染统一入口。
+   */
+  albumActive?: boolean;
+  /**
+   * 上报「当前有效结果集」：该工具当前可加入相册的照片列表。
+   * 供照片整理面板顶部统一「加入相册」入口消费。无有效结果集时传 null 或不调用。
+   */
+  onAlbumChange?: (photos: PhotoFileInfo[] | null) => void;
 }
 
 // ── 共享 UI 组件 ────────────────────────────────────────
@@ -1044,6 +1070,95 @@ export async function deletePhotos(
   return ok;
 }
 
+// ── 删除撤销（写操作一致性：所有删除入口都能撤销） ──────
+
+/**
+ * 删除撤销 hook：统一的「删除 + 最近删除可撤销」。
+ *
+ * 解决不同工具删除体验不一致（去重有撤销、相似/人脸/日历没有）：
+ * 任何工具用 runDelete 删除照片后，会记录最近一次删除并提供 undoDelete；
+ * folder 模式进回收站、library 模式从列表移除，撤销把照片重新加回列表。
+ *
+ * @param sourceMode   数据来源模式（区分 library / folder）
+ * @param onPhotosUpdate 更新照片列表（删除与撤销都会用到）
+ * @param addToast      全局 toast
+ */
+export function useDeleteUndo(opts: {
+  sourceMode: DataSourceMode;
+  addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void;
+  onPhotosUpdate: (updater: (prev: PhotoFileInfo[]) => PhotoFileInfo[]) => void;
+}) {
+  const { sourceMode, addToast } = opts;
+  const { t } = useTranslation();
+  const [lastDeleted, setLastDeleted] = useState<PhotoFileInfo[] | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  /** 执行删除并记录最近删除（供撤销），返回成功删除数 */
+  const runDelete = useCallback(
+    async (targets: PhotoFileInfo[]): Promise<number> => {
+      const ok = await deletePhotos(targets, sourceMode, opts.onPhotosUpdate, addToast, t);
+      if (ok > 0) {
+        setLastDeleted(targets);
+        clearTimer();
+        timerRef.current = window.setTimeout(() => setLastDeleted(null), 5000);
+      }
+      return ok;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sourceMode, opts.onPhotosUpdate, addToast, t],
+  );
+
+  /** 撤销最近一次删除（把照片重新加回列表） */
+  const undoDelete = useCallback(() => {
+    setLastDeleted((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      opts.onPhotosUpdate((list) => {
+        const existing = new Set(list.map((p) => p.id));
+        const toRestore = prev.filter((p) => !existing.has(p.id));
+        return [...list, ...toRestore];
+      });
+      return null;
+    });
+    clearTimer();
+  }, [opts.onPhotosUpdate]);
+
+  /** 手动清除撤销状态（工具自身清理结果时调用） */
+  const clearDeleted = useCallback(() => {
+    clearTimer();
+    setLastDeleted(null);
+  }, []);
+
+  // 卸载时清理倒计时
+  useEffect(() => clearTimer, []);
+
+  return { lastDeleted, runDelete, undoDelete, clearDeleted };
+}
+
+/** 删除撤销提示栏（配合 useDeleteUndo 使用） */
+export function UndoBar({ count, onUndo }: { count: number; onUndo: () => void }) {
+  const { t } = useTranslation();
+  if (!count || count <= 0) return null;
+  return (
+    <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between">
+      <span className="text-xs text-amber-800">
+        {t('home.organize.shared.undoHint', { count, defaultValue: '已删除 {{count}} 张照片' })}
+      </span>
+      <button
+        onClick={onUndo}
+        className="text-xs font-medium text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded border-none cursor-pointer transition-colors"
+      >
+        {t('home.organize.shared.undo', '撤销')}
+      </button>
+    </div>
+  );
+}
+
 // ── 带操作菜单的缩略图组件 ──────────────────────────────
 
 /**
@@ -1317,7 +1432,8 @@ export function PhotoCard({
     if (rel) {
       const idx = lastSep(rel);
       if (idx > 0) return rel.slice(0, idx);
-      return rootPath || rel;
+      // 根目录下的文件：无子目录可显示。避免退回 rel（= 文件名）导致与名称行重复显示两个名称。
+      return rootPath || '';
     }
     if (f.path) {
       const idx = lastSep(f.path);

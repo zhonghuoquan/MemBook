@@ -1,387 +1,73 @@
 # MemBook — 本地优先的电子相册编辑器
 
-> 一款运行在桌面的电子相册制作工具，所有数据保存在你的设备上，不上传服务器。支持自定义尺寸、一键成册、模板套用、滤镜调色、HEIC 解码、PDF 导出、直连打印等完整工作流。
+> 在桌面端制作电子相册。照片和项目数据默认保存在本机，不依赖业务服务器。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-1.2.0-blue)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
-- **版本**：1.2.0
-- **标识符**：`app.membook.desktop`
-- **技术栈**：Tauri 2 + React 19 + TypeScript + Konva 10 + Zustand 5 + Tailwind 4 + Dexie 4 (IndexedDB) + Rust
-- **平台**：Windows（主要）/ macOS 10.15+ / Linux
+## 项目状态
 
----
+- 当前版本：`1.2.0`
+- 应用标识符：`app.membook.desktop`
+- 核心技术：Tauri 2、React 19、TypeScript 6、Vite 7、Konva 10、Zustand 5、Tailwind 4、Dexie 4、Rust
+- Windows 安装包：仅发布 NSIS `.exe`；不发布 WiX/MSI。
+- macOS 发布由独立 CI 流程显式构建，不受 Windows 的 NSIS 目标影响。
 
-## 产品主页
+## 核心能力
 
-- 产品官网与下载：<https://zhonghuoquan.github.io/membook-home/>
-- 桌面安装包：`download/MemBook_1.2.0_x64-setup.exe`（约 13MB，NSIS）
+- 项目与模板：项目管理、模板画廊、自定义模板、封面/封底和书脊设计。
+- 编辑器：Konva 画布、照片槽位、文字、贴纸、形状、对齐参考线、多选、缩放与全屏预览。
+- 自动编排：按照片数量、比例与内容质量生成多种一键成册方案。
+- 照片整理：导入、去重、EXIF/GPS、HEIC/HEIF、格式转换、截图和人脸等整理工具。
+- 输出：PDF、高清图片和本地打印。
 
----
+功能以当前稳定版本为准；详细迭代记录见 [开发日志](开发日志.md)。
 
-## 仓库与同步
-
-本项目代码在 **GitHub** 与 **cnb.cool**（腾讯云代码托管）双平台维护，内容保持一致。
-
-| 平台 | 仓库地址 | 特点 |
-| --- | --- | --- |
-| **GitHub** | <https://github.com/zhonghuoquan/MemBook> | 国际主流平台，支持 Actions CI、Pages 静态托管；国内访问偏慢 |
-| **cnb.cool** | <https://cnb.cool/MemBook-Flash/MemBook> | 腾讯云代码托管，国内访问快，支持 WebIDE 云开发与云原生构建流水线 |
-
-### 同步策略
-
-- 以 **本地仓库为准**，修改后同时推送到两个平台。
-- 保持 `main` 分支在两端完全一致（同一提交哈希）。
-
-```bash
-# 一键同步到双平台
-git push origin main      # GitHub
-git push cnb main         # cnb.cool
-```
-
-### 远程仓库配置（本地）
-
-```bash
-git remote add origin https://github.com/zhonghuoquan/MemBook.git   # GitHub
-git remote add cnb     https://cnb.cool/MemBook-Flash/MemBook.git   # cnb.cool
-```
-
-> 推送时的认证：GitHub 使用 Personal Access Token 或浏览器登录；cnb.cool 使用「Git Username + 令牌」。
-
-### 产品主页同步
-
-产品介绍页（[`docs/MemBook-Home`](../docs/MemBook-Home)）在 GitHub Pages 托管，仓库为 [membook-home](https://github.com/zhonghuoquan/membook-home) 及 cnb 镜像 [membook-home](https://cnb.cool/MemBook-Flash/membook-home)，内容与上述主页同步更新。
-
----
-
-## 一、主要功能
-
-### 1. 项目管理（主页）
-
-- 多项目管理、模板画廊、自定义模板创建
-- 项目封面实时渲染第一页内容
-- 照片整理工具集：去重 / EXIF 查看 / 格式转换 / LIVP 转换 / 智能归类
-
-### 2. 相册编辑器
-
-- **Canvas 画布**：基于 Konva 的高性能 2D 渲染，支持缩放/平移/键盘快捷键
-- **模板系统**：184 种版式（120 内置 + 64 生成，1-12 图，覆盖留白/胶片/杂志英雄/瀑布流/中心环绕/L 型/网格阵列等有呼吸感版式）、自定义模板创建器（拖拽/缩放槽位）、自定义模板分组筛选（首页与编辑模式均可用）、智能切换、模板内置照片位可删除至空白
-- **封面/封底设计系统**：8 款封面 + 8 款配套封底成套模板（全英文衬线文案、真实照片占位、Mixbook 风格），一键应用封面自动同步生成配套封底；封面页左侧**书脊**为物理扩展区（宽度/底色/Logo 颜色可调，可自由添加文字/形状）；「封面设置」右侧面板管理封面/封底照片位圆角、书脊底色、书脊 Logo 颜色与书脊宽度，修改时**画布实时预览、确认才生效**；共享 `CoverPreview` 组件在主页与编辑器呈现铰链折痕/落地投影实物效果
-- **形状工具**：矩形/圆形/线条/箭头等形状绘制（以点击点为原点、拖拽实时预览、一次性使用），支持线性/径向透明渐变填充
-- **主题系统**：背景色 / 装饰元素 / 水印（时间地点水印，自动逆地理编码）
-- **照片操作**：拖拽填充、旋转、缩放、平移、移除、批量操作
-- **多选系统**：Ctrl+点击与鼠标框选统一的跨类型多选（照片位/文字/便利贴/贴纸），同类型≥2 弹出浮动工具栏（组合缩放/移动/置顶/置底/删除），跨类型仅支持移动；框选缩放时自动重算照片 pan 确保铺满不漏白
-- **页面显示模式**：全显模式（显示页面外内容）/ 页面模式（裁剪到页面边界），右上角眼睛图标切换
-- **添加照片位**：顶部工具栏按钮，新增槽位居中显示并置于顶层
-- **网格视图**：100+ 页缩略图虚拟滚动浏览
-- **全屏预览**：相邻图片预加载，零延迟切换
-- **导出**：PDF（jsPDF）/ 高清图片（Canvas 2D 直渲）
-- **打印**：直连系统打印机（SumatraPDF 静默打印，支持双面/份数）
-
-### 3. 一键成册
-
-- Google Photos 布局算法自适应照片数量与宽高比，并感知照片内容质量（清晰/人脸）动态调整每页密度与节奏；「照片密度·智能」为逐页疏密曲线（首页少放 + 后续起伏 + 收尾收敛），「排版节奏·智能」为叙事段位优先（开场/发展/高潮/收尾各取专属 pattern）；多方案由确定性 seed 驱动，点击可翻出明显不同的台型
-- 排版视觉优化：2/3/4 图及方图多结构骨架（并排/叠放/对称/hero/错落/跨行），≥5 图由 seed 驱动行数疏密抖动，页面级 hero 相位系数驱动跨页「大图震撼→细节舒缓」强弱节奏，末行竖图保护避免主体被裁
-- 一键成册整本相册
-
-### 4. 照片管理
-
-- **双轨存储**：
-  - `direct` 模式：File System Access API / Tauri asset 协议，直接引用原文件
-  - `import` 模式：压缩后存入 IndexedDB（Dexie），完全离线可用
-- **HEIC/HEIF 解码**：三级回退链（Windows WIC → Rust libheif → 前端 heic2any WASM）
-- **EXIF/GPS**：自动提取拍摄时间、GPS 坐标、逆地理编码为地点名称
-- **LOD 三级图片体系**：thumb(256px) / preview(1200px) / full(4096px)
-
-### 5. 工程化能力
-
-- **自动更新**：Tauri Updater + GitHub Releases 清单 + 公钥签名 + 后台自动下载 + 24h 冷却（主页任务栏右上角指示：下载中圆形进度环、就绪后「更新」按钮 → 弹窗确认后重启安装）
-- **错误监控**：Sentry（仅生产环境，敏感信息脱敏）
-- **离线授权**：RSA-PKCS1-v1_5 激活码 + 双锚点试用期（文件 + 注册表）
-- **国际化**：i18next 中英文
-- **代码混淆**：javascript-obfuscator（可选，环境变量 `OBFUSCATE=true` 启用）
-
----
-
-## 二、技术架构
-
-### 分层架构
-
-```
-┌─────────────────────────────────────────────────────┐
-│                     UI 层 (components/)             │
-│  home / editor / views / common                     │
-├─────────────────────────────────────────────────────┤
-│                   服务层 (services/)                │
-│  photoService / slotEditService / pageLayoutService │
-├─────────────────────────────────────────────────────┤
-│                   引擎层 (engine/)                  │
-│  storage-engine / layout-engine / selection-engine  │
-│  google-photos-layout / alignment-engine            │
-├─────────────────────────────────────────────────────┤
-│      存储层 (store/ + db/ + engine/storage/)        │
-│  Zustand stores + Dexie (IndexedDB) + 双轨存储      │
-├─────────────────────────────────────────────────────┤
-│                 工具层 (utils/ + hooks/)            │
-│  LRU 缓存 / Web Worker / LOD / 导出引擎 / 打印     │
-├─────────────────────────────────────────────────────┤
-│              Rust 原生层 (src-tauri/src/)           │
-│  HEIC 解码 / 逆地理编码 / 打印 / 窗口控制 / 授权    │
-└─────────────────────────────────────────────────────┘
-```
-
-### 核心设计原则
-
-| 原则                         | 实现                                                                  |
-| ---------------------------- | --------------------------------------------------------------------- |
-| **本地优先**           | 所有数据存 IndexedDB / localStorage，不上传服务器                     |
-| **引擎/UI 分离**       | `engine/` 纯逻辑，`components/` 仅渲染，可独立测试                |
-| **双轨存储**           | direct（引用原文件）/ import（压缩入库），按场景选择                  |
-| **LOD 分级加载**       | thumb/preview/full 三档，按视图档位加载合适分辨率                     |
-| **LRU 内存管控**       | imageCache(150) / blobUrlCache(200) / thumbnailCache 限制内存无限增长 |
-| **虚拟滚动**           | react-virtuoso 仅渲染可见项，100+ 页流畅浏览                          |
-| **细粒度订阅**         | Zustand useShallow 选择器，避免不必要重渲染                           |
-| **Web Worker 渲染**    | 缩略图/PNG 编码移至 Worker，主线程不阻塞                              |
-| **IndexedDB 持久化**   | 缩略图跨会话缓存，避免重载时重新渲染                                  |
-| **引用计数**           | blobUrlCache 显式 acquire/release，防止虚拟滚动场景下图片裂图         |
-| **Canvas 2D 直渲导出** | 导出走 Canvas 2D，避免 React 异步渲染问题                             |
-
-### 状态管理（Zustand Slices）
-
-```
-store/
-├── editorStore/          # 编辑器主状态（拆分为多个 slice）
-│   ├── albumMetaSlice    # 相册元信息
-│   ├── pageSlice         # 页面数据
-│   ├── placementSlice    # 照片放置
-│   ├── selectionSlice    # 选择状态
-│   ├── decorationsSlice  # 装饰元素
-│   ├── toolsSlice        # 工具状态
-│   ├── watermarkSlice    # 水印配置
-│   └── helpers           # 几何计算辅助
-├── photoStore            # 照片库（photoMap O(1) 查找）
-├── historyStore          # 撤销/重做
-└── uiStore               # UI 临时状态
-```
-
-### 数据持久化（Dexie v4）
-
-```
-MemBookDB (IndexedDB)
-├── projects          # 项目
-├── photos            # 照片元数据
-├── customTemplates   # 自定义模板
-├── photoBlobs        # 照片二进制（preview/original/thumb）
-└── thumbnails        # 页面缩略图缓存（跨会话持久化）
-```
-
----
-
-## 三、项目文件树
-
-```
-membook/
-├── .cargo/                    # Cargo 配置（限制并行编译任务数降低内存峰值）
-│   └── config.toml
-├── .github/workflows/
-│   └── ci.yml                 # GitHub Actions: lint + typecheck + test + build
-├── .husky/                    # Git 钩子（commit-msg 规范 + pre-commit lint）
-├── .tauri/                    # Tauri 签名密钥（私钥不提交，仅提交公钥）
-│   └── membook-updater.key.pub
-├── public/                    # 静态资源
-│   ├── heic2any.min.js        # HEIC WASM 解码（index.html 直接加载）
-│   ├── favicon.svg
-│   └── icons.svg
-├── scripts/                   # 构建辅助脚本
-│   ├── extract-ico.ps1
-│   ├── make-icons.cjs
-│   └── tauri-build.ps1        # Windows SDK/MSVC 环境配置 + tauri build
-├── src-tauri/                 # Rust 后端
-│   ├── capabilities/
-│   │   └── default.json       # Tauri 权限配置（fs/dialog/http/updater/process）
-│   ├── icons/                 # 应用图标（Windows/macOS/iOS/Android 全平台）
-│   ├── resources/
-│   │   └── sm.exe             # SumatraPDF（静默打印 PDF）
-│   ├── src/
-│   │   ├── lib.rs             # Tauri 入口 + 命令（HEIC/地理编码/打印/授权/窗口）
-│   │   └── main.rs
-│   ├── Cargo.toml             # Rust 依赖（tauri/plugins/reqwest/winreg/sha2/windows）
-│   ├── build.rs
-│   └── tauri.conf.json        # Tauri 配置（窗口/CSP/bundle/updater）
-├── src/                       # 前端源码
-│   ├── components/            # UI 组件
-│   │   ├── common/            # 通用组件（Modal/Toast/Button/ErrorBoundary/UpdateDialog）
-│   │   ├── editor/            # 编辑器组件（Canvas/GridView/PhotoPanel/ExportDialog）
-│   │   │   ├── canvas/        # Konva 画布相关（渲染/拖拽/缩放/快捷键）
-│   │   │   └── tools/         # 工具面板（背景/笔刷/颜色/便签样式）
-│   │   ├── home/              # 主页组件（项目网格/模板画廊/整理工具）
-│   │   │   └── organize/      # 照片整理工具（去重/EXIF/转换/归类）
-│   │   └── views/             # 顶层视图（HomeView/EditorView/SmartLayoutView）
-│   ├── config/                # 应用配置
-│   ├── constants/             # 常量（模板调色板）
-│   ├── contexts/              # React Context（ThemeContext）
-│   ├── db/                    # Dexie 数据库封装
-│   ├── engine/                # 引擎层（纯逻辑）
-│   │   ├── storage/           # 存储引擎（direct-access/import-store/heic-converter/image-compressor）
-│   │   ├── alignment-engine   # 对齐引擎
-│   │   ├── drag-manager       # 拖拽管理
-│   │   ├── google-photos-layout # 智能布局算法
-│   │   ├── layout-engine      # 布局引擎
-│   │   ├── selection-engine   # 选择引擎
-│   │   └── storage-engine     # 存储统一入口
-│   ├── hooks/                 # React Hooks（usePhotoSrc/useHotkeys/usePhotoImport 等）
-│   ├── i18n/                  # 国际化
-│   │   └── locales/           # en-US.json / zh-CN.json
-│   ├── license/               # 离线授权（RSA 激活码 + 试用期）
-│   ├── photo-tools/           # 照片工具（EXIF/哈希/地理编码/LIVP 转换/整理）
-│   ├── services/              # 服务层（跨 store 协调）
-│   ├── store/                 # Zustand 状态管理
-│   │   └── editorStore/       # 编辑器 slice 拆分
-│   ├── styles/                # 全局样式 + 设计 tokens
-│   ├── types/                 # TypeScript 类型定义
-│   ├── utils/                 # 工具层
-│   │   ├── lruCache           # LRU 缓存
-│   │   ├── imageBitmapLoader  # ImageBitmap 加载（显式 close 释放内存）
-│   │   ├── gridThumbnailRenderer # 网格缩略图渲染
-│   │   ├── thumbnailCore      # 缩略图共享渲染逻辑
-│   │   ├── thumbnail.worker   # Web Worker 缩略图渲染
-│   │   ├── exportEngine       # Canvas 2D 导出引擎
-│   │   ├── printEngine        # 打印引擎
-│   │   ├── updater            # Tauri 自动更新
-│   │   ├── sentry             # Sentry 错误监控
-│   │   └── ...
-│   ├── App.tsx                # 根组件（页面切换/许可证/更新检查）
-│   ├── main.tsx               # 入口（Sentry 初始化 + React 渲染）
-│   └── version.ts             # 版本号与构建信息
-├── tools/                     # 独立工具（许可证生成器等，私有工具不提交）
-├── .gitignore
-├── eslint.config.js           # ESLint Flat Config
-├── index.html                 # HTML 入口
-├── package.json
-├── setup-tauri.ps1            # 一键环境配置脚本
-├── tsconfig.json              # TS 项目引用
-├── tsconfig.app.json          # 前端 TS 配置
-├── vite.config.ts             # Vite 配置（混淆/资源校验/分块/预构建）
-├── vitest.config.ts           # Vitest 配置（jsdom + fake-indexeddb）
-├── 开发日志.md                # 开发迭代记录
-└── Readme.md
-```
-
----
-
-## 四、开发与构建
+## 快速开始
 
 ### 环境要求
 
-- **Node.js** ≥ 20
-- **Rust** stable（rustup 安装）
-- **Windows SDK** + **MSVC Build Tools**（仅 Windows 桌面打包）
-- **Tauri CLI** 2.x
+- Node.js 20 或更高版本
+- Rust stable
+- Windows SDK 和 MSVC Build Tools（Windows 桌面打包需要）
 
 ### 常用命令
 
 ```bash
-# 安装依赖
-npm install
-
-# 前端开发（仅浏览器）
+npm ci
 npm run dev
-
-# 桌面端开发（Tauri + 前端热重载）
 npm run desktop:dev
-
-# 类型检查
 npm run typecheck
-
-# Lint
-npm run lint
-
-# 测试
-npm test                    # 单次运行
-npm run test:watch          # 监听模式
-
-# 生产构建
-npm run build               # 仅前端
-npm run desktop:build       # 桌面端安装包（NSIS .exe，需在系统 PowerShell 中运行）
-npm run desktop:build:debug # 调试版桌面端
-
-# Windows 一键环境配置
-.\setup-tauri.ps1
+npm test
+npm run lint:baseline
+npm run build
+npm run desktop:build
 ```
 
-> 注意：项目启用了 husky 的 pre-commit（ESLint）+ commit-msg（commitlint）钩子。
-> 提交时若被 lint 拦截，可先修复代码，或用 `git commit --no-verify` 临时跳过。
+`npm run desktop:build` 生成 Windows NSIS 安装包，默认位置为
+`src-tauri/target/release/bundle/nsis/`。发布环境需要配置 Tauri 更新签名密钥。
 
-### 构建产物
+## 文档导航
 
-- **前端**：`dist/`（Vite 构建）
-- **桌面安装包**（NSIS，跳过 WiX/MSI 减少依赖）：
-  - `src-tauri/target/release/bundle/nsis/MemBook_1.2.0_x64-setup.exe`（约 13MB）
-  - `src-tauri/target/release/bundle/msi/MemBook_1.2.0_x64_zh-CN.msi`（企业部署用）
-- **自动更新包**（`createUpdaterArtifacts: "v1Compatible"`）：每种安装器额外生成压缩更新包 `*.zip (updater)`，供更新器后台下载——`nsis/*.nsis.zip`、`msi/*.msi.zip`
-- **签名**：`.sig` 文件（如 `*.exe.sig` / `*.zip.sig`）用于自动更新校验来源与完整性；生成更新清单由 CI 用私钥签名完成，本地打包需设置 `TAURI_SIGNING_PRIVATE_KEY`（及 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，无密码则省略）环境变量
+- [代码开发规范](MemBook%20代码开发规范.md)：唯一有效的开发规则。
+- [架构说明](docs/architecture.md)：目录职责、状态与存储边界。
+- [发布说明](docs/release.md)：Windows NSIS 发布与更新流程。
+- [质量治理](docs/quality-governance.md)：测试、lint 基线和 CI 演进方式。
+- [技术债务清单](docs/technical-debt.md)：已知问题与分阶段治理计划。
+- [变更记录](CHANGELOG.md)：面向发布的用户可见改动。
 
-### 测试
+## 贡献约定
 
-- **框架**：Vitest 4 + jsdom + fake-indexeddb
-- **覆盖**：引擎层 + Store + DB 的单元测试（配置见 [`vitest.config.ts`](vitest.config.ts)）
+1. 新代码遵循[代码开发规范](MemBook%20代码开发规范.md)。
+2. 提交前至少运行 `npm run typecheck`、`npm test` 与 `npm run lint:baseline`。
+3. 提交信息使用 Conventional Commits，例如 `feat(editor): add page guides`。
+4. 涉及依赖版本、npm scripts、Tauri 配置、缓存参数或发布流程时，同步更新对应文档。
 
-### CI
+## 仓库同步
 
-- **平台**：GitHub Actions（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）
-- **流程**：Lint → TypeCheck → Test → Build
-- **触发**：push / PR 到 `main`
+本地仓库为准，`main` 分支同步推送至 GitHub 与 cnb.cool。产品主页和安装包发布流程见[发布说明](docs/release.md)。
 
----
+## 许可证
 
-## 五、性能优化要点
-
-针对 300+ 照片 / 100+ 页场景的优化（详见 [`开发日志.md`](开发日志.md)）：
-
-| 优化项           | 说明                                                            |
-| ---------------- | --------------------------------------------------------------- |
-| LRU 缓存         | imageBitmapLoader(100) / thumbnailCache(80) 限制内存无限增长    |
-| 虚拟滚动         | react-virtuoso 仅渲染可见项                                     |
-| LOD 三级图片     | thumb/preview/full 按视图档位加载                               |
-| Web Worker 渲染  | 缩略图/PNG 编码移至 Worker，主线程不阻塞                        |
-| IndexedDB 持久化 | 缩略图跨会话缓存                                                |
-| 引用计数         | blobUrlCache 显式 acquire/release（无容量上限，按引用计数管理） |
-| 细粒度订阅       | Zustand selector 选择器，禁止全量订阅                           |
-| 请求去重         | loadImage/loadImageBitmap 防止并发重复加载                      |
-| photoMap 归一化  | O(1) 查找替代 O(n) find                                         |
-| ImageBitmap      | 显式 close() 释放内存                                           |
-
----
-
-## 六、关键约束
-
-- 私钥（`.tauri/membook-updater.key`）绝不提交，仅提交公钥
-- 激活码生成器（`tools/license-generator/`）含 RSA 私钥，不提交
-- Canvas 2D 渲染需 `ensureCanvasSafeUrl` 转换非同源 URL，避免 canvas 污染
-- 自动更新清单由 CI（`release.yml`）生成，随版本发布到 GitHub Releases，更新源指向 `releases/latest/download/update-<target>-<arch>.json`
-- CSP `connect-src` 需允许 GitHub 下载域（`https://github.com`、`https://*.githubusercontent.com`），updater 下载才不中断
-- CSP `connect-src` 必须包含 `blob:`，否则 `fetch(blob:url)` 加载 ImageBitmap 会被拦截导致页面崩溃
-- `tauri.conf.json` 的 bundle targets 必须为 `["nsis"]`，跳过 WiX/MSI 减少依赖
-- 入口 `main.tsx` 不使用 `<StrictMode>`：react-konva 19.x 的 `<Transformer>` 在 React 19 开发期 StrictMode 双挂载下会抛 `setAttrs` 崩溃，导致 Konva 画布不渲染（形状/槽位不显示）
-- Sentry 仅生产环境初始化，敏感 URL 需脱敏
-- 导入 >100 张照片时，存储模式对话框必须在文件选择后立即弹出
-- 照片导入进度需显示三阶段：读取文件 / 导入 / 加载缩略图
-
----
-
-## 七、贡献指南
-
-1. Fork 本仓库并创建功能分支：`git checkout -b feat/your-feature`
-2. 提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范（项目已配置 commitlint）
-3. 提交前运行 `npm run lint` 与 `npm run typecheck` 确保通过
-4. 推送分支并提交 Pull Request
-
----
-
-## 八、许可证与版权
-
-© 2026 MemBook. **保留所有权利。**
-
-本项目为闭源商业软件，未经许可不得复制、分发、修改或用于商业用途。激活码授权由内置 RSA 离线授权系统管理。
+版权所有 © 2026 MemBook。未经授权不得复制、分发或用于商业用途。

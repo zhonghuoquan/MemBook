@@ -27,10 +27,14 @@ import {
   type ToolResultSummary,
   type DataSourceMode,
   type DedupeResult,
+  type FaceClusterResult,
+  type FaceDetectionResult,
+  type SimilarGroup,
+  type ScreenshotItem,
 } from '../../photo-tools';
 import { useUIStore } from '../../store';
 import { useLicenseStore } from '../../license';
-import type { LicenseFeature } from '../../license/types';
+
 import { ProgressBar, ToolCard, AddToAlbumButton, IMAGE_EXTS, getExt, extToMimeType, FEATURE_COLORS, countByExt, type ToolProps } from './organize/shared';
 import { DedupeTool } from './organize/DedupeTool';
 import { OrganizeTool } from './organize/OrganizeTool';
@@ -246,27 +250,18 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const { t } = useTranslation();
   const addToast = useUIStore((s) => s.addToast);
 
-  // 照片整理工具的 Pro 专属授权映射：哪些工具需要激活 Pro 才能使用
-  // Free 免费可用：去重、归类、截图识别、重命名、时间线、日历、Exif 查看
-  // Pro 专属：人脸识别、相似照片分析、格式转换、EXIF 批量修改
-  const TOOL_PRO_FEATURE: Partial<Record<ToolId, LicenseFeature>> = {
-    faceCluster: 'faceCluster',
-    similar: 'similar',
-    convert: 'convert',
-    exif: 'exifBatch',
-  };
-  // 检查某工具是否被 Pro 锁定（未激活且该工具属于 Pro 专属）
-  // 订阅 isActivated 布尔态而非稳定的 isFeatureAvailable 函数引用，确保激活后组件能重新渲染并刷新锁定判断
+  // 照片整理结果写操作授权：删除照片 / 合并人脸组等对文件或结果的修改需 Pro（激活或试用期内）。
+  // 分析并展示结果免费；落地写操作时才弹激活窗（由 checkWritePermission 守卫）。
   const licenseActivated = useLicenseStore((s) => s.isActivated);
-  const isFeatureAvailable = useLicenseStore((s) => s.isFeatureAvailable);
   const checkFeature = useLicenseStore((s) => s.checkFeature);
-  const isToolLocked = (id: ToolId): boolean => {
-    const feat = TOOL_PRO_FEATURE[id];
-    if (!feat) return false;
-    return !isFeatureAvailable(feat);
-  };
-  // 在激活态变化时刷新一次（确保依赖 isToolLocked 的缓存与 UI 及时更新）
-  void licenseActivated;
+  const openLicenseDialog = useLicenseStore((s) => s.openDialog);
+
+  /** 结果写操作授权：Free（试用结束后）拒绝删除/合并并弹激活窗；试用期内/Pro 放行 */
+  const checkWritePermission = useCallback((): boolean => {
+    if (licenseActivated) return true;
+    openLicenseDialog(t('license.proWriteRequired'));
+    return false;
+  }, [licenseActivated, openLicenseDialog, t]);
 
   // ---- 多路径标签状态 ----
   // 使用 lazy initializer 在初始化时同步恢复 localStorage 中的标签，避免 effect 中 setState
@@ -278,13 +273,29 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   });
   // 最近打开过的路径历史（用于 EmptyState 快捷重开）
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
+  // render 期同步的 activeTabId，供无依赖稳定回调（handleBusyChange）读取当前标签
+  const activeTabIdRef = useRef<string | null>(null);
+  activeTabIdRef.current = activeTabId;
   // 工具执行中状态汇总：记录哪些工具名处于 busy（任一非空即锁定标签切换）
   // 修复：原 busyTabId 单值会被多个工具的 onBusyChange(false) 覆盖，改用 Set 按工具名汇总
   const [busyTools, setBusyTools] = useState<Set<string>>(new Set());
   const isAnyToolBusy = busyTools.size > 0;
 
   // ── 工具状态追踪（扫描中/已完成），用于侧栏按钮状态指示 ──
-  const [toolStatuses, setToolStatuses] = useState<Map<ToolId, ToolStatus>>(new Map());
+  // 按「标签」隔离：key = `${tabId}::${toolId}`，避免新开路径沿用了上一路径的“已完成”状态
+  const [toolStatuses, setToolStatuses] = useState<Map<string, ToolStatus>>(new Map());
+  // 当前激活标签的工具栏状态（供侧栏渲染）
+  const activeToolStatuses = useMemo<Map<ToolId, ToolStatus>>(() => {
+    const m = new Map<ToolId, ToolStatus>();
+    if (!activeTabId) return m;
+    const prefix = `${activeTabId}::`;
+    for (const [k, v] of toolStatuses) {
+      if (k.startsWith(prefix)) {
+        m.set(k.slice(prefix.length) as ToolId, v);
+      }
+    }
+    return m;
+  }, [toolStatuses, activeTabId]);
   // ── 已访问工具集合（懒挂载：首次切换到某工具时才渲染，之后保持挂载以保留状态） ──
   const [visitedTools, setVisitedTools] = useState<Set<ToolId>>(new Set(['dedupe']));
 
@@ -294,6 +305,12 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const [activeTool, setActiveTool] = useState<ToolId>('dedupe');
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
+  // 当前活跃工具上报的「加入相册」有效结果集（由各工具通过 onAlbumChange 上报）
+  const [albumToolPhotos, setAlbumToolPhotos] = useState<PhotoFileInfo[] | null>(null);
+  // 接收工具上报结果集（stable 引用，避免工具 effect 依赖抖动）
+  const handleAlbumChange = useCallback((photos: PhotoFileInfo[] | null) => {
+    setAlbumToolPhotos(photos);
+  }, []);
   // 一键成册 3 步向导
   const [oneClickAlbumOpen, setOneClickAlbumOpen] = useState(false);
   // 时间线 → 日历跳转的初始月份（跳转后清空，避免后续切换日历视图时仍定位到旧月份）
@@ -334,16 +351,73 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     });
   }, []);
 
+  // ── 相似照片结果按标签持久化（提升到面板级别，与去重一致；离开面板/切换标签不丢） ──
+  interface SimilarPanelState {
+    scanned: boolean;
+    groups: SimilarGroup[];
+    marked: Record<string, Set<number>>;
+  }
+  const [similarStates, setSimilarStates] = useState<Map<string, SimilarPanelState>>(new Map());
+  const activeSimilarState: SimilarPanelState = activeTabId
+    ? (similarStates.get(activeTabId) ?? { scanned: false, groups: [], marked: {} })
+    : { scanned: false, groups: [], marked: {} };
+  const setSimilarState = useCallback((tabId: string, s: SimilarPanelState) => {
+    setSimilarStates((prev) => {
+      const next = new Map(prev);
+      if (!s.scanned && s.groups.length === 0) next.delete(tabId);
+      else next.set(tabId, s);
+      return next;
+    });
+  }, []);
+
+  // ── 人脸识别结果按标签持久化（提升到面板级别，与去重一致） ──
+  interface FacePanelState {
+    result: FaceClusterResult | null;
+    detection: FaceDetectionResult | null;
+  }
+  const [faceStates, setFaceStates] = useState<Map<string, FacePanelState>>(new Map());
+  const activeFaceState: FacePanelState = activeTabId
+    ? (faceStates.get(activeTabId) ?? { result: null, detection: null })
+    : { result: null, detection: null };
+  const setFaceState = useCallback((tabId: string, s: FacePanelState) => {
+    setFaceStates((prev) => {
+      const next = new Map(prev);
+      if (!s.result && !s.detection) next.delete(tabId);
+      else next.set(tabId, s);
+      return next;
+    });
+  }, []);
+
+  // ── 截图识别结果按标签持久化（提升到面板级别，与去重一致） ──
+  interface ScreenshotPanelState {
+    scanned: boolean;
+    screenshots: ScreenshotItem[];
+    suspects: ScreenshotItem[];
+    normalPhotos: PhotoFileInfo[];
+    failedPhotos: number;
+  }
+  const [screenshotStates, setScreenshotStates] = useState<Map<string, ScreenshotPanelState>>(new Map());
+  const activeScreenshotState: ScreenshotPanelState = activeTabId
+    ? (screenshotStates.get(activeTabId) ?? { scanned: false, screenshots: [], suspects: [], normalPhotos: [], failedPhotos: 0 })
+    : { scanned: false, screenshots: [], suspects: [], normalPhotos: [], failedPhotos: 0 };
+  const setScreenshotState = useCallback((tabId: string, s: ScreenshotPanelState) => {
+    setScreenshotStates((prev) => {
+      const next = new Map(prev);
+      if (!s.scanned && s.screenshots.length === 0 && s.suspects.length === 0) next.delete(tabId);
+      else next.set(tabId, s);
+      return next;
+    });
+  }, []);
+
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const scanningAny = tabs.some((t) => t.scanning);
 
   // ── “一键分析”状态：自动依次运行 去重 → 人脸识别 → 相似照片 → 截图识别 ──
-  // 对 Free 用户自动剔除 Pro 专属工具（人脸识别/相似照片），仅在授权可用时才纳入序列
+  // 分析能力对全部用户开放（含 Free）：人脸识别 / 相似照片也能给出结果、可查看；
+  // 对结果的写操作（删除 / 合并）才由 checkWritePermission 收口到 Pro。
   const AUTO_ANALYZE_TOOLS: ToolId[] = useMemo(
-    () => (['dedupe', 'faceCluster', 'similar', 'screenshot'] as ToolId[]).filter((id) => !isToolLocked(id)),
-    // 依赖 licenseActivated：激活后（Pro 全开）一键分析要包含全部工具
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFeatureAvailable, licenseActivated],
+    () => (['dedupe', 'faceCluster', 'similar', 'screenshot'] as ToolId[]),
+    [],
   );
   // 当前“一键分析”进行到的工具（'idle' 表示未在运行）
   const [autoAnalyzeStep, setAutoAnalyzeStep] = useState<ToolId | 'idle'>('idle');
@@ -480,6 +554,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 且扫描结果由各工具内部 useTabCachedResult 按标签缓存，切回时自动恢复，无需卸载重挂。
   useEffect(() => {
     setSelectedPhotoIds(new Set());
+    setAlbumToolPhotos(null);
     // 切换路径后若新路径尚未生成分析报告，则关闭报告页，避免显示上一个路径的旧报告；
     // 若新路径已有报告，保持展示（报告内容会随 activeReport 自动切换到该路径的报告）
     if (activeReport.length === 0) {
@@ -609,8 +684,30 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     let rafId = 0;
     // scanDone 标志：扫描结束后阻止延迟 flush 的 rAF 覆盖 scanProgress: null
     let scanDone = false;
+    // 超时兜底：Rust 端 / listen / invoke 任一环节挂起时强制退出“扫描中”，避免用户永远卡住
+    let timedOut = false;
+    const SCAN_TIMEOUT_MS = 30_000;
+    let timeoutId: number | undefined;
 
     try {
+      // 扫描超时兜底：即使 Rust 端 / listen / invoke 任一环节挂起，达到时限后强制退出
+      // “扫描中”状态并给出明确提示（listen 不再作为无界阻塞点）。若扫描在超时后才返回，
+      // 后续分支通过 timedOut 判断放弃应用，避免与超时复位冲突。
+      timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        if (rafId !== 0) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        pendingProgress = null;
+        if (unlisten) {
+          try { unlisten(); } catch { /* ignore */ }
+          unlisten = null;
+        }
+        setTabState(tabId, (tab) => ({ ...tab, scanning: false, scanProgress: null }));
+        addToast({ type: 'error', message: t('organize.scan.scanTimeout', { defaultValue: '扫描超时，请检查所选文件夹后重试' }) });
+      }, SCAN_TIMEOUT_MS);
+
       const { invoke } = await import('@tauri-apps/api/core');
       const { listen } = await import('@tauri-apps/api/event');
 
@@ -737,6 +834,10 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       }
       pendingProgress = null;
 
+      // 扫描超时后放弃应用结果（UI 已复位，避免与超时提示冲突）
+      if (timedOut) return;
+      clearTimeout(timeoutId);
+
       // 大量照片（如 1000+）一次性 setState 会触发重渲染所有工具卡片，
       // 用 startTransition 标记低优先级，让 React 优先处理用户交互（滚动/点击）
       startTransition(() => {
@@ -744,6 +845,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       });
       addToast({ type: 'success', message: t('organize.scan.scanComplete', { count: results.length }) });
     } catch (err) {
+      if (timedOut) return;
+      clearTimeout(timeoutId);
       scanDone = true;
       if (rafId !== 0) {
         cancelAnimationFrame(rafId);
@@ -753,6 +856,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       setTabState(tabId, (tab) => ({ ...tab, scanProgress: null }));
       addToast({ type: 'error', message: t('organize.scan.scanFailed', { message: (err as Error).message }) });
     } finally {
+      clearTimeout(timeoutId);
       // 统一清理事件监听器（无论成功或失败）
       if (unlisten) {
         try { unlisten(); } catch { /* ignore */ }
@@ -977,6 +1081,16 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
         next.delete(id);
         return next;
       });
+      // 释放该标签的侧栏工具状态（已完成/扫描中），避免孤儿条目残留
+      setToolStatuses((prev) => {
+        const prefix = `${id}::`;
+        if (!Array.from(prev.keys()).some((k) => k.startsWith(prefix))) return prev;
+        const next = new Map(prev);
+        for (const k of Array.from(next.keys())) {
+          if (k.startsWith(prefix)) next.delete(k);
+        }
+        return next;
+      });
 
       const idx = tabsRef.current.findIndex((t) => t.id === id);
       const remaining = tabsRef.current.filter((t) => t.id !== id);
@@ -1183,10 +1297,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     setToolStatuses((prev) => {
       const next = new Map(prev);
       const tid = toolName as ToolId;
+      // 归属当前激活标签（或一键分析发起标签），按标签隔离“已完成”状态，
+      // 避免新开路径/切换标签时显示上一路径的扫描结果
+      const tabId = activeAnalyzeTabRef.current ?? activeTabIdRef.current;
+      if (!tabId) return prev;
+      const key = `${tabId}::${tid}`;
       if (busy) {
-        next.set(tid, 'running');
-      } else if (next.get(tid) === 'running') {
-        next.set(tid, 'done');
+        next.set(key, 'running');
+      } else if (next.get(key) === 'running') {
+        next.set(key, 'done');
       }
       return next;
     });
@@ -1224,10 +1343,11 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
     onBusyChange: handleBusyChange,
     onResultSummary: handleResultSummary,
     checkProFeature: (feat, hint) => checkFeature(feat, hint ?? t('license.photoToolRequiresPro')),
+    checkWritePermission,
   }), [
     activeTab?.photos, activeTab?.rootPath, activeTab?.sourceMode,
     readPhotoData, onPhotosUpdate, addToast, handleRescan, activeTabId, handleBusyChange, handleResultSummary,
-    checkFeature, t,
+    checkFeature, t, checkWritePermission,
   ]);
 
   // ── 渲染 ──────────────────────────────────────────────
@@ -1239,8 +1359,20 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   // 只依赖 hasData + toolProps（已 memo 化）+ 去重状态
   const hasActiveTab = !!activeTab;
 
-  // 工具是否需要"加入相册"按钮（仅浏览类工具支持照片选择→加入相册）
+  // 浏览类工具（时间线/日历）是否显示"一键成册 + 加入相册"
   const showAlbumButton = activeTool === 'timeline' || activeTool === 'calendar';
+
+  // 统一「加入相册」的当前有效集合：
+  //   - 浏览类工具：使用时间线/日历勾选的照片
+  //   - 智能整理工具：使用当前活跃工具上报的有效结果集（去重保留 / 人脸勾选 / 相似保留 / 截图正常 / 待归类 / 待重命名 / 待转换 / 已有日期等）
+  const albumTargetPhotos = useMemo(() => {
+    if (showAlbumButton) {
+      if (!activeTab || selectedPhotoIds.size === 0) return [];
+      return activeTab.photos.filter((p) => selectedPhotoIds.has(p.id));
+    }
+    return albumToolPhotos ?? [];
+  }, [showAlbumButton, activeTab, selectedPhotoIds, albumToolPhotos]);
+  const canAlbum = albumTargetPhotos.length > 0;
 
   return (
     <div className="h-full flex flex-col p-6 overflow-hidden">
@@ -1526,7 +1658,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             </button>
             <ToolSidebar
               activeTool={activeTool}
-              toolStatuses={toolStatuses}
+              toolStatuses={activeToolStatuses}
               onSelect={(id) => {
                 // 用户手动切换工具：标记为“用户有操作”，一键分析不再强制自动跳转
                 if (autoAnalyzeRunning) userNavigatedRef.current = true;
@@ -1537,6 +1669,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                 setActiveTool(id);
                 // 切换工具时清空选中（不同工具的选择上下文不同，避免误操作）
                 setSelectedPhotoIds(new Set());
+                // 清空上一工具上报的入册结果集，等待新活跃工具重新上报
+                setAlbumToolPhotos(null);
               }}
             />
           </div>
@@ -1545,9 +1679,9 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
           <div className="flex-1 min-w-0 flex flex-col relative">
             {/* 一键成册 + 加入相册浮动按钮（选中照片后显示，固定在右上角）
                 显示报告页时隐藏，避免遮挡单独报告页 */}
-            {!showAnalyzeReport && (showAlbumButton || selectedPhotoIds.size > 0) && (
+            {!showAnalyzeReport && (showAlbumButton || canAlbum) && (
               <div className="absolute top-2 right-3 z-20 flex items-center gap-2">
-                {/* 一键成册：把选中照片一键排版成可导出的相册 */}
+                {/* 一键成册：把选中照片一键排版成可导出的相册（仅浏览类工具） */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1573,21 +1707,10 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                   </svg>
                   {t('organize.oneClickAlbum.title', '一键成册')}
                 </button>
-                {showAlbumButton && (
+                {canAlbum && (
                   <AddToAlbumButton
-                    count={selectedPhotoIds.size}
-                    onClick={() => {
-                      if (selectedPhotoIds.size === 0) {
-                        addToast({
-                          type: 'warning',
-                          message: t('home.organize.albumBridge.selectPhotosFirst', {
-                            defaultValue: '请先选择照片',
-                          }),
-                        });
-                        return;
-                      }
-                      setAlbumBridgeOpen(true);
-                    }}
+                    count={albumTargetPhotos.length}
+                    onClick={() => setAlbumBridgeOpen(true)}
                   />
                 )}
               </div>
@@ -1617,6 +1740,8 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
                 <DedupeTool
                   key="dedupe"
                   {...toolProps}
+                  albumActive={activeTool === 'dedupe'}
+                  onAlbumChange={handleAlbumChange}
                   dedupeResult={activeDedupeState.result}
                   dedupeOverrides={activeDedupeState.overrides}
                   onDedupeStateChange={(result, overrides) => { if (activeTabId) setDedupeState(activeTabId, result, overrides); }}
@@ -1632,17 +1757,17 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             )}
             {visitedTools.has('faceCluster') && (
               <div className={!showAnalyzeReport && activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key="faceCluster" {...toolProps} proFeature="faceCluster" autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
+                <FaceClusterTool key="faceCluster" {...toolProps} proFeature="faceCluster" faceResult={activeFaceState.result} faceDetection={activeFaceState.detection} onFaceStateChange={(result, detection) => { if (activeTabId) setFaceState(activeTabId, { result, detection }); }} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
               </div>
             )}
             {visitedTools.has('similar') && (
               <div className={!showAnalyzeReport && activeTool === 'similar' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <SimilarTool key="similar" {...toolProps} proFeature="similar" autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
+                <SimilarTool key="similar" {...toolProps} proFeature="similar" similarResult={activeSimilarState} onSimilarStateChange={(s) => { if (activeTabId) setSimilarState(activeTabId, s); }} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'similar'} />
               </div>
             )}
             {visitedTools.has('screenshot') && (
               <div className={!showAnalyzeReport && activeTool === 'screenshot' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <ScreenshotTool key="screenshot" {...toolProps} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
+                <ScreenshotTool key="screenshot" {...toolProps} screenshotResult={activeScreenshotState} onScreenshotStateChange={(s) => { if (activeTabId) setScreenshotState(activeTabId, s); }} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'screenshot'} />
               </div>
             )}
             {visitedTools.has('exif') && (
@@ -1727,11 +1852,11 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
         </div>
       )}
 
-      {/* 一键成册联动对话框 */}
+      {/* 一键成册联动对话框（统一「加入相册」入口） */}
       <AlbumBridgeDialog
         open={albumBridgeOpen}
         onClose={() => setAlbumBridgeOpen(false)}
-        photos={selectedPhotos}
+        photos={albumTargetPhotos}
         sourceMode={activeTab?.sourceMode ?? 'folder'}
         addToast={addToast}
         readPhotoData={readPhotoData}

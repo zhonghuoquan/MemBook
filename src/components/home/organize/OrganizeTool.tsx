@@ -21,7 +21,7 @@ import {
 import { ToolCard, ProgressBar, PrimaryButton, countByExt, useTabCachedResult, type ToolProps } from './shared';
 import { logger } from '../../../utils/logger';
 
-export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan, onBusyChange, tabId }: ToolProps) {
+export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addToast, onRescan, onBusyChange, tabId, albumActive, onAlbumChange }: ToolProps) {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -49,6 +49,18 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
     const set = new Set(photos.map((p) => p.ext));
     return [...set].sort();
   }, [photos]);
+
+  // 当前生效待归类照片（排除未选格式），作为「加入相册」目标
+  const photosToOrganize = useMemo(
+    () => photos.filter((p) => !excludedExts.has(p.ext)),
+    [photos, excludedExts],
+  );
+
+  // 上报「当前有效结果集」：待归类照片可统一加入相册（需桌面端可用）
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(canUse && photosToOrganize.length > 0 ? photosToOrganize : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumActive, onAlbumChange, canUse, photosToOrganize]);
 
   // 组件保持挂载后，切标签时 photos 引用也会变化，但不应清空（结果由 useTabCachedResult 按标签恢复）。
   // 仅在“同一标签内 photos 变化”（重新扫描/删除照片）时清除旧预览结果。
@@ -103,7 +115,6 @@ export function OrganizeTool({ photos, rootPath, sourceMode, readPhotoData, addT
   const handlePreview = async () => {
     setPreviewing(true);
     setItems([]);
-    const photosToOrganize = photos.filter((p) => !excludedExts.has(p.ext));
     try {
       const result = await previewOrganize(photosToOrganize, {
         readData: readPhotoData,

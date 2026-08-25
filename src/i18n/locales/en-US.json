@@ -354,15 +354,17 @@
         "invalidDateFormat": "Unrecognized date format",
         "parsedAs": "Parsed as: {{date}}",
         "preserveTime": "Preserve original time (date only)",
+        "positionTitle": "Location / GPS",
         "dateScopeTitle": "Scope (by date taken)",
         "scopeWithDate": "Photos with date taken ({{count}})",
         "scopeWithoutDate": "Photos without date taken ({{count}})",
         "dateScopeHint": "Unchecked groups won't be modified. E.g. checking only \"without date\" writes dates only to those photos.",
-        "showNoDateList": "Show photos without date ({{count}})",
+        "showNoDateList": "Show photos to fix ({{count}})",
         "hideNoDateList": "Hide list",
         "morePhotos": "{{count}} more photos",
         "autoRecognized": "Auto-detected",
         "notRecognized": "Not detected",
+        "viewLarge": "Click to view large",
         "copyNameHint": "Click to copy file name",
         "copyNameToast": "Copied file name: {{name}}",
         "singleDatePlaceholder": "YYYY-MM-DD HH:MM:SS",
@@ -388,6 +390,17 @@
         "writeAllSuccess": "Written {{ok}} photos, {{fail}} failed",
         "writeAllNoTarget": "No writable photos (enter a date for a photo in the list first)",
         "batchHint": "Click \"Convert All\" first, then \"Write All\" to set dates (buttons disabled without targets)",
+        "filter": {
+          "all": "All to fix",
+          "noDate": "Missing date",
+          "noGps": "Missing GPS",
+          "both": "Missing both",
+          "complete": "Complete"
+        },
+        "mergeHint": "Fill a unified date/coords above and click \"Write All at once\" to batch-process filtered photos; or fill date/coords per card and save individually.",
+        "executeMerge": "Write all at once ({{count}})",
+        "writeGps": "Set coords",
+        "writingGps": "Writing...",
         "gpsModeCoord": "Coordinates",
         "gpsModePlace": "Place Name",
         "placeNamePlaceholder": "Enter a place, e.g. Tiananmen Square",
@@ -843,7 +856,9 @@
       "expand": "Expand",
       "collapse": "Collapse"
     },
-    "photoToolRequiresPro": "This feature is Pro-only. Activate to unlock."
+    "photoToolRequiresPro": "This feature is Pro-only. Activate to unlock.",
+    "proWriteRequired": "Analysis results can only be merged / deleted with Pro. Activate to unlock.",
+    "proUnlockDpi": "Activate Pro to unlock higher-resolution export (≥{{dpi}} DPI)"
   },
   "organize": {
     "title": "Photo Organize",
@@ -952,9 +967,10 @@
     "scan": {
       "scanningFolder": "Scanning folder...",
       "photosFound": "{{count}} photos found...",
-      "scannedCount": "Scanned {{count}} · {{name}}",
+      "scannedCount": "Processed {{count}} items · {{name}}",
       "scanComplete": "Scan complete: {{count}} photos",
       "scanFailed": "Scan failed: {{message}}",
+      "scanTimeout": "Scan timed out. Please check the selected folder and retry",
       "restoring": "Restoring..."
     },
     "tools": {

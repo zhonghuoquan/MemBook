@@ -3,7 +3,7 @@
 > 本规范基于 MemBook 项目当前代码现状提炼，后续所有代码开发**必须严格执行**本规范。
 > 规范冲突时：硬约束 > 工程约定 > 风格约定。违反规范需在 PR 中显式说明理由。
 
-最后更新：2026-08-22（新增 9.14 照片整理大批量性能优化规范）
+最后更新：2026-08-25（统一 NSIS 发布策略、质量基线与文档治理）
 
 ---
 
@@ -13,8 +13,8 @@
 
 | 层级 | 技术 | 版本约束 |
 |---|---|---|
-| 框架 | React 19 + TypeScript 5.x | strict 模式 |
-| 构建 | Vite 5.x | — |
+| 框架 | React 19 + TypeScript 6.x | strict 模式 |
+| 构建 | Vite 7.x | — |
 | 桌面 | Tauri 2.x | 桌面壳层 |
 | 状态 | Zustand 5.x（slices 模式） | — |
 | 画布 | react-konva + Konva 10.x | — |
@@ -54,7 +54,7 @@ src/
 | `db/` | IndexedDB CRUD | 调用 store / 组件 |
 | `hooks/` | 复用逻辑封装 | 持久化业务数据 |
 
-> 经验教训：使用 koa-connect wrapper 导致 ctx 泄漏；原生 Koa 重写是必需的。同理，分层边界不可用 wrapper 模糊。
+> 本表是**新代码的目标边界**。当前存量代码中仍有例外，必须以 [技术债务清单](docs/technical-debt.md) 追踪；不得将存量例外复制到新增代码。
 
 ---
 
@@ -312,7 +312,7 @@ const id = `page-${Date.now()}`;
 
 - 槽位（slot）按 `slotOrder` 排序，装饰元素（画笔/文字/便利贴/贴纸）按 `zIndex` 排序。
 - 装饰元素与槽位是**两套独立的层级系统**：装饰元素的 `bringToFront` 不影响槽位顺序，反之亦然。
-- **统一 zIndex 系统**：新增槽位（`addPhotoSlot`）和粘贴槽位时通过 `getGlobalMaxZ(page)` 计算全局最大 zIndex，新槽位设为 `maxZ + 1` 确保顶层显示。`getGlobalMaxZ` 定义在 `decorationsSlice.ts`，考虑所有槽位（`slotZIndices`）和装饰元素（`stickerElements/textElements/stickyNotes/brushStrokes`）的 zIndex。
+- **统一 zIndex 系统**：新增槽位（`addPhotoSlot`）和粘贴槽位时通过 `getGlobalMaxZ(page)` 计算全局最大 zIndex，新槽位设为 `maxZ + 1` 确保顶层显示。`getGlobalMaxZ` 定义在 `store/editorStore/helpers.ts`，考虑所有槽位（`slotZIndices`）和装饰元素（`stickerElements/textElements/stickyNotes/brushStrokes`）的 zIndex。
 - **页面显示模式**：`pageDisplayMode: 'full' | 'page'`（uiStore）。`'page'` 模式下用 Konva `<Group clipFunc>` 裁剪 `globalLayerElements` 到页面边界 `(0, 0, CANVAS_W, CANVAS_H)`；UI 元素（Transformer/框选/编辑遮罩）不受裁剪影响。
 - Konva Stage 卸载时必须调用 `stage.destroy()` 释放位图引用（见 Canvas.tsx P0-fix）。
 
@@ -337,7 +337,7 @@ const id = `page-${Date.now()}`;
 
 ### 9.5 React 约束（硬约束）
 
-- **禁止使用 `<StrictMode>`**：React 19 开发期 StrictMode 双挂载会使 react-konva 19.x 的 `<Transformer>` 抛 `Cannot read properties of undefined (reading 'setAttrs')`，导致**整个 Konva Stage 崩溃、画布不渲染**（形状/槽位等全部不显示）。入口 [main.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/main.tsx) 已移除 StrictMode（仅开发期生效，生产构建无影响）。若 reintroduce，必须显式在 PR 说明理由并验证画布渲染。
+- **禁止使用 `<StrictMode>`**：React 19 开发期 StrictMode 双挂载会使 react-konva 19.x 的 `<Transformer>` 抛 `Cannot read properties of undefined (reading 'setAttrs')`，导致**整个 Konva Stage 崩溃、画布不渲染**（形状/槽位等全部不显示）。入口 [main.tsx](src/main.tsx) 已移除 StrictMode（仅开发期生效，生产构建无影响）。若重新引入，必须在 PR 说明理由并验证画布渲染。
 - **Konva 渐变 stop 必须使用扁平数组** `[offset, color, offset, color]`（`fillLinearGradientColorStops` / `fillRadialGradientColorStops`），禁止嵌套数组 `[[offset, color], ...]`。嵌套数组会导致 `addColorStop` 收到数组而渐变填充失败、形状在画布不可见（缩略图/导出用 Canvas2D 逐 stop 填充，不受此影响，故易漏判）。
 
 ### 9.6 封面/书脊域规范
@@ -358,7 +358,7 @@ const id = `page-${Date.now()}`;
 
 ### 9.7 文字元素渲染规范（单一 DOM 排版引擎，2026-08-15）
 
-- **显示与编辑必须是同一个 DOM 节点**：文字元素由 [TextDomNode.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/components/editor/canvas/TextDomNode.tsx) 常驻渲染（Canvas 的「文字 DOM 层」容器内，页面左上角锚定）。显示态只读 + `pointer-events` 穿透；进入编辑仅切换 `contentEditable` + 聚焦光标。**禁止**恢复「Konva 渲染显示 + DOM 浮层编辑」双引擎方案，**禁止** reintroduce half-leading / 基线 / 列容量等任何双引擎补偿公式（两套排版引擎存在固有差异，补偿无法覆盖所有字号/行高/字距/对齐/断行/用户缩放组合，历史教训见开发日志 2026-08-15）。
+- **显示与编辑必须是同一个 DOM 节点**：文字元素由 [TextDomNode.tsx](src/components/editor/canvas/TextDomNode.tsx) 常驻渲染（Canvas 的「文字 DOM 层」容器内，页面左上角锚定）。显示态只读 + `pointer-events` 穿透；进入编辑仅切换 `contentEditable` + 聚焦光标。**禁止**恢复「Konva 渲染显示 + DOM 浮层编辑」双引擎方案，**禁止**重新引入 half-leading / 基线 / 列容量等任何双引擎补偿公式（两套排版引擎存在固有差异，补偿无法覆盖所有字号/行高/字距/对齐/断行/用户缩放组合，历史教训见开发日志 2026-08-15）。
 - **Konva TextElementNode 仅承载命中/选中/控制点**（透明 Rect 命中区），不得渲染文字内容；导出（exportEngine）与缩略图（thumbnailCore）沿用 Canvas 2D 公式，必须与 DOM 排版公式同源（见下）。
 - **尺寸计算单一来源**：`fitTextSize`（TextDomNode.tsx 导出）与显示层块几何**完全同源**——竖排每列容量 `perCol = floor((height×MM_TO_PX − 2×4px) / (fontSize+letterSpacing))`（无 +1）、列宽 `stepX = fontSize×lineHeight`、字步进 `stepY = fontSize+letterSpacing`、显式 `\n` 即换列（`numCols = Σ ceil(段长/perCol)`）；横排行高 `fontSize×lineHeight`、断行用共享 `wrapTextLines`（CJK 逐字可断、Latin 按空格断）。**单位硬约束**：`el.width/height` 为 mm、`fontSize/letterSpacing` 为逻辑 px，任何公式比较前必须经 `MM_TO_PX` 换算到同一单位（历史 bug：mm 除以 px 导致退出编辑盒尺寸爆炸）。
 - **断行测量必须计入 letterSpacing**：`wrapTextLines` 用 Canvas `measureText` 断行，但 `measureText` 不含 `letter-spacing`，**必须**用 `measureText(s) + s.length×letterSpacing` 判断是否超宽；调用方 contentWpx 需减去末尾一个字距。否则字距较大的多行文本会少算行数 → 文本框高度不足、多行文字被裁剪（历史教训见开发日志 2026-08-15）。
@@ -461,7 +461,7 @@ const id = `page-${Date.now()}`;
 ### 9.13 标尺与参考线（2026-08-19）
 - **统一开关**：标尺 + 参考线由 `uiStore.rulerEnabled`（默认 false，localStorage `membook_ruler_enabled` 持久化）统一控制，底部导航左侧「对齐」旁「标尺」按钮切换；**关闭时标尺与参考线均隐藏**。
 - **参考线数据归属**：相册级编辑辅助 `AlbumGuideLine`（id/orientation/position，position 为 **mm** 页面坐标），存 `albumMetaSlice.guideLines` + `AlbumProject.guideLines` 随项目持久化；**禁止**写入页面数据/元素（不参与导出/缩略图/打印/undo）。旧数据缺省空数组，无需迁移。
-- **标尺渲染**：[CanvasRulers.tsx](file:///f:/N-编程/MenBook开发项目/MemBook/src/components/editor/CanvasRulers.tsx) 顶部横尺 + 左侧竖尺**固定于滚动容器视口边缘**（Canvas 主 return 外包 `relative w-full h-full pointer-events-none` wrapper，滚动容器 `absolute inset-0 pointer-events-auto`；标尺条 pointer-events-auto）；刻度 canvas 绘制、**单位按 mm**（页面 210mm 标 0~210，`mmToPx=MM_TO_PX`；主刻度间距从 1/2/5/10/20/50/100/200mm 中按 `mm×MM_TO_PX×zoom ≥ 60px` 自适应），**数字放外侧（textBaseline top）、刻度线放内侧**（主 24→13 / 中 24→16 / 次 24→19），互不重叠；页面内容范围高亮；随滚动/缩放重绘。
+- **标尺渲染**：[CanvasRulers.tsx](src/components/editor/CanvasRulers.tsx) 顶部横尺 + 左侧竖尺**固定于滚动容器视口边缘**（Canvas 主 return 外包 `relative w-full h-full pointer-events-none` wrapper，滚动容器 `absolute inset-0 pointer-events-auto`；标尺条 pointer-events-auto）；刻度 canvas 绘制、**单位按 mm**（页面 210mm 标 0~210，`mmToPx=MM_TO_PX`；主刻度间距从 1/2/5/10/20/50/100/200mm 中按 `mm×MM_TO_PX×zoom ≥ 60px` 自适应），**数字放外侧（textBaseline top）、刻度线放内侧**（主 24→13 / 中 24→16 / 次 24→19），互不重叠；页面内容范围高亮；随滚动/缩放重绘。
 - **参考线渲染/交互**：参考线 Layer 位于 Stage 顶层（内容层之上），坐标 = `groupOX/OY + 位置mm×MM_TO_PX×zoom`（**必须含 groupOX/OY 才是 Stage 空间**——对齐引导线 `updateGuideLines` 已修复该偏移）；**珊瑚粉虚线 `#FF6B8B`**（已保存参考线与拖出中临时预览线颜色必须一致），拖拽移动（**dragEnd 一次提交**，避免拖拽中 store 重渲染抖动）、双击删除；**从顶部横尺拖出水平参考线（'horizontal'）、左侧竖尺拖出垂直参考线（'vertical'）**，方向语义 = 参考线本身方向（横线用 Y、竖线用 X），禁止传反。
 - **顶部控件避让**：标尺开启时页面顶部悬浮工具栏（`PageToolbar`）与右上角显示模式按钮（`PageDisplayModeToggle`）的 `top` 必须下移至 `RULER_SIZE + 12px`（读取 `uiStore.rulerEnabled` + `RULER_SIZE`），关闭恢复 12px，防止遮挡标尺。
 - **对齐吸附接入**：`buildAlignTargets` 把参考线作为零宽/零高细长 bounds 目标，**仅 `rulerEnabled` 时参与**（避免吸附到隐藏参考线）；吸附生效仍受 `alignEnabled` 门控。
@@ -470,7 +470,7 @@ const id = `page-${Date.now()}`;
 
 ### 9.14 照片整理大批量性能优化（2026-08-22）
 上万张照片的分析功能（相似分析/去重/人脸识别/截图识别/时间归类）**禁止**把长任务一次性跑在主线程导致 UI 冻结，统一采用「分批让出主线程 + 并发控制 + 只读文件头」策略：
-- **共享工具函数**（[async-utils.ts](file:///f:/N-编程/MenBook开发项目/MemBook/src/photo-tools/async-utils.ts)）：`yieldToMain()`（`setTimeout(0)` 让出主线程）、`runInChunks(items, batch, fn, signal)`（分批处理 + 每批让出）、`mapWithConcurrency(items, fn, concurrency, onProgress, signal)`（工作池并发模式，默认并发 8）。**禁止**在 hash.ts / screenshot.ts / organize.ts 内各自内联重复实现，必须导入共享函数（本地重复实现已删除）。
+- **共享工具函数**（[async-utils.ts](src/photo-tools/async-utils.ts)）：`yieldToMain()`（`setTimeout(0)` 让出主线程）、`runInChunks(items, batch, fn, signal)`（分批处理 + 每批让出）、`mapWithConcurrency(items, fn, concurrency, onProgress, signal)`（工作池并发模式，默认并发 8）。**禁止**在 hash.ts / screenshot.ts / organize.ts 内各自内联重复实现，必须导入共享函数（本地重复实现已删除）。
 - **大批量同步重计算必须分批让出**：人脸检测（`detectFaces` 用 `runInChunks`）、人脸聚类距离矩阵（`agglomerativeCluster` 按行分批 `MATRIX_BATCH_ROWS=200` + 每批 `yieldToMain`）、时间归类构建归类项（`PROCESS_BATCH=50`）等；每批结束更新进度，保证 UI 响应与进度条平滑。
 - **内存与复杂度防护**：聚类距离矩阵用**三角形扁平存储**（`distFlat`）替代 N×N 二维矩阵；complete linkage 用防爆表 + 带生成计数器的检查缓存避免 O(n²) 检查重复计算；去重 Phase 3 全量 SHA256 并发数降为 `FULL_HASH_CONCURRENCY=4` 控制内存峰值。
 - **只读文件头取 EXIF/尺寸**：截图识别/时间归类**禁止**读取整张照片数据——用 `readData(photo, length)` 只读文件头（`HEAD_BYTES = 64KB`）经 `getImageSizeFromHeader(buf)`（JPEG/PNG/WebP/GIF/BMP）解析像素尺寸 + EXIF 时间，大幅降低内存与 IO；`ScreenshotDetectOptions`/`PreviewOrganizeOptions` 的 `readData` 已支持可选 `length` 参数。
@@ -510,6 +510,9 @@ node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json
 
 # 单元测试
 npm test
+
+# 冻结 lint 基线（错误或警告数量增加即失败）
+npm run lint:baseline
 ```
 
 ---
@@ -539,13 +542,13 @@ npm test
 
 ### 13.1 构建脚本
 
-- 构建 EXE 安装包必须在**系统 PowerShell**（非 TRAE 终端）中运行，避免 TRAE sandbox 拦截文件操作。
+- 构建 Windows 安装包使用 `npm run desktop:build`；默认目标仅为 NSIS `.exe`。
 - 必须设置系统环境变量：
   ```
   TAURI_BUNDLER_TOOLS_GITHUB_MIRROR=https://gh-proxy.com/https://github.com
   ```
   防止 NSIS 下载超时。
-- `tauri.conf.json` 的 bundle targets 必须为 `["nsis"]`，跳过 WiX/MSI 减少依赖。
+- `tauri.conf.json` 的 `bundle.targets` 必须为 `["nsis"]`，跳过 WiX/MSI 减少依赖。
 - **CSP 配置硬约束**：`tauri.conf.json` 的 `connect-src` 指令**必须包含 `blob:`**，否则 `imageBitmapLoader.ts` 中 `fetch(blob:url)` 会被 CSP 拦截，导致 GP 模式重排后照片加载失败、React 渲染崩溃（error #300）。
 
 ### 13.2 构建脚本约定
@@ -577,7 +580,7 @@ npm test
   ### 涉及文件
   - `path/to/file.ts` — 改动说明
   ```
-- 涉及的文件路径使用 markdown 链接语法 `[file.ts](file:///absolute/path)` 便于跳转。
+- 涉及的文件路径使用仓库相对 Markdown 链接，如 `[file.ts](src/path/file.ts)`；禁止使用本机绝对路径链接。
 
 ---
 
@@ -604,15 +607,15 @@ npm test
 # 桌面端开发
 npm run desktop:dev
 
-# 构建 EXE（在系统 PowerShell 中运行，非 TRAE 终端）
+# 构建 Windows NSIS 安装包
 npm run desktop:build
 ```
 
 ---
 
-## 附录：已知技术债务与优化方向（2026-07-29 审查）
+## 附录：历史技术债务审查归档（2026-07-29）
 
-> 基于全项目代码审查，按严重程度分级。新增功能时优先修复相关 P1 项。
+> 本节仅保留历史审查记录，不能作为当前代码状态或开发决策依据。当前有效的债务清单与迁移方案见[技术债务清单](docs/technical-debt.md)。
 
 ### P1（架构/类型问题，需优先修复）
 

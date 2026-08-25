@@ -19,7 +19,7 @@ import { ToolCard, ProgressBar, PrimaryButton, CONVERTIBLE_EXTS, countByExt, dow
 import { logger } from '../../../utils/logger';
 import { invoke } from '@tauri-apps/api/core';
 
-export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature }: ToolProps) {
+export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature, albumActive, onAlbumChange }: ToolProps) {
   const { t } = useTranslation();
   const [quality, setQuality] = useState(0.95);
   const [deleteOriginal, setDeleteOriginal] = useState(false);
@@ -89,10 +89,18 @@ export function ConvertTool({ photos, sourceMode, readPhotoData, onPhotosUpdate,
     });
   };
 
-  // 最终待转换照片：生效列表中未被取消勾选的照片
-  const selectedPhotos = filteredPhotos.filter((p) => !deselectedIds.has(p.id));
+  // 最终待转换照片：生效列表中未被取消勾选的照片（memo 保持引用稳定，避免上报触发面板重渲染）
+  const selectedPhotos = useMemo(
+    () => filteredPhotos.filter((p) => !deselectedIds.has(p.id)),
+    [filteredPhotos, deselectedIds],
+  );
   const allSelected =
     filteredPhotos.length > 0 && filteredPhotos.every((p) => !deselectedIds.has(p.id));
+
+  // 上报「当前有效结果集」：工具活跃时把当前待转换/入册集合同步到面板统一入口
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(selectedPhotos);
+  }, [albumActive, onAlbumChange, selectedPhotos]);
 
   // 照片选择网格 + 文件预览列表懒加载（初始一批，滚动到底自动追加，最终全部可展示）
   const gridList = useLazyList(filteredPhotos.length, 200);

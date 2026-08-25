@@ -17,6 +17,7 @@ import {
   type PhotoFileInfo,
 } from '../../../photo-tools';
 import { ToolCard, ProgressBar, PrimaryButton, EXIF_WRITABLE_EXTS, downloadBlob, ThumbImage, useLazyList, type ToolProps } from './shared';
+import { PhotoQuickView } from './PhotoQuickView';
 import { logger } from '../../../utils/logger';
 
 /** 智能解析日期输入，支持多种格式：
@@ -108,24 +109,38 @@ async function writeDateToPhoto(
   }
 }
 
-export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature }: ToolProps) {
+export type ExifFilter = 'all' | 'noDate' | 'noGps' | 'both' | 'complete';
+
+/**
+ * 判断照片是否有「实际可用」的 GPS 坐标。
+ * 仅当 lng/lat 都是有效数字，且不是 (0,0)（无定位时设备常写入零坐标）、且在合法范围内才算有 GPS。
+ * 供列表过滤（candidatePhotos）、批量范围（effectivePhotos）、卡片渲染（NoDatePhotoRow）统一使用。
+ */
+export function hasGps(p: { gpsLat?: number; gpsLon?: number }): boolean {
+  const { gpsLat, gpsLon } = p;
+  if (typeof gpsLat !== 'number' || typeof gpsLon !== 'number') return false;
+  if (gpsLat === 0 && gpsLon === 0) return false;
+  return gpsLon >= -180 && gpsLon <= 180 && gpsLat >= -90 && gpsLat <= 90;
+}
+
+// 批量输入区统一控件样式（目标日期 / 位置两列共用，保证视觉一致）
+const EXIF_FIELD_LABEL_CLS =
+  'block text-[11px] font-[600] text-[var(--color-gray-600)] mb-1';
+const EXIF_INPUT_CLS =
+  'w-full min-w-0 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-white/70 text-sm text-[var(--color-gray-700)] placeholder-[var(--color-gray-400)] focus:outline-none focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand)]/15 transition-colors';
+const EXIF_PANEL_CLS =
+  'rounded-xl border border-[var(--color-border)]/70 bg-[var(--color-surface)]/60 p-3 space-y-2 min-w-0 flex flex-col';
+
+export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, addToast, onBusyChange, proFeature, checkProFeature, albumActive, onAlbumChange }: ToolProps) {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<'date' | 'gps'>('date');
+
+  // 筛选条件：决定待补照片列表展示范围（合并日期 + GPS，不在顶部切表）
+  const [filter, setFilter] = useState<ExifFilter>('all');
 
   // 日期表单
   const [dateInput, setDateInput] = useState('');
   const [preserveTime, setPreserveTime] = useState(true);
   const [excludeSorted, setExcludeSorted] = useState(true);
-
-  // 日期修改范围（按是否已有拍摄日期分组勾选）
-  // 默认仅勾选「无拍摄日期」组（避免覆盖已有日期的照片）
-  const [scopeWithDate, setScopeWithDate] = useState(false);
-  const [scopeWithoutDate, setScopeWithoutDate] = useState(true);
-
-  // GPS 修改范围（按是否已有 GPS 参数分组勾选）
-  // 默认仅勾选「无 GPS」组（避免覆盖已有 GPS 的照片）
-  const [gpsScopeWith, setGpsScopeWith] = useState(false);
-  const [gpsScopeWithout, setGpsScopeWithout] = useState(true);
 
   // GPS 表单
   const [gpsMode, setGpsMode] = useState<'coord' | 'place'>('coord');
@@ -136,10 +151,10 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  // 无拍摄日期照片列表展开/折叠
-  const [showNoDateList, setShowNoDateList] = useState(false);
-  // 无 GPS 照片列表展开/折叠
-  const [showNoGpsList, setShowNoGpsList] = useState(false);
+  // 无拍摄日期照片列表展开/折叠（默认展开，便于直接查看照片卡片）
+  const [showNoDateList, setShowNoDateList] = useState(true);
+  // 无日期照片大图预览（点击缩略图查看大图，支持左右切换）
+  const [preview, setPreview] = useState<{ list: PhotoFileInfo[]; index: number } | null>(null);
   // 批量转格式 / 批量写入日期 状态
   const [convertingAll, setConvertingAll] = useState(false);
   const [writingAll, setWritingAll] = useState(false);
@@ -199,27 +214,58 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
     [writablePhotos, modifyQueue],
   );
 
-  const parsedDate = mode === 'date' ? parseDateInput(dateInput) : null;
+  const parsedDate = parseDateInput(dateInput);
 
-  // 按是否已有拍摄日期分组统计
-  const photosWithDate = writablePhotos.filter((p) => !!p.dateTaken);
-  const photosWithoutDate = writablePhotos.filter((p) => !p.dateTaken);
+  // 按是否已有拍摄日期分组统计（memo 保持引用稳定，避免上报触发面板重渲染）
+  const photosWithDate = useMemo(() => writablePhotos.filter((p) => !!p.dateTaken), [writablePhotos]);
 
-  // 按是否已有 GPS 参数分组统计
-  const hasGps = (p: (typeof writablePhotos)[number]) =>
-    typeof p.gpsLat === 'number' && typeof p.gpsLon === 'number';
-  const photosWithGps = writablePhotos.filter(hasGps);
-  const photosWithoutGps = writablePhotos.filter((p) => !hasGps(p));
+  // 按是否已有「实际可用」GPS 判定（复用共享的 hasGps，排除 0,0 / 越界坐标）
 
-  // 无日期 / 无 GPS 列表懒加载（初始一批 200，滚动到底自动追加，最终全部可展示）
-  const noDateList = useLazyList(photosWithoutDate.length, 200);
-  const noGpsList = useLazyList(photosWithoutGps.length, 200);
+  // 待补照片（缺日期或缺 GPS）按筛选条件过滤 — 合并日期与 GPS 后统一在此展示与批量处理
+  const candidatePhotos = useMemo<PhotoFileInfo[]>(
+    () =>
+      writablePhotos.filter((p) => {
+        const noDate = !p.dateTaken;
+        const noGps = !hasGps(p);
+        if (filter === 'noDate') return noDate;
+        if (filter === 'noGps') return noGps;
+        if (filter === 'both') return noDate && noGps;
+        if (filter === 'complete') return !noDate && !noGps;
+        return noDate || noGps; // 'all'
+      }),
+    [writablePhotos, filter],
+  );
 
-  // 根据勾选范围筛选实际要处理的照片（日期模式按拍摄日期、GPS 模式按是否已有 GPS）
-  const effectivePhotos =
-    mode === 'date'
-      ? writablePhotos.filter((p) => (p.dateTaken ? scopeWithDate : scopeWithoutDate))
-      : writablePhotos.filter((p) => (hasGps(p) ? gpsScopeWith : gpsScopeWithout));
+  // 待补照片列表懒加载（初始一批 200，滚动到底自动追加，最终全部可展示）；切换筛选时重置回首批，避免旧筛选收敛导致新列表首屏为空
+  const candidateList = useLazyList(candidatePhotos.length, 200, filter);
+
+  // 各筛选条件下的待补照片数量（用于筛选按钮右上角计数显示）
+  const filterCounts = useMemo(() => {
+    const counts: Record<ExifFilter, number> = { all: 0, noDate: 0, noGps: 0, both: 0, complete: 0 };
+    for (const p of writablePhotos) {
+      const noDate = !p.dateTaken;
+      const noGps = !hasGps(p);
+      if (noDate) counts.noDate++;
+      if (noGps) counts.noGps++;
+      if (noDate && noGps) counts.both++;
+      if (noDate || noGps) counts.all++;
+      if (!noDate && !noGps) counts.complete++;
+    }
+    return counts;
+  }, [writablePhotos]);
+
+  // 大图预览：点击缩略图打开（预览列表与网格一致，支持左右切换）
+  const openNoDatePreview = useCallback((index: number) => {
+    setPreview({ list: candidatePhotos, index });
+  }, [candidatePhotos]);
+
+  // 上报「当前有效结果集」：已具备有效拍摄日期的照片可统一加入相册
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(photosWithDate.length > 0 ? photosWithDate : null);
+  }, [albumActive, onAlbumChange, photosWithDate]);
+
+  // 实际要批量处理的照片 = 当前筛选下的待补照片
+  const effectivePhotos = candidatePhotos;
 
   // photos 变化时重置
   useEffect(() => {
@@ -250,9 +296,7 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
   };
 
   const canExecute =
-    mode === 'date'
-      ? !!parsedDate && effectivePhotos.length > 0
-      : !!lon && !!lat && effectivePhotos.length > 0;
+    effectivePhotos.length > 0 && (!!parsedDate || (!!lon && !!lat));
 
   const handleExecute = async () => {
     const targetPhotos = effectivePhotos;
@@ -272,13 +316,16 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
           if (!data) throw new Error('读取失败');
 
           let modified = data;
-          if (mode === 'date' && parsedDate) {
+          const hasDateVal = !!parsedDate;
+          const hasGpsVal = !!lon && !!lat;
+          if (hasDateVal) {
             const oldDate = photo.dateTaken ? new Date(photo.dateTaken) : undefined;
-            modified = await writeExifDate(modified, photo.ext, parsedDate, preserveTime ? oldDate : undefined);
+            modified = await writeExifDate(modified, photo.ext, parsedDate!, preserveTime ? oldDate : undefined);
           }
-          if (mode === 'gps' && lon && lat) {
+          if (hasGpsVal) {
             modified = await writeExifGps(modified, photo.ext, parseFloat(lon), parseFloat(lat));
           }
+          if (!hasDateVal && !hasGpsVal) throw new Error('没有可写入的内容');
 
           // 保存：folder + Tauri 写回文件，library / Web 下载到本地
           if (isTauri() && photo.path && sourceMode === 'folder') {
@@ -411,258 +458,212 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
         <span className="px-4 py-2 inline-block text-sm text-[var(--color-gray-500)]">{t('home.organize.exif.noWritablePhotos')}</span>
       ) : (
         <>
-          {/* 模式切换 */}
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setMode('date')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-[600] border-none cursor-pointer transition-all ${
-                mode === 'date' ? 'bg-[var(--color-brand)] text-white' : 'bg-[var(--color-gray-100)] text-[var(--color-gray-600)]'
-              }`}
-            >
-              {t('home.organize.exif.modeDate')}
-            </button>
-            <button
-              onClick={() => setMode('gps')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-[600] border-none cursor-pointer transition-all ${
-                mode === 'gps' ? 'bg-[var(--color-brand)] text-white' : 'bg-[var(--color-gray-100)] text-[var(--color-gray-600)]'
-              }`}
-            >
-              {t('home.organize.exif.modeGps')}
-            </button>
+          {/* 筛选条件：待补照片（缺日期 / 缺GPS）范围 */}
+          <div className="flex items-center gap-3 flex-wrap mb-4">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {(['all', 'noDate', 'noGps', 'both', 'complete'] as ExifFilter[]).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-[600] border-none cursor-pointer transition-all inline-flex items-center gap-1.5 ${
+                    filter === key ? 'bg-[var(--color-brand)] text-white' : 'bg-[var(--color-gray-100)] text-[var(--color-gray-600)]'
+                  }`}
+                >
+                  {t(`home.organize.exif.filter.${key}`)}
+                  <span className={`min-w-4 text-center text-[10px] leading-[14px] px-1 rounded-full ${
+                    filter === key ? 'bg-white/25' : 'bg-white/70 text-[var(--color-gray-500)]'
+                  }`}>
+                    {filterCounts[key]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
+              <input type="checkbox" checked={excludeSorted} onChange={(e) => setExcludeSorted(e.target.checked)} className="cursor-pointer" />
+              {t('home.organize.exif.excludeSorted')}
+            </label>
           </div>
 
-          {/* 通用选项 */}
-          <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer mb-4">
-            <input type="checkbox" checked={excludeSorted} onChange={(e) => setExcludeSorted(e.target.checked)} className="cursor-pointer" />
-            {t('home.organize.exif.excludeSorted')}
-          </label>
-
-          {/* 日期表单 */}
-          {mode === 'date' && (
-            <div className="space-y-3">
-              <label className="block">
-                <span className="text-sm text-[var(--color-gray-600)] mb-1 block">{t('home.organize.exif.targetDate')}</span>
+          {/* 统一批量输入：目标日期 + 位置（左右两列，统一卡片视觉，尽量少占纵向空间） */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {/* 左列：目标日期 */}
+            <div className={EXIF_PANEL_CLS}>
+              <div className="flex items-center gap-1.5">
+                <svg viewBox="0 0 14 14" className="w-3.5 h-3.5 text-[var(--color-brand)]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2.5" width="10" height="9.5" rx="1.5" />
+                  <line x1="2" y1="5.5" x2="12" y2="5.5" />
+                  <line x1="4.8" y1="1" x2="4.8" y2="3" />
+                  <line x1="9.2" y1="1" x2="9.2" y2="3" />
+                </svg>
+                <span className="text-xs font-[600] text-[var(--color-gray-800)]">{t('home.organize.exif.targetDate')}</span>
+              </div>
+              <div className="min-w-0">
                 <input
                   type="text"
                   placeholder={t('home.organize.exif.targetDatePlaceholder')}
                   value={dateInput}
                   onChange={(e) => setDateInput(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] text-sm focus:outline-none focus:border-[var(--color-brand)]"
+                  className={EXIF_INPUT_CLS}
                 />
                 {dateInput && !parsedDate && (
-                  <span className="text-xs text-red-500 mt-1 block">{t('home.organize.exif.invalidDateFormat')}</span>
+                  <span className="flex items-center gap-1 text-[11px] text-red-500 mt-1">
+                    <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="6" r="4.4" /><line x1="6" y1="3.4" x2="6" y2="6.4" /><line x1="6" y1="8" x2="6" y2="8" /></svg>
+                    {t('home.organize.exif.invalidDateFormat')}
+                  </span>
                 )}
                 {parsedDate && (
-                  <span className="text-xs text-green-600 mt-1 block">
+                  <span className="flex items-center gap-1 text-[11px] text-green-600 mt-1">
+                    <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6l3 3 5-6" /></svg>
                     {t('home.organize.exif.parsedAs', { date: parsedDate.toLocaleString('zh-CN') })}
                   </span>
                 )}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
-                <input type="checkbox" checked={preserveTime} onChange={(e) => setPreserveTime(e.target.checked)} className="cursor-pointer" />
-                {t('home.organize.exif.preserveTime')}
-              </label>
-              <div className="mt-3 rounded-lg bg-[var(--color-gray-50)] p-3 space-y-2">
-                <p className="text-xs font-[600] text-[var(--color-gray-600)]">{t('home.organize.exif.dateScopeTitle')}</p>
-                <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
-                  <input type="checkbox" checked={scopeWithDate} onChange={(e) => setScopeWithDate(e.target.checked)} className="cursor-pointer" />
-                  {t('home.organize.exif.scopeWithDate', { count: photosWithDate.length })}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
-                  <input type="checkbox" checked={scopeWithoutDate} onChange={(e) => setScopeWithoutDate(e.target.checked)} className="cursor-pointer" />
-                  {t('home.organize.exif.scopeWithoutDate', { count: photosWithoutDate.length })}
-                </label>
-                {/* 无拍摄日期照片列表（可折叠，支持单文件自动识别+修改 EXIF） */}
-                {photosWithoutDate.length > 0 && (
-                  <div className="mt-1">
-                    <button
-                      onClick={() => setShowNoDateList((v) => !v)}
-                      className="text-xs text-[var(--color-brand)] hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      <svg viewBox="0 0 12 12" className={`w-3 h-3 transition-transform ${showNoDateList ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 2l4 4-4 4" />
-                      </svg>
-                      {showNoDateList ? t('home.organize.exif.hideNoDateList') : t('home.organize.exif.showNoDateList', { count: photosWithoutDate.length })}
-                    </button>
-                    {showNoDateList && (
-                      <div className="mt-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar">
-                        {/* 自适应网格：面板越宽列数越多（典型宽度下约 3~4 列），缩略图加大便于查看 */}
-                        <div className="grid gap-1.5 grid-cols-[repeat(auto-fill,minmax(205px,1fr))]">
-                          {photosWithoutDate.slice(0, noDateList.visibleCount).map((p) => (
-                            <NoDatePhotoRow
-                              key={p.id}
-                              photo={p}
-                              sourceMode={sourceMode}
-                              readPhotoData={readPhotoData}
-                              addToast={addToast}
-                              onReport={handleReport}
-                              onDateUpdated={(newDate) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, dateTaken: newDate } : item)))}
-                              onPhotoConverted={(updated) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? updated : item)))}
-                            />
-                          ))}
-                        </div>
-                        {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
-                        {noDateList.visibleCount < photosWithoutDate.length && <div ref={noDateList.sentinelRef} className="h-1" />}
-                      </div>
-                    )}
-                    {/* 两个批量操作按钮：全部转换（转 JPEG）+ 全部修改（写入日期） */}
-                    {photosWithoutDate.length > 0 && (
-                      <div className="mt-2 space-y-1.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {/* 全部转换：一键转换列表中已出现「转格式」按钮的照片（无目标时禁用） */}
-                          <button
-                            onClick={handleConvertAll}
-                            disabled={convertingAll || busy || convertCandidates.length === 0}
-                            className="px-3 py-1.5 rounded-lg text-xs font-[600] border-none cursor-pointer transition-all
-                                       bg-orange-500 text-white hover:opacity-90
-                                       disabled:opacity-40 disabled:cursor-not-allowed
-                                       inline-flex items-center gap-1.5"
-                            title={t('home.organize.exif.convertAllHint')}
-                          >
-                            <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M2 7a5 5 0 0 1 8.5-3.5L12 5" />
-                              <path d="M12 2v3h-3" />
-                              <path d="M12 7a5 5 0 0 1-8.5 3.5L2 9" />
-                              <path d="M2 12V9h3" />
-                            </svg>
-                            {convertingAll ? t('home.organize.exif.convertingAll') : t('home.organize.exif.convertAll')}
-                          </button>
-                          {/* 全部修改：一键写入列表中已录入/识别到日期的照片（无目标时禁用） */}
-                          <button
-                            onClick={handleWriteAll}
-                            disabled={writingAll || busy || modifyCandidates.length === 0}
-                            className="px-3 py-1.5 rounded-lg text-xs font-[600] border-none cursor-pointer transition-all
-                                       bg-[var(--color-brand)] text-white hover:opacity-90
-                                       disabled:opacity-40 disabled:cursor-not-allowed
-                                       inline-flex items-center gap-1.5"
-                            title={t('home.organize.exif.writeAllHint')}
-                          >
-                            <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M2 7l3 3 7-7" />
-                            </svg>
-                            {writingAll ? t('home.organize.exif.writingAll') : t('home.organize.exif.writeAll')}
-                          </button>
-                        </div>
-                        {/* 无目标时的禁用原因提示 */}
-                        {convertCandidates.length === 0 && (
-                          <p className="text-[10px] text-orange-500 leading-tight">{t('home.organize.exif.convertAllNoTarget')}</p>
-                        )}
-                        {modifyCandidates.length === 0 && (
-                          <p className="text-[10px] text-orange-500 leading-tight">{t('home.organize.exif.writeAllNoTarget')}</p>
-                        )}
-                        <p className="text-[10px] text-[var(--color-gray-400)] leading-tight">
-                          {t('home.organize.exif.batchHint')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <p className="text-xs text-[var(--color-gray-400)] leading-relaxed">
-                  {t('home.organize.exif.dateScopeHint')}
-                </p>
               </div>
+              <label className="flex items-center gap-2 text-xs text-[var(--color-gray-600)] cursor-pointer select-none mt-auto pt-0.5">
+                <input type="checkbox" checked={preserveTime} onChange={(e) => setPreserveTime(e.target.checked)} className="accent-[var(--color-brand)] cursor-pointer" />
+                <span>{t('home.organize.exif.preserveTime')}</span>
+              </label>
             </div>
-          )}
 
-          {/* GPS 表单 */}
-          {mode === 'gps' && (
-            <div className="space-y-3">
-              <div className="flex gap-2 mb-2">
-                <button onClick={() => setGpsMode('coord')} className={`px-3 py-1 rounded text-xs ${gpsMode === 'coord' ? 'bg-[var(--color-brand)] text-white' : 'bg-[var(--color-gray-100)]'}`}>
-                  {t('home.organize.exif.gpsModeCoord')}
-                </button>
-                <button onClick={() => setGpsMode('place')} className={`px-3 py-1 rounded text-xs ${gpsMode === 'place' ? 'bg-[var(--color-brand)] text-white' : 'bg-[var(--color-gray-100)]'}`}>
-                  {t('home.organize.exif.gpsModePlace')}
-                </button>
+            {/* 右列：位置 */}
+            <div className={EXIF_PANEL_CLS}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <svg viewBox="0 0 14 14" className="w-3.5 h-3.5 text-[var(--color-brand)]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 12.5s-4-3.4-4-6.4a4 4 0 1 1 8 0c0 3-4 6.4-4 6.4z" />
+                    <circle cx="7" cy="6" r="1.4" />
+                  </svg>
+                  <span className="text-xs font-[600] text-[var(--color-gray-800)]">{t('home.organize.exif.positionTitle')}</span>
+                </div>
+                {/* 输入方式：坐标 / 地名 */}
+                <div className="flex p-0.5 rounded-lg bg-[var(--color-gray-100)]">
+                  {(['coord', 'place'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setGpsMode(mode)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-[600] border-none cursor-pointer transition-all ${
+                        gpsMode === mode ? 'bg-white text-[var(--color-brand)] shadow-sm' : 'text-[var(--color-gray-500)] hover:text-[var(--color-gray-700)]'
+                      }`}
+                    >
+                      {t(`home.organize.exif.gpsMode${mode === 'coord' ? 'Coord' : 'Place'}`)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {gpsMode === 'place' && (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder={t('home.organize.exif.placeNamePlaceholder')}
-                    value={placeName}
-                    onChange={(e) => setPlaceName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleGeocode()}
-                    className="flex-1 px-3 py-2 rounded-lg border border-[var(--color-border)] text-sm focus:outline-none focus:border-[var(--color-brand)]"
-                  />
+              {gpsMode === 'place' ? (
+                <div className="flex gap-2 items-stretch">
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      placeholder={t('home.organize.exif.placeNamePlaceholder')}
+                      value={placeName}
+                      onChange={(e) => setPlaceName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleGeocode()}
+                      className={EXIF_INPUT_CLS}
+                    />
+                  </div>
                   <PrimaryButton onClick={handleGeocode} loading={geocoding} variant="ghost">
                     {t('home.organize.exif.query')}
                   </PrimaryButton>
                 </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="min-w-0">
+                    <span className={EXIF_FIELD_LABEL_CLS}>{t('home.organize.exif.longitude')}</span>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      placeholder="116.397128"
+                      value={lon}
+                      onChange={(e) => setLon(e.target.value)}
+                      className={EXIF_INPUT_CLS}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <span className={EXIF_FIELD_LABEL_CLS}>{t('home.organize.exif.latitude')}</span>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      placeholder="39.916527"
+                      value={lat}
+                      onChange={(e) => setLat(e.target.value)}
+                      className={EXIF_INPUT_CLS}
+                    />
+                  </div>
+                </div>
               )}
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block">
-                  <span className="text-xs text-[var(--color-gray-600)] mb-1 block">{t('home.organize.exif.longitude')}</span>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    placeholder="116.397128"
-                    value={lon}
-                    onChange={(e) => setLon(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] text-sm focus:outline-none focus:border-[var(--color-brand)]"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs text-[var(--color-gray-600)] mb-1 block">{t('home.organize.exif.latitude')}</span>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    placeholder="39.916527"
-                    value={lat}
-                    onChange={(e) => setLat(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] text-sm focus:outline-none focus:border-[var(--color-brand)]"
-                  />
-                </label>
-              </div>
-
-              <div className="mt-3 rounded-lg bg-[var(--color-gray-50)] p-3 space-y-2">
-                <p className="text-xs font-[600] text-[var(--color-gray-600)]">{t('home.organize.exif.gpsScopeTitle')}</p>
-                <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
-                  <input type="checkbox" checked={gpsScopeWith} onChange={(e) => setGpsScopeWith(e.target.checked)} className="cursor-pointer" />
-                  {t('home.organize.exif.scopeWithGps', { count: photosWithGps.length })}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--color-gray-600)] cursor-pointer">
-                  <input type="checkbox" checked={gpsScopeWithout} onChange={(e) => setGpsScopeWithout(e.target.checked)} className="cursor-pointer" />
-                  {t('home.organize.exif.scopeWithoutGps', { count: photosWithoutGps.length })}
-                </label>
-                {/* 无 GPS 照片列表（可折叠，支持单文件输入坐标+修改 EXIF） */}
-                {photosWithoutGps.length > 0 && (
-                  <div className="mt-1">
+            {/* 待补照片列表（按筛选条件展示；每张卡片可单独改日期 / 坐标） */}
+            {candidatePhotos.length > 0 && (
+              <div className="mt-1 border-t border-[var(--color-border)]/60 pt-2">
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 flex-wrap bg-[var(--color-surface-panel)]/95 backdrop-blur-sm rounded-lg py-1.5 px-1 shadow-[var(--shadow-sm)]">
+                  <button
+                    onClick={() => setShowNoDateList((v) => !v)}
+                    className="text-xs text-[var(--color-brand)] hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <svg viewBox="0 0 12 12" className={`w-3 h-3 transition-transform ${showNoDateList ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 2l4 4-4 4" />
+                    </svg>
+                    {showNoDateList ? t('home.organize.exif.hideNoDateList') : t('home.organize.exif.showNoDateList', { count: candidatePhotos.length })}
+                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
-                      onClick={() => setShowNoGpsList((v) => !v)}
-                      className="text-xs text-[var(--color-brand)] hover:underline cursor-pointer flex items-center gap-1"
+                      onClick={handleConvertAll}
+                      disabled={convertingAll || busy || convertCandidates.length === 0}
+                      className="px-2.5 py-1 rounded-md text-xs font-[600] border-none cursor-pointer transition-all
+                                 bg-orange-500 text-white hover:opacity-90
+                                 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                      title={t('home.organize.exif.convertAllHint')}
                     >
-                      <svg viewBox="0 0 12 12" className={`w-3 h-3 transition-transform ${showNoGpsList ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 2l4 4-4 4" />
-                      </svg>
-                      {showNoGpsList ? t('home.organize.exif.hideNoGpsList') : t('home.organize.exif.showNoGpsList', { count: photosWithoutGps.length })}
+                      <svg viewBox="0 0 14 14" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 7a5 5 0 0 1 8.5-3.5L12 5" /><path d="M12 2v3h-3" /><path d="M12 7a5 5 0 0 1-8.5 3.5L2 9" /><path d="M2 12V9h3" /></svg>
+                      {convertingAll ? t('home.organize.exif.convertingAll') : t('home.organize.exif.convertAll')}
                     </button>
-                    {showNoGpsList && (
-                      <div className="mt-2 max-h-[360px] overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 custom-scrollbar">
-                        {photosWithoutGps.slice(0, noGpsList.visibleCount).map((p) => (
-                          <NoGpsPhotoRow
-                            key={p.id}
-                            photo={p}
-                            sourceMode={sourceMode}
-                            readPhotoData={readPhotoData}
-                            addToast={addToast}
-                            onGpsUpdated={(newLon, newLat) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, gpsLon: newLon, gpsLat: newLat } : item)))}
-                          />
-                        ))}
-                        {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
-                        {noGpsList.visibleCount < photosWithoutGps.length && <div ref={noGpsList.sentinelRef} className="h-1" />}
-                      </div>
-                    )}
+                    <button
+                      onClick={handleWriteAll}
+                      disabled={writingAll || busy || modifyCandidates.length === 0}
+                      className="px-2.5 py-1 rounded-md text-xs font-[600] border-none cursor-pointer transition-all
+                                 bg-[var(--color-brand)] text-white hover:opacity-90
+                                 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                      title={t('home.organize.exif.writeAllHint')}
+                    >
+                      <svg viewBox="0 0 14 14" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 7l3 3 7-7" /></svg>
+                      {writingAll ? t('home.organize.exif.writingAll') : t('home.organize.exif.writeAll')}
+                    </button>
+                  </div>
+                </div>
+                {showNoDateList && (
+                  <div className="mt-2 max-h-[56vh] overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar">
+                    {/* 照片卡片网格：点击缩略图查看大图；卡内按缺失项显示日期 / 坐标编辑 */}
+                    <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
+                      {candidatePhotos.slice(0, candidateList.visibleCount).map((p, idx) => (
+                        <NoDatePhotoRow
+                          key={p.id}
+                          photo={p}
+                          sourceMode={sourceMode}
+                          readPhotoData={readPhotoData}
+                          addToast={addToast}
+                          onReport={handleReport}
+                          onPreview={() => openNoDatePreview(idx)}
+                          onDateUpdated={(newDate) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, dateTaken: newDate } : item)))}
+                          onGpsUpdated={(newLon, newLat) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? { ...item, gpsLon: newLon, gpsLat: newLat } : item)))}
+                          onPhotoConverted={(updated) => onPhotosUpdate((prev) => prev.map((item) => (item.id === p.id ? updated : item)))}
+                        />
+                      ))}
+                    </div>
+                    {/* 懒加载哨兵：滚动接近底部自动加载下一批，加载完消失 */}
+                    {candidateList.visibleCount < candidatePhotos.length && <div ref={candidateList.sentinelRef} className="h-1" />}
                   </div>
                 )}
-                <p className="text-xs text-[var(--color-gray-400)] leading-relaxed">
-                  {t('home.organize.exif.gpsScopeHint')}
+                <p className="text-[10px] text-[var(--color-gray-400)] leading-tight mt-1">
+                  {t('home.organize.exif.batchHint')}
                 </p>
               </div>
-            </div>
-          )}
+            )}
+            <p className="text-xs text-[var(--color-gray-400)] leading-relaxed">
+            {t('home.organize.exif.mergeHint')}
+          </p>
 
           {/* 操作区 */}
           <div className="mt-4">
@@ -670,11 +671,20 @@ export function ExifTool({ photos, sourceMode, readPhotoData, onPhotosUpdate, ad
               <p className="text-xs text-[var(--color-gray-500)] mb-2">{sourceMode === 'library' ? t('home.organize.exif.libraryDownloadHint') : t('home.organize.exif.webDownloadHint')}</p>
             )}
             <PrimaryButton onClick={handleExecute} disabled={!canExecute} loading={running}>
-              {mode === 'date' ? t('home.organize.exif.executeDate', { count: effectivePhotos.length }) : t('home.organize.exif.executeGps', { count: effectivePhotos.length })}
+              {t('home.organize.exif.executeMerge', { count: effectivePhotos.length })}
             </PrimaryButton>
             <ProgressBar progress={progress} />
           </div>
         </>
+      )}
+      {/* 无日期照片大图预览（点击缩略图打开，支持左右切换） */}
+      {preview && (
+        <PhotoQuickView
+          photos={preview.list}
+          initialIndex={preview.index}
+          onClose={() => setPreview(null)}
+          readPhotoData={readPhotoData}
+        />
       )}
     </ToolCard>
   );
@@ -691,11 +701,15 @@ interface NoDatePhotoRowProps {
   onReport: (id: string, r: { convert: boolean; date: Date | null }) => void;
   /** 日期写入成功后回调，传入新的 dateTaken ISO 字符串 */
   onDateUpdated: (newDateIso: string) => void;
+  /** 坐标写入成功后回调，传入新的经度和纬度 */
+  onGpsUpdated: (newLon: number, newLat: number) => void;
   /** 转换格式成功后回调，传入更新后的 PhotoFileInfo（ext/path/name 变为 jpg） */
   onPhotoConverted: (updated: PhotoFileInfo) => void;
+  /** 点击缩略图查看大图 */
+  onPreview?: () => void;
 }
 
-function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, onDateUpdated, onPhotoConverted }: NoDatePhotoRowProps) {
+function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, onDateUpdated, onGpsUpdated, onPhotoConverted, onPreview }: NoDatePhotoRowProps) {
   const { t } = useTranslation();
   // 从文件名自动识别日期（parseFilenameDate 支持 9 种常见命名格式）
   const recognizedDate = useMemo(() => parseFilenameDate(photo.name), [photo.name]);
@@ -708,6 +722,24 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, 
   const [done, setDone] = useState(false);
   // 修改失败标记：显示转格式按钮
   const [modifyFailed, setModifyFailed] = useState(false);
+
+  // 该照片是否缺失日期 / GPS（决定卡片展示哪类编辑区）
+  const hasGpsVal = hasGps(photo);
+  const needsDate = !photo.dateTaken;
+  const needsGps = !hasGpsVal;
+
+  // GPS 编辑状态（可选：坐标直填）
+  const [gpsLonInput, setGpsLonInput] = useState(photo.gpsLon != null ? String(photo.gpsLon) : '');
+  const [gpsLatInput, setGpsLatInput] = useState(photo.gpsLat != null ? String(photo.gpsLat) : '');
+  const [gpsModifying, setGpsModifying] = useState(false);
+  const [gpsDone, setGpsDone] = useState(false);
+  const [gpsFailed, setGpsFailed] = useState(false);
+  const parsedGpsLon = parseFloat(gpsLonInput);
+  const parsedGpsLat = parseFloat(gpsLatInput);
+  const canModifyGps =
+    !Number.isNaN(parsedGpsLon) && !Number.isNaN(parsedGpsLat) &&
+    parsedGpsLon >= -180 && parsedGpsLon <= 180 && parsedGpsLat >= -90 && parsedGpsLat <= 90 &&
+    !gpsModifying && !gpsDone && needsGps;
 
   const parsedDate = parseDateInput(dateInput);
   const canModify = !!parsedDate && !modifying && !done && !converting;
@@ -751,6 +783,36 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, 
       setModifying(false);
     }
   }, [parsedDate, modifying, done, readPhotoData, photo, sourceMode, onDateUpdated, addToast, t]);
+
+  // 单独写入该照片的 GPS 坐标（写入 EXIF，folder+Tauri 写回文件，其他模式下载）
+  const handleModifyGps = useCallback(async () => {
+    if (!canModifyGps) return;
+    setGpsModifying(true);
+    setGpsFailed(false);
+    try {
+      const data = await readPhotoData(photo);
+      if (!data) throw new Error(t('home.organize.exif.readFailed'));
+
+      const modified = await writeExifGps(data, photo.ext, parsedGpsLon, parsedGpsLat);
+
+      if (isTauri() && photo.path && sourceMode === 'folder') {
+        const { writeFile } = await import('@tauri-apps/plugin-fs');
+        await writeFile(photo.path, new Uint8Array(modified));
+      } else {
+        downloadBlob(new Blob([modified], { type: photo.mimeType || 'image/jpeg' }), photo.name);
+      }
+
+      onGpsUpdated(parsedGpsLon, parsedGpsLat);
+      setGpsDone(true);
+      addToast({ type: 'success', message: t('home.organize.exif.toastSingleGpsSuccess', { name: photo.name, lon: parsedGpsLon.toFixed(6), lat: parsedGpsLat.toFixed(6) }) });
+    } catch (err) {
+      logger.warn(`[exif-gps-single] ${photo.name}`, err);
+      setGpsFailed(true);
+      addToast({ type: 'error', message: t('home.organize.exif.toastSingleGpsFailed', { name: photo.name, message: (err as Error).message }) });
+    } finally {
+      setGpsModifying(false);
+    }
+  }, [canModifyGps, parsedGpsLon, parsedGpsLat, readPhotoData, photo, sourceMode, onGpsUpdated, addToast, t]);
 
   // 转换格式为 JPEG：读取原图 → convertToJpg → 写回文件（同目录同名 .jpg）
   // 转换成功后删除原文件，更新 photo 信息（ext/path/name），用户可重新修改
@@ -797,21 +859,6 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, 
     }
   }, [converting, readPhotoData, photo, sourceMode, onPhotoConverted, addToast, t]);
 
-  if (done) {
-    // 修改成功后显示简洁的成功状态（照片会被父组件移出无日期列表，但有动画过渡）
-    return (
-      <div className="px-2.5 py-2 rounded bg-green-50 text-green-700 flex flex-col gap-1 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 6l3 3 5-6" />
-          </svg>
-          <span className="truncate">{photo.name}</span>
-        </div>
-        <span className="text-green-600 font-mono text-[10px]">{dateInput}</span>
-      </div>
-    );
-  }
-
   // 点击文件名复制到剪贴板
   const handleCopyName = useCallback(async () => {
     const name = photo.name;
@@ -832,239 +879,139 @@ function NoDatePhotoRow({ photo, sourceMode, readPhotoData, addToast, onReport, 
   }, [photo.name, addToast, t]);
 
   return (
-    <div className="px-2.5 py-2 rounded bg-white/80 border border-[var(--color-border)]/50 flex gap-2 min-w-0">
-      {/* 缩略图（拉伸到与右侧信息区等高，object-cover 铺满）；底部条标注识别状态 */}
-      <div className="relative shrink-0 w-14 self-stretch overflow-hidden rounded border border-[var(--color-border)]/50">
-        <ThumbImage photo={photo} readPhotoData={readPhotoData} size="small" aspect="fill" />
+    <div className="overflow-hidden rounded-lg bg-white/80 border border-[var(--color-border)]/50 flex flex-col min-w-0 shadow-sm">
+      {/* 大缩略图：点击查看大图（与截图识别一致） */}
+      <button
+        type="button"
+        onClick={onPreview}
+        title={t('home.organize.exif.viewLarge')}
+        className="relative w-full aspect-[4/3] overflow-hidden cursor-zoom-in bg-black/5 group border-b border-[var(--color-border)]/40"
+      >
+        <ThumbImage photo={photo} readPhotoData={readPhotoData} size="medium" aspect="4/3" />
+        {/* hover 放大提示 */}
+        <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white bg-black/0 group-hover:bg-black/30 transition-colors opacity-0 group-hover:opacity-100">
+          {t('home.organize.exif.viewLarge')}
+        </span>
+        {/* 自动识别状态角标 */}
         <span
-          className={`absolute left-0 right-0 bottom-0 text-[9px] leading-[13px] text-center font-medium ${
-            recognizedDate ? 'bg-green-600/85 text-white' : 'bg-black/40 text-white/90'
+          className={`absolute left-1.5 top-1.5 text-[9px] leading-[14px] px-1 rounded font-medium ${
+            recognizedDate ? 'bg-green-600/90 text-white' : 'bg-black/40 text-white/90'
           }`}
         >
           {recognizedDate ? t('home.organize.exif.autoRecognized') : t('home.organize.exif.notRecognized')}
         </span>
-      </div>
-      {/* 右侧信息区 */}
-      <div className="flex-1 min-w-0 space-y-1">
-        {/* 文件名字：点击快捷复制 */}
-        <button
-          type="button"
-          onClick={handleCopyName}
-          title={t('home.organize.exif.copyNameHint')}
-          className="flex items-center gap-1 min-w-0 w-full text-left group cursor-pointer"
-        >
-          <span className="text-xs text-[var(--color-gray-700)] truncate group-hover:text-[var(--color-brand)]">{photo.name}</span>
-          <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 shrink-0 text-[var(--color-gray-400)] group-hover:text-[var(--color-brand)]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="4" y="2.5" width="6" height="7" rx="1" />
-            <path d="M8 2.5v-.5a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
-          </svg>
-        </button>
-        {/* 日期输入框 */}
-        <input
-          type="text"
-          placeholder={t('home.organize.exif.singleDatePlaceholder')}
-          value={dateInput}
-          onChange={(e) => setDateInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && canModify) handleModify(); }}
-          className={`w-full min-w-0 px-2 py-1 rounded text-xs border focus:outline-none transition-colors ${
-            dateInput && !parsedDate
-              ? 'border-red-300 text-red-600'
-              : 'border-[var(--color-border)] text-[var(--color-gray-700)] focus:border-[var(--color-brand)]'
-          }`}
-        />
-        {/* 无效日期 / 修改失败提示 */}
-        {dateInput && !parsedDate && (
-          <p className="text-[10px] text-red-500">{t('home.organize.exif.invalidDateFormat')}</p>
-        )}
-        {modifyFailed && (
-          <p className="text-[10px] text-orange-600 leading-relaxed">{t('home.organize.exif.fixAllHint')}</p>
-        )}
-        {/* 按钮行 */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+      </button>
+      {/* 底部信息 + 操作 */}
+      <div className="px-2 py-2 space-y-2 flex-1 min-w-0">
+        {/* 文件名 + 复制 */}
+        <div className="flex items-center gap-1 min-w-0">
+          <span className="text-[11px] text-[var(--color-gray-700)] truncate flex-1" title={photo.name}>{photo.name}</span>
           <button
-            onClick={handleModify}
-            disabled={!canModify}
-            className="shrink-0 px-2.5 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
-                       bg-[var(--color-brand)] text-white hover:opacity-90
-                       disabled:opacity-40 disabled:cursor-not-allowed"
+            type="button"
+            onClick={handleCopyName}
+            title={t('home.organize.exif.copyNameHint')}
+            className="shrink-0 text-[var(--color-gray-400)] hover:text-[var(--color-brand)] cursor-pointer"
           >
-            {modifying ? t('home.organize.exif.modifying') : t('home.organize.exif.modify')}
+            <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="2.5" width="6" height="7" rx="1" />
+              <path d="M8 2.5v-.5a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
+            </svg>
           </button>
-          {showConvertBtn && (
-            <button
-              onClick={handleConvert}
-              disabled={converting || modifying}
-              className="shrink-0 px-2 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
-                         bg-orange-500 text-white hover:opacity-90
-                         disabled:opacity-40 disabled:cursor-not-allowed"
-              title={t('home.organize.exif.convertFormat')}
-            >
-              {converting ? t('home.organize.exif.converting') : t('home.organize.exif.convertFormat')}
-            </button>
-          )}
         </div>
+
+        {/* 日期编辑区（仅当缺拍摄日期） */}
+        {needsDate && (
+          <div className="space-y-1">
+            {done ? (
+              <div className="px-1.5 py-1 rounded bg-green-50 text-green-700 flex items-center gap-1 text-[11px]">
+                <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6l3 3 5-6" /></svg>
+                <span className="truncate">{dateInput}</span>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder={t('home.organize.exif.singleDatePlaceholder')}
+                  value={dateInput}
+                  onChange={(e) => setDateInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && canModify) handleModify(); }}
+                  className={`w-full min-w-0 px-1.5 py-1 rounded text-xs border focus:outline-none transition-colors ${
+                    dateInput && !parsedDate
+                      ? 'border-red-300 text-red-600'
+                      : 'border-[var(--color-border)] text-[var(--color-gray-700)] focus:border-[var(--color-brand)]'
+                  }`}
+                />
+                {dateInput && !parsedDate && (
+                  <p className="text-[10px] text-red-500">{t('home.organize.exif.invalidDateFormat')}</p>
+                )}
+                {modifyFailed && (
+                  <p className="text-[10px] text-orange-600 leading-relaxed">{t('home.organize.exif.fixAllHint')}</p>
+                )}
+                <button
+                  onClick={handleModify}
+                  disabled={!canModify}
+                  className="w-full px-2 py-1 rounded text-[11px] font-[600] border-none cursor-pointer transition-all
+                             bg-[var(--color-brand)] text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {modifying ? t('home.organize.exif.modifying') : t('home.organize.exif.modify')}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* GPS 编辑区（仅当缺 GPS 坐标） */}
+        {needsGps && (
+          <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-1">
+              <input
+                type="number"
+                step="0.000001"
+                placeholder={t('home.organize.exif.longitude')}
+                value={gpsLonInput}
+                onChange={(e) => setGpsLonInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && canModifyGps) handleModifyGps(); }}
+                className="w-full min-w-0 px-1.5 py-1 rounded text-[11px] border border-[var(--color-border)] text-[var(--color-gray-700)] focus:outline-none focus:border-[var(--color-brand)]"
+              />
+              <input
+                type="number"
+                step="0.000001"
+                placeholder={t('home.organize.exif.latitude')}
+                value={gpsLatInput}
+                onChange={(e) => setGpsLatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && canModifyGps) handleModifyGps(); }}
+                className="w-full min-w-0 px-1.5 py-1 rounded text-[11px] border border-[var(--color-border)] text-[var(--color-gray-700)] focus:outline-none focus:border-[var(--color-brand)]"
+              />
+            </div>
+            {(gpsFailed || gpsDone) && (
+              <p className={`text-[10px] leading-tight ${gpsDone ? 'text-green-600' : 'text-red-500'}`}>
+                {gpsDone ? `${gpsLonInput},${gpsLatInput}` : t('home.organize.exif.toastSingleGpsFailed', { name: photo.name, message: '' })}
+              </p>
+            )}
+            <button
+              onClick={handleModifyGps}
+              disabled={!canModifyGps}
+              className="w-full px-2 py-1 rounded text-[11px] font-[600] border-none cursor-pointer transition-all
+                         bg-teal-500 text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {gpsModifying ? t('home.organize.exif.writingGps') : t('home.organize.exif.writeGps')}
+            </button>
+          </div>
+        )}
+
+        {/* 转格式（非 JPEG / 日期修改失败时出现） */}
+        {showConvertBtn && (
+          <button
+            onClick={handleConvert}
+            disabled={converting || modifying}
+            className="w-full px-2 py-1 rounded text-[11px] font-[600] border-none cursor-pointer transition-all
+                       bg-orange-500 text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={t('home.organize.exif.convertFormat')}
+          >
+            {converting ? t('home.organize.exif.converting') : t('home.organize.exif.convertFormat')}
+          </button>
+        )}
       </div>
-    </div>
-  );
-}
-
-// ── 无 GPS 照片单行（输入坐标/地名 + 单文件写入 GPS EXIF） ─────────────
-
-interface NoGpsPhotoRowProps {
-  photo: PhotoFileInfo;
-  sourceMode: import('../../../photo-tools').DataSourceMode;
-  readPhotoData: (photo: PhotoFileInfo, length?: number) => Promise<ArrayBuffer | null>;
-  addToast: (toast: { type: 'success' | 'error' | 'info' | 'warning'; message: string }) => void;
-  /** GPS 写入成功后回调，传入新的经度和纬度 */
-  onGpsUpdated: (newLon: number, newLat: number) => void;
-}
-
-function NoGpsPhotoRow({ photo, sourceMode, readPhotoData, addToast, onGpsUpdated }: NoGpsPhotoRowProps) {
-  const { t } = useTranslation();
-  const [lonInput, setLonInput] = useState('');
-  const [latInput, setLatInput] = useState('');
-  const [placeInput, setPlaceInput] = useState('');
-  const [modifying, setModifying] = useState(false);
-  const [querying, setQuerying] = useState(false);
-  const [done, setDone] = useState(false);
-
-  const parsedLon = parseFloat(lonInput);
-  const parsedLat = parseFloat(latInput);
-  const hasCoord =
-    lonInput.trim() !== '' && latInput.trim() !== '' &&
-    !Number.isNaN(parsedLon) && !Number.isNaN(parsedLat) &&
-    parsedLon >= -180 && parsedLon <= 180 && parsedLat >= -90 && parsedLat <= 90;
-  const canModify = hasCoord && !modifying && !done;
-
-  const handleGeocode = useCallback(async () => {
-    if (!placeInput.trim() || querying) return;
-    setQuerying(true);
-    try {
-      const result = await geocode(placeInput);
-      if (result) {
-        setLonInput(result.lon.toFixed(6));
-        setLatInput(result.lat.toFixed(6));
-        addToast({ type: 'success', message: t('home.organize.exif.toastLocated', { name: result.displayName.slice(0, 40) }) });
-      } else {
-        addToast({ type: 'error', message: t('home.organize.exif.toastPlaceNotFound') });
-      }
-    } catch (err) {
-      addToast({ type: 'error', message: t('home.organize.exif.toastGeocodeFailed', { message: (err as Error).message }) });
-    } finally {
-      setQuerying(false);
-    }
-  }, [placeInput, querying, addToast, t]);
-
-  const handleModify = useCallback(async () => {
-    if (!hasCoord || modifying || done) return;
-    setModifying(true);
-    try {
-      const data = await readPhotoData(photo);
-      if (!data) throw new Error(t('home.organize.exif.readFailed'));
-
-      const modified = await writeExifGps(data, photo.ext, parsedLon, parsedLat);
-
-      if (isTauri() && photo.path && sourceMode === 'folder') {
-        const { writeFile } = await import('@tauri-apps/plugin-fs');
-        await writeFile(photo.path, new Uint8Array(modified));
-      } else {
-        downloadBlob(new Blob([modified], { type: photo.mimeType || 'image/jpeg' }), photo.name);
-      }
-
-      onGpsUpdated(parsedLon, parsedLat);
-      setDone(true);
-      addToast({
-        type: 'success',
-        message: t('home.organize.exif.toastSingleGpsSuccess', { name: photo.name, lon: parsedLon.toFixed(6), lat: parsedLat.toFixed(6) }),
-      });
-    } catch (err) {
-      logger.warn(`[exif-gps-single] ${photo.name}`, err);
-      addToast({ type: 'error', message: t('home.organize.exif.toastSingleGpsFailed', { name: photo.name, message: (err as Error).message }) });
-    } finally {
-      setModifying(false);
-    }
-  }, [hasCoord, modifying, done, readPhotoData, photo, sourceMode, parsedLon, parsedLat, onGpsUpdated, addToast, t]);
-
-  if (done) {
-    return (
-      <div className="text-xs px-2.5 py-1.5 rounded bg-green-50 text-green-700 flex items-center gap-1.5">
-        <svg viewBox="0 0 12 12" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2 6l3 3 5-6" />
-        </svg>
-        <span className="truncate flex-1" title={photo.name}>{photo.name}</span>
-        <span className="shrink-0 text-green-600 font-mono">{parsedLon.toFixed(4)},{parsedLat.toFixed(4)}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-2.5 py-2 rounded bg-white/80 border border-[var(--color-border)]/50 space-y-1.5">
-      {/* 第一行：文件名 + 状态标记 */}
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-xs text-[var(--color-gray-700)] truncate flex-1" title={photo.relativePath || photo.name}>
-          {photo.name}
-        </span>
-        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-gray-100)] text-[var(--color-gray-400)]">
-          {t('home.organize.exif.noGpsBadge')}
-        </span>
-      </div>
-      {/* 第二行：地名查询（可选） */}
-      <div className="flex items-center gap-1.5">
-        <input
-          type="text"
-          placeholder={t('home.organize.exif.placeNamePlaceholder')}
-          value={placeInput}
-          onChange={(e) => setPlaceInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && placeInput.trim()) handleGeocode(); }}
-          className="flex-1 min-w-0 px-2 py-1 rounded text-xs border border-[var(--color-border)] text-[var(--color-gray-700)] focus:outline-none focus:border-[var(--color-brand)]"
-        />
-        <button
-          onClick={handleGeocode}
-          disabled={!placeInput.trim() || querying}
-          className="shrink-0 px-2 py-1 rounded text-xs border-none cursor-pointer bg-[var(--color-gray-100)] text-[var(--color-gray-600)] hover:bg-[var(--color-gray-200)] disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {querying ? t('home.organize.exif.querying') : t('home.organize.exif.query')}
-        </button>
-      </div>
-      {/* 第三行：经纬度输入 + 修改按钮 */}
-      <div className="flex items-center gap-1.5">
-        <input
-          type="number"
-          step="0.000001"
-          placeholder={t('home.organize.exif.longitudeShort')}
-          value={lonInput}
-          onChange={(e) => setLonInput(e.target.value)}
-          className={`w-[80px] shrink-0 px-2 py-1 rounded text-xs border focus:outline-none transition-colors ${
-            lonInput && !hasCoord
-              ? 'border-red-300 text-red-600'
-              : 'border-[var(--color-border)] text-[var(--color-gray-700)] focus:border-[var(--color-brand)]'
-          }`}
-        />
-        <input
-          type="number"
-          step="0.000001"
-          placeholder={t('home.organize.exif.latitudeShort')}
-          value={latInput}
-          onChange={(e) => setLatInput(e.target.value)}
-          className={`w-[80px] shrink-0 px-2 py-1 rounded text-xs border focus:outline-none transition-colors ${
-            latInput && !hasCoord
-              ? 'border-red-300 text-red-600'
-              : 'border-[var(--color-border)] text-[var(--color-gray-700)] focus:border-[var(--color-brand)]'
-          }`}
-        />
-        <button
-          onClick={handleModify}
-          disabled={!canModify}
-          className="shrink-0 px-2.5 py-1 rounded text-xs font-[600] border-none cursor-pointer transition-all
-                     bg-[var(--color-brand)] text-white hover:opacity-90
-                     disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {modifying ? t('home.organize.exif.modifying') : t('home.organize.exif.modify')}
-        </button>
-      </div>
-      {(lonInput || latInput) && !hasCoord && (
-        <p className="text-[10px] text-red-500">{t('home.organize.exif.invalidCoord')}</p>
-      )}
     </div>
   );
 }

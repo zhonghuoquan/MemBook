@@ -16,15 +16,13 @@ import { useTranslation } from 'react-i18next';
 import {
   deduplicatePhotos,
   formatBytes,
-  isTauri,
   type PhotoFileInfo,
   type DedupeResult,
   type DedupeGroup,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, PhotoCard, type ToolProps } from './shared';
+import { ToolCard, ProgressBar, PrimaryButton, PhotoCard, useDeleteUndo, UndoBar, useLazyList, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
-import { evictFromCache } from './thumbCache';
 
 interface DedupeToolProps extends ToolProps {
   /** 去重结果（受控，由父组件持久化到 tab 级别，切换标签不丢失） */
@@ -39,14 +37,17 @@ interface DedupeToolProps extends ToolProps {
   isAutoRunTarget?: boolean;
 }
 
-export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addToast, readPhotoData, onBusyChange, onResultSummary, dedupeResult, dedupeOverrides, onDedupeStateChange, autoRunToken, isAutoRunTarget }: DedupeToolProps) {
+/** 去重重复组懒加载每批数量 */
+const DEDUPE_GROUP_BATCH = 10;
+
+export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addToast, readPhotoData, onBusyChange, onResultSummary, dedupeResult, dedupeOverrides, onDedupeStateChange, autoRunToken, isAutoRunTarget, albumActive, onAlbumChange }: DedupeToolProps) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
   const [confirmMode, setConfirmMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // 最近删除的照片（用于撤销）
-  const [lastDeleted, setLastDeleted] = useState<PhotoFileInfo[] | null>(null);
+  // 写操作一致性：删除可撤销（与相似/人脸/日历统一）
+  const { lastDeleted, runDelete, undoDelete } = useDeleteUndo({ sourceMode, addToast, onPhotosUpdate });
   const abortRef = useRef<AbortController | null>(null);
 
   // 受控状态：result 和 overrides 由父组件持久化（切换标签不丢失）
@@ -149,18 +150,14 @@ export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addTo
     (g: DedupeGroup, idx: number) => {
       const cur = new Set(overrides[g.groupId] ?? [g.keepIndex]);
       if (cur.has(idx)) {
-        // 取消保留：若当前只剩 1 张保留，禁止
-        if (cur.size <= 1) {
-          addToast({ type: 'warning', message: t('home.organize.dedupe.keepAtLeastOne') });
-          return;
-        }
+        // 取消保留：允许全部删除（不再强制保留一张）
         cur.delete(idx);
       } else {
         cur.add(idx);
       }
       updateDedupeState(result, { ...overrides, [g.groupId]: cur });
     },
-    [overrides, result, updateDedupeState, addToast, t],
+    [overrides, result, updateDedupeState],
   );
 
   /** 批量操作：按算法建议重置 */
@@ -199,6 +196,22 @@ export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addTo
     return { count, bytes };
   }, [toDelete]);
 
+  /** 实际保留（将加入相册）的照片列表 */
+  const keptPhotos = useMemo<PhotoFileInfo[]>(() => {
+    if (!result) return [];
+    const list: PhotoFileInfo[] = [];
+    for (const g of result.groups) {
+      const keep = getKeepSet(g);
+      g.files.forEach((f, i) => { if (keep.has(i)) list.push(f); });
+    }
+    return list;
+  }, [result, getKeepSet]);
+
+  // 上报「当前有效结果集」：去重后保留的照片可统一加入相册
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(result ? keptPhotos : null);
+  }, [albumActive, onAlbumChange, result, keptPhotos]);
+
   /** 打开预览 */
   const openPreview = useCallback((g: DedupeGroup, idx: number) => {
     setPreviewGroup(g);
@@ -214,56 +227,10 @@ export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addTo
       return;
     }
     setDeleting(true);
-    // 保存删除前的照片列表，用于撤销
-    const deletedPhotos = [...toDelete];
-
-    let ok = 0, fail = 0;
     try {
-      if (sourceMode === 'library') {
-        for (const f of toDelete) {
-          if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
-          // 清理 thumbCache 中缓存的此照片缩略图
-          evictFromCache(f.id);
-          ok++;
-        }
-      } else if (isTauri()) {
-        // 与 ConvertTool 一致：移入系统回收站（可恢复），而非物理删除
-        const { invoke } = await import('@tauri-apps/api/core');
-        const paths = toDelete.map((f) => f.path).filter((p): p is string => Boolean(p));
-        if (paths.length > 0) {
-          try {
-            await invoke('trash_files', { paths });
-            ok = paths.length;
-            // 无 path 的条目（理论上不应出现）计为失败
-            fail = toDelete.length - paths.length;
-          } catch {
-            // 批量失败时尝试逐个移入回收站，定位失败文件
-            for (const f of toDelete) {
-              try {
-                if (f.path) { await invoke('trash_files', { paths: [f.path] }); ok++; } else fail++;
-              } catch { fail++; }
-            }
-          }
-        } else {
-          fail = toDelete.length;
-        }
-      } else {
-        for (const f of toDelete) {
-          if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
-          ok++;
-        }
-      }
-
-      const deleteIds = new Set(toDelete.map((f) => f.id));
-      onPhotosUpdate((prev) => prev.filter((p) => !deleteIds.has(p.id)));
-
-      addToast({
-        type: fail > 0 ? 'warning' : 'success',
-        message: fail > 0 ? t('home.organize.dedupe.toastDeletedWithFail', { ok, fail }) : t('home.organize.dedupe.toastDeleted', { ok }),
-      });
-      setLastDeleted(deletedPhotos);
-      // 撤销倒计时：5秒后自动清除撤销状态
-      setTimeout(() => setLastDeleted(null), 5000);
+      // 统一走共享删除（library 移除 / folder 进回收站），并记录最近删除供撤销
+      await runDelete(toDelete);
+      // 删除成功后清空结果（与相似工具一致，用户可重新扫描）
       updateDedupeState(null, {});
       setConfirmMode(false);
       // 删除完成后重新上报摘要，同步更新报告页数据
@@ -275,8 +242,6 @@ export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addTo
         targetTool: 'dedupe',
         color: 'coral',
       });
-    } catch (err) {
-      addToast({ type: 'error', message: t('home.organize.dedupe.toastDeleteFailed', { message: (err as Error).message }) });
     } finally {
       setDeleting(false);
     }
@@ -342,32 +307,8 @@ export function DedupeTool({ photos, sourceMode, rootPath, onPhotosUpdate, addTo
         />
       )}
 
-      {/* 撤销删除栏 */}
-      {lastDeleted && lastDeleted.length > 0 && (
-        <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between">
-          <span className="text-xs text-amber-800">
-            {t('home.organize.dedupe.undoHint', {
-              count: lastDeleted.length,
-              defaultValue: '已删除 {{count}} 张照片',
-            })}
-          </span>
-          <button
-            onClick={() => {
-              // 通过 onPhotosUpdate 恢复被删除的照片
-              onPhotosUpdate((prev) => {
-                const existingIds = new Set(prev.map((p) => p.id));
-                const toRestore = lastDeleted.filter((p) => !existingIds.has(p.id));
-                return [...prev, ...toRestore];
-              });
-              setLastDeleted(null);
-              addToast({ type: 'info', message: t('home.organize.dedupe.undoDone', '已撤销删除') });
-            }}
-            className="text-xs font-medium text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded border-none cursor-pointer transition-colors"
-          >
-            {t('home.organize.dedupe.undo', '撤销')}
-          </button>
-        </div>
-      )}
+      {/* 删除撤销提示栏（与相似/人脸/日历统一） */}
+      <UndoBar count={lastDeleted?.length ?? 0} onUndo={undoDelete} />
     </ToolCard>
   );
 }
@@ -410,6 +351,9 @@ function DedupeResults({
   const { t } = useTranslation();
   // 扫描完成后默认全部展开，方便用户一眼看到所有重复组
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(result.groups.map((g) => g.groupId)));
+
+  // 懒加载：重复组多时按批渲染，滚动到底自动追加，避免一次性渲染全部
+  const { visibleCount, sentinelRef } = useLazyList(result.groups.length, DEDUPE_GROUP_BATCH);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -473,7 +417,7 @@ function DedupeResults({
 
       {/* 重复组列表 */}
       <div className="max-h-[480px] overflow-y-auto overflow-x-hidden space-y-2 pr-1 custom-scrollbar">
-        {result.groups.map((g) => {
+        {result.groups.slice(0, visibleCount).map((g) => {
           const keepSet = getKeepSet(g);
           const isOverridden = overrides[g.groupId] !== undefined;
           return (
@@ -554,6 +498,8 @@ function DedupeResults({
             </div>
           );
         })}
+        {/* 懒加载哨兵：滚动进入视口时追加下一批重复组 */}
+        {visibleCount < result.groups.length && <div ref={sentinelRef} className="h-2" />}
       </div>
 
       {/* 底部操作 */}

@@ -24,10 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        # 历史代码存在已知 lint 错误，暂不阻断 CI；新代码由 pre-commit hook 保障
-        continue-on-error: true
-        run: npm run lint
+      - name: Lint baseline
+        # 历史问题以基线冻结；错误或警告总数增加即阻断，直至逐步清零。
+        run: npm run lint:baseline
 
       - name: Type check
         run: npm run typecheck

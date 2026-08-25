@@ -965,8 +965,8 @@ mod commands {
 
     /// 实际的同步扫描逻辑（在 spawn_blocking 线程中执行）。
     ///
-    /// 进度 emit 节流策略：每 50 张照片 emit 一次进度事件。
-    /// 1000 张照片仅触发 20 次 IPC 事件（原来每张一次 = 1000 次），
+    /// 进度 emit 节流策略：每 50 个遍历条目 emit 一次进度事件（按条目而非仅图片）。
+    /// 1000 个条目仅触发 20 次 IPC 事件（原来每张一次 = 1000 次），
     /// 前端 React 重渲染次数从 1000 次降至 20 次，UI 完全流畅。
     fn scan_photos_blocking(
         app: tauri::AppHandle,
@@ -974,81 +974,91 @@ mod commands {
     ) -> Result<Vec<PhotoScanItem>, String> {
         use walkdir::WalkDir;
 
-        let root = std::path::Path::new(folder_path);
-        let mut results = Vec::new();
-        let mut count: u32 = 0;
-        /// 进度 emit 频率：每 N 张照片推送一次（避免事件风暴）
-        const PROGRESS_INTERVAL: u32 = 50;
+        // catch_unwind：遍历/EXIF 过程中若某个文件触发 panic，恢复控制权并返回错误，
+        // 避免 spawn_blocking 线程因 panic 卡死，导致前端 invoke 迟迟不返回。
+        let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let root = std::path::Path::new(folder_path);
+            let mut results = Vec::new();
+            /// 进度 emit 频率：每 N 个遍历条目推送一次（避免事件风暴）
+            const PROGRESS_INTERVAL: u32 = 50;
 
-        for entry in WalkDir::new(folder_path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if !entry.file_type().is_file() {
-                continue;
+            let mut scanned_items: u32 = 0;
+            for entry in WalkDir::new(folder_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                scanned_items += 1;
+
+                // 进度按“已遍历条目”计数而非仅图片计数：即使目录里图片很少、
+                // 或存在无权限/无法访问的子目录，前端也能持续看到进度跳动，
+                // 避免“正在扫描却无任何反馈”的观感。
+                if scanned_items == 1 || scanned_items % PROGRESS_INTERVAL == 0 {
+                    let _ = app.emit(
+                        "organize://scan-progress",
+                        serde_json::json!({
+                            "current": scanned_items,
+                            "message": entry.file_name().to_string_lossy().to_string(),
+                        }),
+                    );
+                }
+
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+
+                let path = entry.path();
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| format!(".{}", e.to_lowercase()))
+                    .unwrap_or_default();
+
+                let ext_no_dot = ext.strip_prefix('.').unwrap_or(&ext);
+                if !PHOTO_EXTS.contains(&ext_no_dot) {
+                    continue;
+                }
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let full_path = path.to_string_lossy().to_string();
+                let relative_path = path
+                    .strip_prefix(root)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| name.clone());
+
+                let (date_taken, gps_lat, gps_lon, needs_js_fallback) = read_exif_from_file(path);
+
+                results.push(PhotoScanItem {
+                    path: full_path,
+                    name,
+                    size,
+                    ext,
+                    relative_path,
+                    date_taken,
+                    gps_lat,
+                    gps_lon,
+                    needs_js_fallback,
+                });
             }
 
-            let path = entry.path();
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| format!(".{}", e.to_lowercase()))
-                .unwrap_or_default();
-
-            let ext_no_dot = ext.strip_prefix('.').unwrap_or(&ext);
-            if !PHOTO_EXTS.contains(&ext_no_dot) {
-                continue;
-            }
-
-            let name = entry.file_name().to_string_lossy().to_string();
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            let full_path = path.to_string_lossy().to_string();
-            let relative_path = path
-                .strip_prefix(root)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| name.clone());
-
-            count += 1;
-
-            // 节流：每 PROGRESS_INTERVAL 张 emit 一次进度
-            // 首张也 emit（让前端尽快看到"已扫描 1 张"反馈）
-            if count == 1 || count % PROGRESS_INTERVAL == 0 {
+            // 扫描结束 emit 最终条目计数（覆盖节流遗漏的最后若干项）
+            if scanned_items > 0 && scanned_items % PROGRESS_INTERVAL != 0 {
                 let _ = app.emit(
                     "organize://scan-progress",
                     serde_json::json!({
-                        "current": count,
-                        "message": name,
+                        "current": scanned_items,
+                        "message": "",
                     }),
                 );
             }
 
-            let (date_taken, gps_lat, gps_lon, needs_js_fallback) = read_exif_from_file(path);
+            results
+        }));
 
-            results.push(PhotoScanItem {
-                path: full_path,
-                name,
-                size,
-                ext,
-                relative_path,
-                date_taken,
-                gps_lat,
-                gps_lon,
-                needs_js_fallback,
-            });
+        match scan_result {
+            Ok(results) => Ok(results),
+            Err(_) => Err("扫描过程中发生异常，已安全中断".to_string()),
         }
-
-        // 扫描结束 emit 最终计数（覆盖节流遗漏的最后几张）
-        if count > 0 && count % PROGRESS_INTERVAL != 0 {
-            let _ = app.emit(
-                "organize://scan-progress",
-                serde_json::json!({
-                    "current": count,
-                    "message": "",
-                }),
-            );
-        }
-
-        Ok(results)
     }
 
     /// 从文件读取 EXIF 拍摄日期和 GPS 坐标。

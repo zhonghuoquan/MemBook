@@ -45,14 +45,14 @@ export const TIER_FEATURES: TierFeature[] = [
   {
     key: 'dataImport',
     label: '数据导入 / 迁移',
-    freeLabel: '—',
-    proLabel: '完整导入',
-    proOnly: true,
+    freeLabel: '基础导入',
+    proLabel: '完整迁移',
+    proOnly: false,
   },
   {
     key: 'smartLayout',
     label: '智能一键排版',
-    freeLabel: '试用期内可用',
+    freeLabel: '受 Pro 限制',
     proLabel: '永久可用',
     proOnly: true,
   },
@@ -94,15 +94,15 @@ export const TIER_FEATURES: TierFeature[] = [
   {
     key: 'faceCluster',
     label: '人脸识别 / 按人归档',
-    freeLabel: '—',
-    proLabel: '可用',
+    freeLabel: '查看识别结果',
+    proLabel: '合并归档 / 删除',
     proOnly: true,
   },
   {
     key: 'similar',
     label: '相似照片分析',
-    freeLabel: '—',
-    proLabel: '可用',
+    freeLabel: '查看相似结果',
+    proLabel: '批量标记 / 删除',
     proOnly: true,
   },
   {

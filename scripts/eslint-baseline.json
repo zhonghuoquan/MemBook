@@ -1,0 +1,7 @@
+{
+  "updatedAt": "2026-08-25",
+  "eslintVersion": "10.5.0",
+  "errorCount": 386,
+  "warningCount": 115,
+  "note": "Initial frozen baseline. Counts may only decrease; update this file in an explicit quality-governance change."
+}

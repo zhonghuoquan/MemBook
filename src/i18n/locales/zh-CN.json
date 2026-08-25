@@ -354,15 +354,17 @@
         "invalidDateFormat": "无法识别的日期格式",
         "parsedAs": "解析为：{{date}}",
         "preserveTime": "保留原照片的时分秒（仅改日期）",
+        "positionTitle": "位置 / GPS",
         "dateScopeTitle": "修改范围（按拍摄日期）",
         "scopeWithDate": "有拍摄日期的照片（{{count}} 张）",
         "scopeWithoutDate": "无拍摄日期的照片（{{count}} 张）",
         "dateScopeHint": "取消勾选的组不会被修改。例如只勾选「无拍摄日期」，则仅对这些照片写入日期，已有日期的照片保持不变。",
-        "showNoDateList": "查看无拍摄日期照片列表（{{count}} 张）",
+        "showNoDateList": "查看待补照片列表（{{count}} 张）",
         "hideNoDateList": "收起列表",
         "morePhotos": "还有 {{count}} 张照片",
         "autoRecognized": "自动识别",
         "notRecognized": "未识别",
+        "viewLarge": "点击查看大图",
         "copyNameHint": "点击复制文件名",
         "copyNameToast": "已复制文件名：{{name}}",
         "singleDatePlaceholder": "YYYY-MM-DD HH:MM:SS",
@@ -388,6 +390,17 @@
         "writeAllSuccess": "修改完成，成功 {{ok}} 张，失败 {{fail}} 张",
         "writeAllNoTarget": "没有可修改的照片（请先在列表中的照片录入日期）",
         "batchHint": "先点「全部转换」转为 JPEG，再点「全部修改」写入日期（无目标时按钮禁用）",
+        "filter": {
+          "all": "全部待补",
+          "noDate": "仅缺日期",
+          "noGps": "仅缺GPS",
+          "both": "两者兼缺",
+          "complete": "已完整"
+        },
+        "mergeHint": "可在上方填写统一日期/坐标后点「一并写入」批量处理本次筛选的照片；也可在各卡片内单独填写日期或坐标并保存。",
+        "executeMerge": "一并写入 ({{count}} 张)",
+        "writeGps": "写坐标",
+        "writingGps": "写入中...",
         "gpsModeCoord": "输入坐标",
         "gpsModePlace": "地名查询",
         "placeNamePlaceholder": "输入地名，如 北京天安门",
@@ -844,7 +857,9 @@
       "expand": "展开对比",
       "collapse": "收起"
     },
-    "photoToolRequiresPro": "该功能为 Pro 专属，激活后解锁"
+    "photoToolRequiresPro": "该功能为 Pro 专属，激活后解锁",
+    "proWriteRequired": "分析结果仅 Pro 版本可合并 / 删除，激活后解锁",
+    "proUnlockDpi": "激活 Pro 解锁更高分辨率导出（≥{{dpi}} DPI）"
   },
   "organize": {
     "title": "照片整理",
@@ -953,9 +968,10 @@
     "scan": {
       "scanningFolder": "正在扫描文件夹...",
       "photosFound": "已发现 {{count}} 张照片...",
-      "scannedCount": "已扫描 {{count}} 张 · {{name}}",
+      "scannedCount": "已处理 {{count}} 项 · {{name}}",
       "scanComplete": "扫描完成：共 {{count}} 张照片",
       "scanFailed": "扫描失败: {{message}}",
+      "scanTimeout": "扫描超时，请检查所选文件夹后重试",
       "restoring": "正在恢复..."
     },
     "tools": {

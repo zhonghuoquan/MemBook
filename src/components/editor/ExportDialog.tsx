@@ -6,6 +6,7 @@ import { exportToPNG, exportToJPG, exportToPDF, cancelExport } from '../../utils
 import { useDraggable } from '../../hooks/useDraggable';
 import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
 import { SPINE_WIDTH_MIN_MM, SPINE_WIDTH_MAX_MM } from './canvas/constants';
+import { useLicenseStore } from '../../license/licenseStore';
 import { logger } from '../../utils/logger';
 
 interface ExportDialogProps {
@@ -14,6 +15,9 @@ interface ExportDialogProps {
 }
 
 const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+
+/* Free 档导出清晰度上限（DPI），Pro 不受限 */
+const FREE_EXPORT_MAX_DPI = 150;
 
 /* ══════════════════════════ 导出进度浮窗（居中显示） ══════════════════════════ */
 
@@ -168,6 +172,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const pages = useEditorStore((s) => s.pages);
   const albumSize = useEditorStore((s) => s.albumSize);
   const addToast = useUIStore((s) => s.addToast);
+  // Free 档（未激活且试用期结束）导出清晰度上限，Pro 不受限
+  const isProExport = useLicenseStore((s) => s.isActivated);
 
   // 读取页面设置中书脊宽度（封面页 spineWidth），打开对话框时同步到导出设置，避免默认 0 与页面不一致
   const coverSpineWidth = useMemo(
@@ -212,7 +218,13 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     { value: 150, label: '150 DPI', desc: t('editor.exportDialog.dpi150Desc'), px: `${Math.round(pageMM.w/25.4*150)}×${Math.round(pageMM.h/25.4*150)} px` },
     { value: 300, label: '300 DPI', desc: t('editor.exportDialog.dpi300Desc'), px: `${Math.round(pageMM.w/25.4*300)}×${Math.round(pageMM.h/25.4*300)} px` },
     { value: 600, label: '600 DPI', desc: t('editor.exportDialog.dpi600Desc'), px: `${Math.round(pageMM.w/25.4*600)}×${Math.round(pageMM.h/25.4*600)} px` },
-  ];
+  ].filter((opt) => isProExport || opt.value <= FREE_EXPORT_MAX_DPI);
+
+  // Free 档导出仅到 150 DPI：若当前选择被取消解锁能力则回落到上限
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!isProExport && dpi > FREE_EXPORT_MAX_DPI) setDpi(FREE_EXPORT_MAX_DPI);
+  }, [isProExport, isOpen]);
 
   const handleBrowse = useCallback(async () => {
     if (!isTauri()) return;
@@ -428,6 +440,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                       </button>
                     ))}
                   </div>
+                  {!isProExport && (
+                    <p className="mt-1.5 flex items-center gap-1 text-[var(--text-caption)] text-[var(--color-primary-600)]">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 shrink-0">
+                        <path d="M3 8l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      {t('license.proUnlockDpi', { dpi: FREE_EXPORT_MAX_DPI })}
+                    </p>
+                  )}
                 </div>
 
                 {/* Quality */}

@@ -84,7 +84,7 @@ function localPreviewTemplate(
   return result + ext;
 }
 
-export function RenameTool({ photos, rootPath, sourceMode, addToast, onRescan, onBusyChange }: ToolProps) {
+export function RenameTool({ photos, rootPath, sourceMode, addToast, onRescan, onBusyChange, albumActive, onAlbumChange }: ToolProps) {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -112,6 +112,18 @@ export function RenameTool({ photos, rootPath, sourceMode, addToast, onRescan, o
     const set = new Set(photos.map((p) => p.ext));
     return [...set].sort();
   }, [photos]);
+
+  // 当前生效待重命名照片（排除未选格式），作为「加入相册」目标
+  const photosToRename = useMemo(
+    () => photos.filter((p) => !excludedExts.has(p.ext)),
+    [photos, excludedExts],
+  );
+
+  // 上报「当前有效结果集」：待重命名照片可统一加入相册（需桌面端可用）
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(canUse && photosToRename.length > 0 ? photosToRename : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumActive, onAlbumChange, canUse, photosToRename]);
 
   // photos 变化时清除旧结果
   useEffect(() => {
@@ -179,7 +191,6 @@ export function RenameTool({ photos, rootPath, sourceMode, addToast, onRescan, o
   const handlePreview = async () => {
     setPreviewing(true);
     setItems([]);
-    const photosToRename = photos.filter((p) => !excludedExts.has(p.ext));
     try {
       const result = await previewRename(photosToRename, {
         template,

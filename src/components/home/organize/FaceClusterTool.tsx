@@ -30,8 +30,7 @@ import {
   type FaceDetectionResult,
   type ToolProgress,
 } from '../../../photo-tools';
-import { ToolCard, ProgressBar, PrimaryButton, AddToAlbumButton, ThumbImage, ThumbWithMenu, deletePhotos, RangeSlider, useTabCachedResult, type ToolProps } from './shared';
-import { AlbumBridgeDialog } from './AlbumBridgeDialog';
+import { ToolCard, ProgressBar, PrimaryButton, ThumbImage, ThumbWithMenu, RangeSlider, useDeleteUndo, UndoBar, useLazyList, type ToolProps } from './shared';
 import { PhotoQuickView } from './PhotoQuickView';
 import { getFaceThumbUrl } from './thumbCache';
 
@@ -44,6 +43,8 @@ const STAGES: Array<{ phase: string; label: string }> = [
 
 /** 缩略图网格最多显示数量 */
 const MAX_THUMBS = 6;
+/** 人脸组懒加载每批数量 */
+const CLUSTER_BATCH = 8;
 
 /**
  * 识别灵敏度档位（整数 1~13）→ 欧氏距离阈值（0.3~0.9）的映射。
@@ -86,12 +87,28 @@ function getClusterColor(index: number) {
   return CLUSTER_COLOR_PALETTE[index % CLUSTER_COLOR_PALETTE.length];
 }
 
-export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, tabId, proFeature, checkProFeature, autoRunToken, isAutoRunTarget }: ToolProps & { autoRunToken?: number; isAutoRunTarget?: boolean }) {
+interface FaceClusterToolProps extends ToolProps {
+  autoRunToken?: number;
+  isAutoRunTarget?: boolean;
+  /** 面板级持久化的人脸聚类结果（切换标签/离开面板不丢） */
+  faceResult?: FaceClusterResult | null;
+  faceDetection?: FaceDetectionResult | null;
+  onFaceStateChange?: (result: FaceClusterResult | null, detection: FaceDetectionResult | null) => void;
+}
+
+export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange, onResultSummary, sourceMode, onPhotosUpdate, checkWritePermission, faceResult, faceDetection, onFaceStateChange, autoRunToken, isAutoRunTarget, albumActive, onAlbumChange }: FaceClusterToolProps) {
   const { t } = useTranslation();
+  // 写操作一致性：删除可撤销（与去重/相似/日历统一）
+  const { lastDeleted, runDelete, undoDelete } = useDeleteUndo({ sourceMode, addToast, onPhotosUpdate });
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ToolProgress | null>(null);
-  // 检测/聚类结果按标签缓存：切换路径标签时保留各路径的人脸识别结果
-  const [result, setResult] = useTabCachedResult<FaceClusterResult | null>(tabId, null);
+  // 检测/聚类结果提升到面板级（受控，由父组件持久化；非持久化的 UI 状态仍为本地）
+  const result = faceResult ?? null;
+  const detection = faceDetection ?? null;
+  const updateFace = useCallback(
+    (r: FaceClusterResult | null, d: FaceDetectionResult | null) => { onFaceStateChange?.(r, d); },
+    [onFaceStateChange],
+  );
   /**
    * 识别灵敏度档位（整数 1~13）：档位越小越严格（分出更多组），档位越大越宽松（合并更多）
    * 默认 5 档，对应欧氏距离 0.5，兼顾准确率与召回
@@ -99,14 +116,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   const [level, setLevel] = useState(DEFAULT_LEVEL);
   // 由档位映射出的欧氏距离阈值（供 recluster 使用）
   const threshold = levelToThreshold(level);
-  // 缓存检测结果（descriptor 数组），调阈值时复用，避免重新检测；按标签缓存
-  const [detection, setDetection] = useTabCachedResult<FaceDetectionResult | null>(tabId, null);
   // 选中的照片 ID 集合
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 无人脸照片区域折叠状态
   const [noFaceExpanded, setNoFaceExpanded] = useState(false);
-  // 加入相册对话框
-  const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
   // 选中的聚类组（用于合并操作）
   const [selectedClusters, setSelectedClusters] = useState<Set<string>>(new Set());
   // 组内照片展开状态（默认折叠，仅显示前 MAX_THUMBS 张；展开后查看全部）
@@ -116,14 +129,19 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   // 正在编辑名称的组 ID
   const [editingNameClusterId, setEditingNameClusterId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 懒加载：人脸组多时按批渲染，滚动到底自动追加
+  const { visibleCount: clusterVisible, sentinelRef: clusterSentinel } = useLazyList(result?.clusters.length ?? 0, CLUSTER_BATCH);
   // 大图预览（预览当前分组内的照片）
   const [previewGroup, setPreviewGroup] = useState<PhotoFileInfo[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
 
-  /** 删除单张照片（共享逻辑，含确认弹窗由 ThumbWithMenu 处理） */
+  /** 删除单张照片（共享逻辑，含确认弹窗由 ThumbWithMenu 处理；删除可撤销） */
   const handleDeletePhoto = useCallback(
-    (photo: PhotoFileInfo) => {
-      void deletePhotos([photo], sourceMode, onPhotosUpdate, addToast, t);
+    async (photo: PhotoFileInfo) => {
+      // 写操作授权：删除照片需 Pro（激活或试用期内）；Free 弹激活窗并中止
+      if (checkWritePermission && !checkWritePermission()) return;
+      const ok = await runDelete([photo]);
+      if (ok === 0) return;
       // 同步从选中集合中移除
       setSelectedIds((prev) => {
         if (!prev.has(photo.id)) return prev;
@@ -132,10 +150,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         return n;
       });
       // 同步从聚类结果与检测缓存中移除，保证界面显示即时更新
-      setResult((prev) => {
-        if (!prev) return prev;
+      let nextResult = result;
+      if (result) {
         let hasFace = false;
-        const clusters = prev.clusters
+        const clusters = result.clusters
           .map((c) => {
             const photos = c.photos.filter((p) => p.id !== photo.id);
             const faces = c.faces.filter((f) => f.photoId !== photo.id);
@@ -155,26 +173,27 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             };
           })
           .filter((c): c is FaceCluster => c !== null);
-        const noFacePhotos = prev.noFacePhotos.filter((p) => p.id !== photo.id);
+        const noFacePhotos = result.noFacePhotos.filter((p) => p.id !== photo.id);
         // 照片整体数量、有人脸照片数、无人脸照片数同步递减
-        const totalPhotos = Math.max(0, prev.totalPhotos - 1);
-        const photosWithFaces = Math.max(0, prev.photosWithFaces - (hasFace ? 1 : 0));
-        return { ...prev, clusters, noFacePhotos, totalPhotos, photosWithFaces };
-      });
-      setDetection((prev) => {
-        if (!prev) return prev;
-        const faces = prev.faces.filter((f) => f.photoId !== photo.id);
-        const nextSet = new Set(prev.photosWithFacesSet);
+        const totalPhotos = Math.max(0, result.totalPhotos - 1);
+        const photosWithFaces = Math.max(0, result.photosWithFaces - (hasFace ? 1 : 0));
+        nextResult = { ...result, clusters, noFacePhotos, totalPhotos, photosWithFaces };
+      }
+      let nextDetection = detection;
+      if (detection) {
+        const faces = detection.faces.filter((f) => f.photoId !== photo.id);
+        const nextSet = new Set(detection.photosWithFacesSet);
         nextSet.delete(photo.id);
-        return {
-          ...prev,
+        nextDetection = {
+          ...detection,
           faces,
           photosWithFacesSet: nextSet,
-          totalPhotos: Math.max(0, prev.totalPhotos - 1),
+          totalPhotos: Math.max(0, detection.totalPhotos - 1),
         };
-      });
+      }
+      updateFace(nextResult, nextDetection);
     },
-    [sourceMode, onPhotosUpdate, addToast, t],
+    [runDelete, checkWritePermission, result, detection, updateFace],
   );
 
   // 通知父组件工具执行状态
@@ -186,14 +205,11 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 开始人脸检测（只检测，不聚类） */
   const handleStart = async () => {
     if (photos.length === 0) return;
-    // Pro 授权守卫：点击“开始分析”时才检查并提示激活，而非进入工具时立即弹出
-    if (proFeature && checkProFeature && !checkProFeature(proFeature, t('license.photoToolRequiresPro'))) {
-      return;
-    }
+    // 分析对全部用户开放（含 Free）：人脸识别 / 聚类结果可查看；
+    // 落地写操作（删除/合并）才由 checkWritePermission 收口到 Pro。
     abortRef.current = new AbortController();
     setRunning(true);
-    setResult(null);
-    setDetection(null);
+    updateFace(null, null);
     setSelectedIds(new Set());
     setSelectedClusters(new Set());
     setExpandedClusters(new Set());
@@ -206,7 +222,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         readData: readPhotoData,
       });
 
-      setDetection(det);
+      updateFace(null, det);
 
       // 模型加载失败
       if (det.modelLoadFailed) {
@@ -225,7 +241,7 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
       // 检测完成，立即聚类
       setProgress({ phase: 'clustering', current: 0, total: det.faces.length, message: `聚类 ${det.faces.length} 个人脸...` });
       const res = await recluster(det, threshold, photos);
-      setResult(res);
+      updateFace(res, det);
 
       // 上报结果摘要（供“一键分析结果报告页”展示）
       onResultSummary?.({
@@ -311,11 +327,11 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   const handleRecluster = useCallback(async () => {
     if (!detection) return;
     const res = await recluster(detection, threshold, photos);
-    setResult(res);
+    updateFace(res, detection);
     setSelectedIds(new Set());
     setSelectedClusters(new Set());
     setExpandedClusters(new Set());
-  }, [detection, threshold, photos]);
+  }, [detection, threshold, photos, updateFace]);
 
   /** 阈值滑块变化时自动重聚类（仅在有检测结果时） */
   useEffect(() => {
@@ -352,39 +368,39 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
   /** 合并选中的聚类组 */
   const handleMergeClusters = useCallback(() => {
     if (selectedClusters.size < 2 || !result) return;
-    setResult((prev) => {
-      if (!prev) return prev;
-      // 合并所有选中组的 faces 和 photos
-      const mergedFaces: typeof prev.clusters[0]['faces'] = [];
-      const mergedPhotoIds = new Set<string>();
-      for (const c of prev.clusters) {
-        if (selectedClusters.has(c.clusterId)) {
-          mergedFaces.push(...c.faces);
-          c.photos.forEach((p) => mergedPhotoIds.add(p.id));
-        }
+    // 写操作授权：合并人脸组需 Pro（激活或试用期内）；Free 弹激活窗并中止
+    if (checkWritePermission && !checkWritePermission()) return;
+    const prev = result;
+    // 合并所有选中组的 faces 和 photos
+    const mergedFaces: typeof prev.clusters[0]['faces'] = [];
+    const mergedPhotoIds = new Set<string>();
+    for (const c of prev.clusters) {
+      if (selectedClusters.has(c.clusterId)) {
+        mergedFaces.push(...c.faces);
+        c.photos.forEach((p) => mergedPhotoIds.add(p.id));
       }
-      const photoById = new Map<string, PhotoFileInfo>();
-      for (const p of photos) photoById.set(p.id, p);
-      const mergedPhotos = [...mergedPhotoIds].map((id) => photoById.get(id)).filter((p): p is PhotoFileInfo => !!p);
-      const representativeFace = mergedFaces.reduce((best, f) => {
-        const bestScore = best.width * best.height * best.score;
-        const fScore = f.width * f.height * f.score;
-        return fScore > bestScore ? f : best;
-      });
-      const mergedCluster: FaceCluster = {
-        clusterId: `face-merged-${Date.now()}`,
-        faces: mergedFaces,
-        photos: mergedPhotos,
-        representativeFace,
-        photoCount: mergedPhotos.length,
-      };
-      // 移除被合并的组，添加合并后的组
-      const remaining = prev.clusters.filter((c) => !selectedClusters.has(c.clusterId));
-      return { ...prev, clusters: [mergedCluster, ...remaining] };
+    }
+    const photoById = new Map<string, PhotoFileInfo>();
+    for (const p of photos) photoById.set(p.id, p);
+    const mergedPhotos = [...mergedPhotoIds].map((id) => photoById.get(id)).filter((p): p is PhotoFileInfo => !!p);
+    const representativeFace = mergedFaces.reduce((best, f) => {
+      const bestScore = best.width * best.height * best.score;
+      const fScore = f.width * f.height * f.score;
+      return fScore > bestScore ? f : best;
     });
+    const mergedCluster: FaceCluster = {
+      clusterId: `face-merged-${Date.now()}`,
+      faces: mergedFaces,
+      photos: mergedPhotos,
+      representativeFace,
+      photoCount: mergedPhotos.length,
+    };
+    // 移除被合并的组，添加合并后的组
+    const remaining = prev.clusters.filter((c) => !selectedClusters.has(c.clusterId));
+    updateFace({ ...prev, clusters: [mergedCluster, ...remaining] }, detection);
     setSelectedClusters(new Set());
     addToast({ type: 'success', message: t('home.organize.faceCluster.toastMerged', { defaultValue: '已合并 {{count}} 个人脸组', count: selectedClusters.size }) });
-  }, [selectedClusters, result, photos, addToast, t]);
+  }, [selectedClusters, result, detection, photos, addToast, t, checkWritePermission, updateFace]);
 
   /** 设置组名 */
   const handleRenameCluster = useCallback((clusterId: string, name: string) => {
@@ -409,14 +425,10 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
     return out;
   }, [result, selectedIds]);
 
-  /** 加入相册 */
-  const handleAddToAlbum = () => {
-    if (selectedIds.size === 0) {
-      addToast({ type: 'warning', message: t('home.organize.faceCluster.selectPhotosFirst') });
-      return;
-    }
-    setAlbumBridgeOpen(true);
-  };
+  // 上报「当前有效结果集」：人脸识别结果中勾选的照片可统一加入相册
+  useEffect(() => {
+    if (albumActive) onAlbumChange?.(result ? selectedPhotos : null);
+  }, [albumActive, onAlbumChange, result, selectedPhotos]);
 
   /** 当前阶段索引 */
   const currentStageIdx = progress
@@ -437,16 +449,6 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
         </svg>
       }
     >
-      {/* 固定“加入相册”浮动按钮（与日历/时间线一致：固定在右上角，样式统一） */}
-      {result && (
-        <div className="absolute top-4 right-4 z-20">
-          <AddToAlbumButton
-            count={selectedIds.size}
-            onClick={handleAddToAlbum}
-          />
-        </div>
-      )}
-
       {/* ── 顶部：距离阈值滑块 + 操作按钮 ── */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[220px]">
@@ -544,10 +546,13 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
             </div>
           )}
 
+          {/* 删除撤销：最近删除的人脸照片可一键恢复 */}
+          <UndoBar count={lastDeleted?.length ?? 0} onUndo={undoDelete} />
+
           {/* 人脸分组列表 */}
           {result.clusters.length > 0 && (
             <div className="mt-3 space-y-2 max-h-[480px] overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar">
-              {result.clusters.map((cluster, idx) => (
+              {result.clusters.slice(0, clusterVisible).map((cluster, idx) => (
                 <FaceClusterGroupItem
                   key={cluster.clusterId}
                   cluster={cluster}
@@ -585,6 +590,8 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
                   onDeletePhoto={handleDeletePhoto}
                 />
               ))}
+              {/* 懒加载哨兵：滚动进入视口时追加下一批人脸组 */}
+              {clusterVisible < result.clusters.length && <div ref={clusterSentinel} className="h-2" />}
             </div>
           )}
 
@@ -613,15 +620,6 @@ export function FaceClusterTool({ photos, readPhotoData, addToast, onBusyChange,
           )}
         </>
       )}
-
-      <AlbumBridgeDialog
-        open={albumBridgeOpen}
-        onClose={() => setAlbumBridgeOpen(false)}
-        photos={selectedPhotos}
-        sourceMode={sourceMode}
-        addToast={addToast}
-        readPhotoData={readPhotoData}
-      />
 
       {/* 大图预览 */}
       {previewGroup && previewGroup.length > 0 && (
