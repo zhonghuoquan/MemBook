@@ -224,7 +224,8 @@ export function ToolSidebar({
   onSelect,
   toolStatuses,
 }: {
-  activeTool: ToolId;
+  /** 当前选中的工具 ID；为 null 表示“无工具选中”（如显示一键分析报告页时） */
+  activeTool: ToolId | null;
   onSelect: (id: ToolId) => void;
   /** 各工具的运行状态（由父组件追踪，用于按钮上显示状态指示） */
   toolStatuses?: Map<ToolId, ToolStatus>;

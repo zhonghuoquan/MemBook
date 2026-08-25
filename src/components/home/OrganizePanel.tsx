@@ -15,7 +15,7 @@
  * 四个工具（去重/归类/改EXIF/转换）由 organize/ 子组件实现
  */
 
-import { useState, useCallback, useRef, useEffect, useMemo, startTransition } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
@@ -838,11 +838,15 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       if (timedOut) return;
       clearTimeout(timeoutId);
 
-      // 大量照片（如 1000+）一次性 setState 会触发重渲染所有工具卡片，
-      // 用 startTransition 标记低优先级，让 React 优先处理用户交互（滚动/点击）
-      startTransition(() => {
-        setTabState(tabId, (tab) => ({ ...tab, photos: results, scanProgress: null }));
-      });
+      // 扫描结束是即时 UI 状态，必须与结果和进度条一起提交。
+      // 不能放进 startTransition：低优先级更新可能晚于 finally 的 scanning:false
+      // 提交，导致 Toast 已显示而旧 scanProgress 仍停留在页面上。
+      setTabState(tabId, (tab) => ({
+        ...tab,
+        photos: results,
+        scanning: false,
+        scanProgress: null,
+      }));
       addToast({ type: 'success', message: t('organize.scan.scanComplete', { count: results.length }) });
     } catch (err) {
       if (timedOut) return;
@@ -986,9 +990,14 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
         cancelAnimationFrame(rafId);
         rafId = 0;
       }
-      startTransition(() => {
-        setTabState(tabId, (tab) => ({ ...tab, photos: results, scanProgress: null }));
-      });
+      // 与 Tauri 扫描保持同一收尾协议：结果、扫描标记和进度条原子更新。
+      // 进度条不能依赖低优先级 transition 清理，否则可能在 Toast 出现后残留。
+      setTabState(tabId, (tab) => ({
+        ...tab,
+        photos: results,
+        scanning: false,
+        scanProgress: null,
+      }));
       addToast({ type: 'success', message: t('organize.scan.scanComplete', { count: results.length }) });
     } catch (err) {
       setTabState(tabId, (tab) => ({ ...tab, scanProgress: null }));
@@ -1657,7 +1666,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
               )}
             </button>
             <ToolSidebar
-              activeTool={activeTool}
+              activeTool={showAnalyzeReport ? null : activeTool}
               toolStatuses={activeToolStatuses}
               onSelect={(id) => {
                 // 用户手动切换工具：标记为“用户有操作”，一键分析不再强制自动跳转
@@ -1757,7 +1766,7 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
             )}
             {visitedTools.has('faceCluster') && (
               <div className={!showAnalyzeReport && activeTool === 'faceCluster' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'hidden'}>
-                <FaceClusterTool key="faceCluster" {...toolProps} proFeature="faceCluster" faceResult={activeFaceState.result} faceDetection={activeFaceState.detection} onFaceStateChange={(result, detection) => { if (activeTabId) setFaceState(activeTabId, { result, detection }); }} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} />
+                <FaceClusterTool key="faceCluster" {...toolProps} proFeature="faceCluster" faceResult={activeFaceState.result} faceDetection={activeFaceState.detection} onFaceStateChange={(result, detection) => { if (activeTabId) setFaceState(activeTabId, { result, detection }); }} autoRunToken={autoAnalyzeToken} isAutoRunTarget={autoAnalyzeStep === 'faceCluster'} albumActive={activeTool === 'faceCluster'} onAlbumChange={handleAlbumChange} />
               </div>
             )}
             {visitedTools.has('similar') && (
