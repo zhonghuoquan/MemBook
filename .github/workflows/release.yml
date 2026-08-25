@@ -74,10 +74,12 @@ jobs:
           $exe = [System.IO.Path]::GetFileName($baseName)
           $url = "https://github.com/${repo}/releases/download/${tag}/${exe}"
           $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          # 更新说明：读 docs/release-notes.md（发版前更新该文件即可），缺失则留空
+          $notes = if (Test-Path "docs/release-notes.md") { (Get-Content -Path "docs/release-notes.md" -Raw).Trim() } else { "" }
           $manifest = [ordered]@{
             version  = $ver
             pub_date = $pub
-            notes    = ""
+            notes    = $notes
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{ signature = $sig; url = $url }
             }
@@ -90,7 +92,7 @@ jobs:
             $cnbManifest = [ordered]@{
               version  = $ver
               pub_date = $pub
-              notes    = ""
+              notes    = $notes
               platforms = [ordered]@{
                 "windows-x86_64" = [ordered]@{ signature = $sig; url = $cnbUrl }
               }
@@ -245,10 +247,12 @@ jobs:
           $artifact = [System.IO.Path]::GetFileName($baseName)
           $url = "https://github.com/${repo}/releases/download/${tag}/${artifact}"
           $pub = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          # 更新说明：读 docs/release-notes.md（发版前更新该文件即可），缺失则留空
+          $notes = if (Test-Path "docs/release-notes.md") { (Get-Content -Path "docs/release-notes.md" -Raw).Trim() } else { "" }
           $manifest = [ordered]@{
             version   = $ver
             pub_date  = $pub
-            notes     = ""
+            notes     = $notes
             platforms = [ordered]@{
               "darwin-universal" = [ordered]@{ signature = $sig; url = $url }
             }
@@ -261,7 +265,7 @@ jobs:
             $cnbManifest = [ordered]@{
               version   = $ver
               pub_date  = $pub
-              notes     = ""
+              notes     = $notes
               platforms = [ordered]@{
                 "darwin-universal" = [ordered]@{ signature = $sig; url = $cnbUrl }
               }

@@ -875,6 +875,11 @@
     "openFolder": "Open in file manager",
     "openFolderFailed": "Failed to open folder",
     "selectPhotoFolder": "Select photo folder",
+    "importPhotos": {
+      "label": "Import Photos",
+      "hint": "Pick photos from any location (e.g. a phone via MTP) or drag files into this window",
+      "noValid": "No importable image files selected"
+    },
     "selectFolderFailed": "Folder selection failed: {{message}}",
     "reloadingProjectPhotos": "Reloading album photos...",
     "reloadedPhotos": "Reloaded {{count}} photos",

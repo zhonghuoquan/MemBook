@@ -876,6 +876,11 @@
     "openFolder": "在文件夹中打开",
     "openFolderFailed": "打开文件夹失败",
     "selectPhotoFolder": "选择照片文件夹",
+    "importPhotos": {
+      "label": "导入照片",
+      "hint": "从电脑/手机(MTP)等任意位置选择照片导入相册，或将文件直接拖入本窗口",
+      "noValid": "未选择到可导入的图片文件"
+    },
     "selectFolderFailed": "选择文件夹失败: {{message}}",
     "reloadingProjectPhotos": "正在重新加载项目照片...",
     "reloadedPhotos": "已重新加载 {{count}} 张照片",

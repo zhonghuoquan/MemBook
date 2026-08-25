@@ -239,6 +239,41 @@ function photoToFileInfo(p: Photo): PhotoFileInfo {
   };
 }
 
+/**
+ * 把浏览器 File（文件多选 / 拖拽，来自手机 MTP 等任意来源）转为 PhotoFileInfo。
+ * 走「路径无关」blob 链路：仅生成 objectURL + 解析日期，不依赖真实文件系统路径，
+ * 后续由 readPhotoData(fetch objectURL) + AlbumBridge import 模式完成入库。
+ */
+async function fileListToPhotoFileInfo(files: File[]): Promise<PhotoFileInfo[]> {
+  const out: PhotoFileInfo[] = [];
+  for (const file of files) {
+    const ext = getExt(file.name);
+    if (!ext) continue;
+    let dateTaken: string | undefined;
+    try {
+      const headBuf = await file.slice(0, 65536).arrayBuffer();
+      const dateStr = await readExifDateWithFallback(headBuf, file.name);
+      if (dateStr) dateTaken = dateStr;
+    } catch {
+      // EXIF 解析失败静默处理
+    }
+    if (!dateTaken && file.lastModified > 0) {
+      dateTaken = new Date(file.lastModified).toISOString();
+    }
+    out.push({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      size: file.size,
+      ext,
+      mimeType: file.type || extToMimeType(ext),
+      thumbUrl: URL.createObjectURL(file),
+      relativePath: file.name,
+      dateTaken,
+    });
+  }
+  return out;
+}
+
 interface OrganizePanelProps {
   /** 当前整理面板是否处于可见（激活）状态；仅当用户真正进入“照片整理”页时才触发恢复扫描 */
   active?: boolean;
@@ -307,10 +342,27 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const [albumBridgeOpen, setAlbumBridgeOpen] = useState(false);
   // 当前活跃工具上报的「加入相册」有效结果集（由各工具通过 onAlbumChange 上报）
   const [albumToolPhotos, setAlbumToolPhotos] = useState<PhotoFileInfo[] | null>(null);
+  // 「导入照片」（文件多选 / 拖拽）待入相册的 photo 集；置入后打开 AlbumBridge 走 import 模式入库
+  const [importPhotos, setImportPhotos] = useState<PhotoFileInfo[] | null>(null);
+  // 文件多选 hidden input 引用
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   // 接收工具上报结果集（stable 引用，避免工具 effect 依赖抖动）
   const handleAlbumChange = useCallback((photos: PhotoFileInfo[] | null) => {
     setAlbumToolPhotos(photos);
   }, []);
+
+  // 把选中的 FileList 导入相册：转 PhotoFileInfo → 打开 AlbumBridge 走 import 模式入库（路径无关）
+  const handleImportFiles = useCallback((files: File[]) => {
+    void (async () => {
+      const photos = await fileListToPhotoFileInfo(files);
+      if (photos.length === 0) {
+        addToast({ type: 'warning', message: t('organize.importPhotos.noValid', '未选择到可导入的图片文件') });
+        return;
+      }
+      setImportPhotos(photos);
+      setAlbumBridgeOpen(true);
+    })();
+  }, [addToast, t]);
   // 一键成册 3 步向导
   const [oneClickAlbumOpen, setOneClickAlbumOpen] = useState(false);
   // 时间线 → 日历跳转的初始月份（跳转后清空，避免后续切换日历视图时仍定位到旧月份）
@@ -1384,13 +1436,54 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
   const canAlbum = albumTargetPhotos.length > 0;
 
   return (
-    <div className="h-full flex flex-col p-6 overflow-hidden">
+    <div
+      className="h-full flex flex-col p-6 overflow-hidden"
+      // 拖拽导入：把手机/电脑中的文件拖入窗口即可导入相册（路径无关）
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) handleImportFiles(files);
+      }}
+    >
       {/* 顶部数据源选择 */}
       <section className={`shrink-0 mb-4 ${hasData ? '' : 'flex-1 flex flex-col overflow-auto custom-scrollbar'}`}>
         <header className="flex items-center gap-4 mb-4">
           <div className="shrink-0">
             <h2 className="text-[1.875rem] font-[700] text-[var(--color-text-primary)] leading-tight tracking-tight">{t('organize.title')}</h2>
             <p className="text-[var(--text-caption)] text-[var(--color-text-tertiary)] mt-0.5">{t('organize.subtitle')}</p>
+          </div>
+          {/* 导入照片：文件多选 / 拖拽（兼容手机 MTP 等路径无关来源） */}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => importFileInputRef.current?.click()}
+              title={t('organize.importPhotos.hint', '从电脑/手机(MTP)等任意位置选择照片导入相册，或将文件直接拖入本窗口')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-[600] cursor-pointer transition-all
+                         border border-[var(--color-brand)] text-[var(--color-brand)] bg-white hover:bg-[var(--color-brand)] hover:text-white active:scale-95 shadow-sm"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <path d="M8 2v8" />
+                <path d="M5 6l3-3 3 3" />
+                <path d="M3 11v2a1 1 0 001 1h8a1 1 0 001-1v-2" />
+              </svg>
+              {t('organize.importPhotos.label', '导入照片')}
+            </button>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              multiple
+              accept="image/*,image/heic,image/heif"
+              className="hidden"
+              onChange={(e) => {
+                const fileList = e.target.files;
+                if (fileList && fileList.length > 0) handleImportFiles(Array.from(fileList));
+                e.target.value = '';
+              }}
+            />
           </div>
         </header>
 
@@ -1864,8 +1957,11 @@ export function OrganizePanel({ active = false, onOpenProject }: OrganizePanelPr
       {/* 一键成册联动对话框（统一「加入相册」入口） */}
       <AlbumBridgeDialog
         open={albumBridgeOpen}
-        onClose={() => setAlbumBridgeOpen(false)}
-        photos={albumTargetPhotos}
+        onClose={() => {
+          setAlbumBridgeOpen(false);
+          setImportPhotos(null);
+        }}
+        photos={importPhotos ?? albumTargetPhotos}
         sourceMode={activeTab?.sourceMode ?? 'folder'}
         addToast={addToast}
         readPhotoData={readPhotoData}

@@ -3,12 +3,12 @@
 > 在桌面端制作电子相册。照片和项目数据默认保存在本机，不依赖业务服务器。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.2.1-blue)
+![Version](https://img.shields.io/badge/version-1.2.2-blue)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
 ## 项目状态
 
-- 当前版本：`1.2.1`
+- 当前版本：`1.2.2`
 - 应用标识符：`app.membook.desktop`
 - 核心技术：Tauri 2、React 19、TypeScript 6、Vite 7、Konva 10、Zustand 5、Tailwind 4、Dexie 4、Rust
 - Windows 安装包：仅发布 NSIS `.exe`；不发布 WiX/MSI。

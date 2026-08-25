@@ -16,6 +16,8 @@ macOS 由发布工作流显式指定 `app,dmg` 构建目标。它不改变 Windo
 
 ## 发布前检查
 
+发版前把本次版本的更新说明写入 `docs/release-notes.md`（多行即可），CI 会自动读入更新清单的 `notes` 字段，用户更新弹窗即可看到；说明文件缺失时按空处理。
+
 ```bash
 npm run typecheck
 npm test
