@@ -3,7 +3,7 @@ import { PAGE_MARGIN_DEFAULT, PAGE_GAP_DEFAULT, DEFAULT_SLOT_CORNER_RADIUS, isGo
 import { pageMarginService, calcCoverOverrides } from '../../services/pageMarginService';
 import { dirtyMarginPageIds, pushSnapshot } from './helpers';
 import { fitTextSize } from '../../components/editor/canvas/TextDomNode';
-import { coverElementSize, coverAnchorPosition, isMaskShape } from '../../utils/coverScale';
+import { rescaleCoverShapeGeometry } from '../../utils/coverScale';
 import { SPINE_DATE_BOTTOM_MM } from '../../utils/sharedRender';
 import type { EditorSlice, AlbumMetaSlice } from './types';
 
@@ -49,25 +49,10 @@ function rescaleCoverDecorations(
     }
     return scaled;
   });
-  const shapeElements = (page.shapeElements || []).map((sh) => {
-    // 形状尺寸统一走 coverElementSize：蒙版按轴拉伸覆盖区域，装饰形状等比保持宽高比
-    const { width, height } = coverElementSize(isMaskShape(sh.id), sh.width, sh.height, kx, ky);
-    // 用旧页相对几何（百分比）判定锚点，在新页尺寸上锚点感知重新定位（贴边/居中保持一致）
-    const pctBox = {
-      x: ((sh.x - spX) / oldSize.width) * 100,
-      y: (sh.y / oldSize.height) * 100,
-      width: (sh.width / oldSize.width) * 100,
-      height: (sh.height / oldSize.height) * 100,
-    };
-    const { x, y } = coverAnchorPosition(pctBox, newSize.width, newSize.height, width, height);
-    return {
-      ...sh,
-      x: spX + x,
-      y,
-      width: Math.max(width, 0.5),
-      height: Math.max(height, 0.5),
-    };
-  });
+  const shapeElements = (page.shapeElements || []).map((sh) =>
+    // 复用 coverScale 的中心点语义重算：锚点(LEFT/TOP)→加回半宽/半高存中心点，避免贴右/贴底形状往左上偏移
+    ({ ...sh, ...rescaleCoverShapeGeometry(sh, oldSize, newSize, spX) }),
+  );
   return { ...page, textElements, shapeElements };
 }
 

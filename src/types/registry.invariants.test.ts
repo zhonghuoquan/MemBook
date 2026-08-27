@@ -20,6 +20,7 @@ import {
   isBackCoverPage,
   isCoverOrBackCoverPage,
   resolveTemplate,
+  GOOGLE_PHOTOS_TEMPLATE_ID,
   findTemplateById,
   normalizeSlotCornerRadius,
   DEFAULT_WATERMARK_SETTINGS,
@@ -56,6 +57,10 @@ describe('types 基础层不变量', () => {
     expect(virtual?.id).toBe('__google_photos__');
     expect(virtual?.slots.map((s) => s.id)).toEqual(['a']);
     expect(resolveTemplate({ templateId: '' })).toBeUndefined();
+    // GP 页被「删空」后 slotOverrides 被清为 {}，仍须返回有效空虚拟模板（避免模板塌陷为 undefined）
+    const emptiedGp = resolveTemplate({ templateId: GOOGLE_PHOTOS_TEMPLATE_ID, slotOverrides: {} });
+    expect(emptiedGp?.id).toBe(GOOGLE_PHOTOS_TEMPLATE_ID);
+    expect(emptiedGp?.slots).toEqual([]);
   });
 
   it('findTemplateById 命中/未命中', () => {

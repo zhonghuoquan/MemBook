@@ -1,6 +1,6 @@
 [package]
 name = "membook"
-version = "1.2.2"
+version = "1.2.3"
 description = "MemBook — 电子相册编辑器"
 authors = ["MemBook"]
 edition = "2021"

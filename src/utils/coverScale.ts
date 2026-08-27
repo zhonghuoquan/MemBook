@@ -110,3 +110,44 @@ export function coverAnchorPosition(
         : (box.y / 100) * pageH;
   return { x, y };
 }
+
+/**
+ * 封面形状元素跨尺寸缩放的几何重算（中心点语义）。
+ *
+ * ShapeElement.x/y 是**中心点**（渲染/拖动时按中心减半宽半高转左上角）。
+ * 当相册尺寸变化时，用旧元素真实左上角盒（中心减半宽/半高）做锚点感知重新定位，
+ * 再把锚点返回的左上角**加回半宽/半高**存回中心点 —— 与模板生成 `presetShapeToPageElements`
+ * 完全一致。若把中心点误当左上角传给 `coverAnchorPosition`，贴右/贴底/角落形状会往左上偏移。
+ *
+ * @param shape 旧元素（含 id?/x/y/width/height，x/y 为中心点、含书脊偏移）
+ * @param oldSize 旧页尺寸
+ * @param newSize 新页尺寸
+ * @param spineOffsetX 书脊锚点偏移（同 presetShapeToPageElements 的 spineOffsetX）
+ * @returns 新尺寸下的中心点坐标与已适配尺寸
+ */
+export function rescaleCoverShapeGeometry(
+  shape: { id?: string; x: number; y: number; width: number; height: number },
+  oldSize: { width: number; height: number },
+  newSize: { width: number; height: number },
+  spineOffsetX: number,
+): { x: number; y: number; width: number; height: number } {
+  const kx = newSize.width / oldSize.width;
+  const ky = newSize.height / oldSize.height;
+  // 尺寸：蒙版按轴拉伸覆盖区域，装饰形状等比保持宽高比
+  const { width, height } = coverElementSize(isMaskShape(shape.id), shape.width, shape.height, kx, ky);
+  // 用真实左上角盒的百分比做锚点判定（中心减半宽/半高）
+  const pctBox = {
+    x: ((shape.x - spineOffsetX - shape.width / 2) / oldSize.width) * 100,
+    y: ((shape.y - shape.height / 2) / oldSize.height) * 100,
+    width: (shape.width / oldSize.width) * 100,
+    height: (shape.height / oldSize.height) * 100,
+  };
+  // 锚点返回左上角，加回半宽/半高存回中心点
+  const { x, y } = coverAnchorPosition(pctBox, newSize.width, newSize.height, width, height);
+  return {
+    x: spineOffsetX + x + width / 2,
+    y: y + height / 2,
+    width: Math.max(width, 0.5),
+    height: Math.max(height, 0.5),
+  };
+}

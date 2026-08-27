@@ -283,9 +283,10 @@ function computeLayoutParams(
 
   let rows = Math.max(1, Math.ceil(photoCount / densityDivisor));
 
-  // ≥5 图：seed 驱动行数上下抖动（-1/0/+1）。同方向大页若行数恒定，
+  // ≥4 图：seed 驱动行数上下抖动（-1/0/+1）。同方向小页若行数恒定，
   // seed 只能影响竖图左右/跨行，骨架变化有限；抖动让「随机排版 / 换方案」翻出疏密不同的骨架。
-  if (photoCount >= 5) {
+  // （下放到 4：4 张竖图此前行数被密度卡死在 2/3/4，随机切换变化不足。）
+  if (photoCount >= 4) {
     rows = Math.max(1, rows + (seededPick(layoutSeed, 91, 3) - 1));
   }
 

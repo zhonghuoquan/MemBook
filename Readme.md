@@ -3,12 +3,12 @@
 > 在桌面端制作电子相册。照片和项目数据默认保存在本机，不依赖业务服务器。
 
 [![CI](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml/badge.svg)](https://github.com/zhonghuoquan/membook/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.2.2-blue)
+![Version](https://img.shields.io/badge/version-1.2.3-blue)
 ![Tech](https://img.shields.io/badge/stack-Tauri%202%20%2B%20React%2019%20%2B%20Rust-8B5CF6)
 
 ## 项目状态
 
-- 当前版本：`1.2.2`
+- 当前版本：`1.2.3`
 - 应用标识符：`app.membook.desktop`
 - 核心技术：Tauri 2、React 19、TypeScript 6、Vite 7、Konva 10、Zustand 5、Tailwind 4、Dexie 4、Rust
 - Windows 安装包：仅发布 NSIS `.exe`；不发布 WiX/MSI。
@@ -51,6 +51,7 @@ npm run desktop:build
 ## 文档导航
 
 - [代码开发规范](MemBook%20代码开发规范.md)：唯一有效的开发规则。
+- [UI与UX设计规范](MemBook%20UI与UX设计规范.md)：视觉令牌、层级与交互统一约定。
 - [架构说明](docs/architecture.md)：目录职责、状态与存储边界。
 - [发布说明](docs/release.md)：Windows NSIS 发布与更新流程。
 - [质量治理](docs/quality-governance.md)：测试、lint 基线和 CI 演进方式。

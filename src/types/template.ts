@@ -11,10 +11,23 @@ import { ALL_COVER_TEMPLATES, findCoverTemplateById } from './cover-templates';
 export const GOOGLE_PHOTOS_TEMPLATE_ID = '__google_photos__';
 
 /** 从 slotOverrides 构造虚拟模板，用于支持 Google Photos 等动态布局页面 */
-export function buildVirtualTemplate(page: { slotOverrides?: Record<string, SlotOverride> }): Template | undefined {
-  if (!page.slotOverrides) return undefined;
-  const slotIds = Object.keys(page.slotOverrides);
-  if (slotIds.length === 0) return undefined;
+export function buildVirtualTemplate(page: { templateId?: string; slotOverrides?: Record<string, SlotOverride> }): Template | undefined {
+  const isGp = page.templateId === GOOGLE_PHOTOS_TEMPLATE_ID;
+  const slotIds = page.slotOverrides ? Object.keys(page.slotOverrides) : [];
+  if (slotIds.length === 0) {
+    // GP 页被「删空/移空」后 slotOverrides 被清为 {}，仍须返回一个有效的空虚拟模板。
+    // 若返回 undefined → resolveTemplate 塌陷，页面被打回「无页可编辑」空态并触发下游崩溃。
+    if (isGp) {
+      return {
+        id: GOOGLE_PHOTOS_TEMPLATE_ID,
+        name: 'Google Photos 紧凑网格',
+        category: 'creative',
+        slots: [],
+        preview: 'collage',
+      };
+    }
+    return undefined;
+  }
   return {
     id: GOOGLE_PHOTOS_TEMPLATE_ID,
     name: 'Google Photos 紧凑网格',

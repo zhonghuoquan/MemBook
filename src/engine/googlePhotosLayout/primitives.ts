@@ -764,9 +764,15 @@ function buildFourSkeleton(photos: Photo[], seed: number): Photo[][] {
   const allSquareish = [a0, a1, a2, a3].every(a => a >= 0.85 && a <= 1.15);
   const pick = seededPick(seed, 131, 6); // 0..5
 
-  // 竖图很多：竖图各自独立成行（利于触发跨行 + 错落），横/方合为一排
+  // 竖图很多：引入 seed 驱动的多样骨架，摆脱"恒为 1+1+2 一种"。
+  // 原逻辑：全竖图恒排成 [1][1][2]，跨行后恒是「1 大竖 + 右(1 竖,2 竖并排)」，
+  // 随机切换只在左右翻转，观感雷同；现按 seed 在 2+2 方格 / 1+3 条带 / 1+1+2 间翻面。
+  // （1+1+2 经 generateRowsForSpec 末行竖图保护 + 跨行检测仍会聚成「大竖+右叠」，保留为一种。）
   if (portraitCount >= 3) {
-    return [[photos[0]], [photos[1]], [photos[2], photos[3]]];
+    const v = seededPick(seed, 141, 10); // 0..9，独立 salt 避免与 pick(131) 耦合
+    if (v < 4) return [[photos[0], photos[1]], [photos[2], photos[3]]];  // 2+2 方格（并排两行，各两竖）
+    if (v < 7) return [[photos[0]], [photos[1], photos[2], photos[3]]];  // 1+3（大竖 + 三条矮带）
+    return [[photos[0]], [photos[1]], [photos[2], photos[3]]];           // 1+1+2（跨行成大竖 + 右叠）
   }
   // 全方图：对称 2+2 更稳重，偶尔转 单hero+3 打破单调
   if (allSquareish) {
@@ -812,11 +818,18 @@ export function generateRowsForSpec(spec: PageSpec, contentWidth: number, gap: n
   // 多行骨架里竖图独占末行无法跨行（没有下一行可合并），fillPage 归一化后会被
   // 拉宽成横带（0.75 的竖图最多裁掉约一半高度，主体可能被切）→ 并入前一行。
   // 仅处理 ≥3 图页面；2 图叠放骨架的多样性语义优先（且 2 行摊薄后裁切可接受）。
+  // ⚠️ 例外：全竖 3 行每行 1 张是「跨行 / 扁平横排」的候选骨架，末行保护会让位，
+  //    由 detectSpanOpportunities 决定翻成「3 根竖条」或「大竖 + 右叠」，否则它会把
+  //    3 行折叠成 2 行，flatAllThree 恒 false，3 张全竖永远只剩一种版式。
   if (photos.length >= 3 && groups.length >= 2) {
-    const lastGroup = groups[groups.length - 1];
-    if (lastGroup.length === 1 && aspectOf(lastGroup[0]) < 0.85) {
-      groups[groups.length - 2] = [...groups[groups.length - 2], ...lastGroup];
-      groups.pop();
+    const pureThreePortrait = photos.length === 3 && groups.length === 3
+      && groups.every(g => g.length === 1 && aspectOf(g[0]) < 0.85);
+    if (!pureThreePortrait) {
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup.length === 1 && aspectOf(lastGroup[0]) < 0.85) {
+        groups[groups.length - 2] = [...groups[groups.length - 2], ...lastGroup];
+        groups.pop();
+      }
     }
   }
 
@@ -845,12 +858,19 @@ export function detectSpanOpportunities(
   let i = 0;
   let spanCount = 0;
 
+  // 关键修复：3 张全竖且每行一张时，50% 概率扁平化为「3 张横排」，不再整体合并成一块。
+  // 原逻辑：全竖恒触发跨行合并，无论怎么随机都只有「一大两小」一种骨架，随机切换没变化
+  const threePortraitSingleRows = rows.length === 3
+    && rows[0].photos.length === 1 && rows[1].photos.length === 1 && rows[2].photos.length === 1
+    && rows.every(r => r.photos.every(p => p.width > 0 && p.height > 0 && p.width / p.height < 0.85));
+  const flatAllThree = threePortraitSingleRows && seededBool(seed, 277, 0.5);
+
   while (i < rows.length) {
     const row = rows[i];
     const nextRow = rows[i + 1];
 
     // 条件：当前行恰好 1 张照片、下一行存在、照片是竖图或本页最高分横图
-    if (row.photos.length === 1 && nextRow) {
+    if (row.photos.length === 1 && nextRow && !flatAllThree) {
       const p = row.photos[0];
       const aspect = p.width > 0 && p.height > 0 ? p.width / p.height : 1;
       const isStrictPortrait = aspect < 0.80;   // iPhone 3:4 (0.75) 等标准竖图，始终跨行

@@ -8,7 +8,7 @@
  *   4. 矩形不重叠：同页照片两两不相交
  */
 import { describe, it, expect } from 'vitest';
-import { googlePhotosLayout, generateMultipleLayouts } from './google-photos-layout';
+import { googlePhotosLayout, generateMultipleLayouts, layoutSinglePage } from './google-photos-layout';
 import type { GooglePhotosConfig, RowTier, TierPattern } from './google-photos-layout';
 import type { Photo } from '../types';
 
@@ -479,6 +479,56 @@ describe('一键成册·布局多元化（seed 驱动）', () => {
       expect(new Set(ids).size).toBe(3);
     }
     expect(sigs.size).toBeGreaterThan(1);
+  });
+
+  it('真实路径 layoutSinglePage：全竖 3 张随机切换能翻出多种骨架（修复 2026-08-27）', () => {
+    const three = [
+      makePhoto(3000, 4000, '01'),
+      makePhoto(3000, 4000, '01'),
+      makePhoto(3000, 4000, '01'),
+    ];
+    const densities: GooglePhotosConfig['density'][] = ['large', 'sparse', 'balanced', 'compact'];
+    // 骨架签名用「照片矩形宽度分布」而非「行内照片数」：全竖图无论「3 根等宽并列」还是
+    // 「1 根大竖 + 2 根小竖叠排」，行内照片数都是 1，`photoIds.length` 恒为 [1,1,1] 无法区分。
+    const skeletonSig = (r: ReturnType<typeof layoutSinglePage>): string =>
+      [...r.pages[0].photos].map(p => Math.round(p.width)).sort((a, b) => a - b).join(',');
+    const skeletons = new Set<string>();
+    for (let s = 0; s < 80; s++) {
+      const d = densities[s % densities.length];
+      const r = layoutSinglePage(three, makeConfig({ density: d }), s * 31 + 7);
+      skeletons.add(skeletonSig(r));
+      const ids = r.pages[0].photos.map(p => p.photoId);
+      expect(ids).toHaveLength(3);
+      expect(new Set(ids).size).toBe(3);
+    }
+    // 修复前全竖 3 张恒被捏成 1 种（大竖+2 叠），随机切换无变化；修复后应翻出「横排 3」等宽分布
+    // 与「大竖+2 叠」宽窄分布两种以上骨架。
+    expect(skeletons.size).toBeGreaterThan(1);
+  });
+
+  it('真实路径 layoutSinglePage：全竖 4 张随机切换能翻出多种行数骨架（修复 2026-08-27）', () => {
+    const four = [
+      makePhoto(3000, 4000, '01'),
+      makePhoto(3000, 4000, '01'),
+      makePhoto(3000, 4000, '01'),
+      makePhoto(3000, 4000, '01'),
+    ];
+    // 模拟随机切换：4 种密度 × seed 迭代，统计行结构签名（含 span）
+    const densities: GooglePhotosConfig['density'][] = ['large', 'sparse', 'balanced', 'compact'];
+    const skeletonSig = (r: ReturnType<typeof layoutSinglePage>): string =>
+      [...r.pages[0].photos].map(p => Math.round(p.width)).sort((a, b) => a - b).join(',');
+    const skeletons = new Set<string>();
+    for (let s = 0; s < 80; s++) {
+      const d = densities[s % densities.length];
+      const r = layoutSinglePage(four, makeConfig({ density: d }), s * 31 + 7);
+      skeletons.add(skeletonSig(r));
+      // 守恒：4 张都在且不重复
+      const ids = r.pages[0].photos.map(p => p.photoId);
+      expect(ids).toHaveLength(4);
+      expect(new Set(ids).size).toBe(4);
+    }
+    // 修复前全竖 4 张被密度锁死为 1 种骨架；修复后应翻出 2+2 方格 / 1+3 条带 / 1+1+2 等多种骨架
+    expect(skeletons.size).toBeGreaterThan(1);
   });
 });
 

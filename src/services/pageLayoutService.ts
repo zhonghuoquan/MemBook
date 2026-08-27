@@ -557,64 +557,55 @@ export const pageLayoutService = {
 
     const photoMap = getPhotoMap();
 
-    const currentPhotoIds = page.placements
-      .map((pl) => pl.photoId).filter((id): id is string => id != null);
-    const currentPhotos = currentPhotoIds
+    const currentPhotos = page.placements
+      .map((pl) => pl.photoId).filter((id): id is string => id != null)
       .map((id) => photoMap.get(id)).filter((p): p is Photo => p != null);
     if (currentPhotos.length === 0) return;
 
     const currentRotation = page.perPageRotation ?? 0;
     const newRotation = ((currentRotation + 90) % 360) as 0 | 90 | 180 | 270;
 
-    const isSideways = newRotation === 90 || newRotation === 270;
-    const basePageW = isSideways ? albumSize.height : albumSize.width;
-    const basePageH = isSideways ? albumSize.width : albumSize.height;
-    const baseContentW = basePageW - pageMargin.left - pageMargin.right;
-    const baseContentH = basePageH - pageMargin.top - pageMargin.bottom;
+    // 「角度切换」= 保持当前版式（行结构/版式/基准页尺寸均不动），仅旋转 90°。
+    // 基准永远以相册页实际尺寸为坐标系，perPageRotation 表示相对它的旋转方向，
+    // 与 SmartLayoutView/LayoutDialog/一键成册 等 GP 页稳定模型一致，避免重排换版式。
+    const rowsMeta = (page.googlePhotosBaseLayoutRows ?? page.googlePhotosLayoutRows) ?? [];
+    const tierPattern = (page.perPageTierPattern as TierPattern | undefined) ?? 'hero-first';
+    const baseContentW = albumSize.width - pageMargin.left - pageMargin.right;
+    const baseContentH = albumSize.height - pageMargin.top - pageMargin.bottom;
     if (baseContentW <= 0 || baseContentH <= 0) return;
 
-    const layoutResult = layoutSinglePage(currentPhotos, {
-      pageWidth: basePageW, pageHeight: basePageH,
-      margin: pageMargin, gap: slotGap,
-      density: 'auto', layoutRhythm: 'auto', dateGrouping: 'continuous',
-    });
-
-    const migrator = makePlacementMigrator(page.placements, page.slotOverrides ?? {}, photoMap);
-    const baseRegen = buildRegenPageData(layoutResult.pages[0].photos, migrator);
-
     const result = refitPageWithRotation(
-      layoutResult.layoutRows[0],
+      rowsMeta,
       photoMap,
       baseContentW, baseContentH,
       pageMargin.left, pageMargin.top,
       slotGap,
       0, 0,
       newRotation,
-      basePageW, basePageH,
+      albumSize.width, albumSize.height,
       albumSize.width, albumSize.height,
       pageMargin,
-      (layoutResult.tierPatterns[0] as TierPattern | undefined) ?? 'hero-first',
+      tierPattern,
     );
 
     const MM = 2;
+    const oldOverrides = page.slotOverrides ?? {};
     const slotOverrides: Record<string, SlotOverride> = {};
     const mmLayout: AlbumPage['googlePhotosMmLayout'] = [];
-    result.photos.forEach((pr, i) => {
-      const pl = baseRegen.placements[i];
-      if (!pl) return;
-      slotOverrides[pl.slotId] = {
-        x: Math.round(pr.x * MM),
-        y: Math.round(pr.y * MM),
-        width: Math.round(pr.width * MM),
-        height: Math.round(pr.height * MM),
-      };
-      mmLayout.push({ photoId: pr.photoId, x: pr.x, y: pr.y, width: pr.width, height: pr.height });
-    });
-
-    const baseOverrides = baseRegen.slotOverrides;
-    const remappedPlacements = baseRegen.placements.map((pl) => {
+    const rotatedPlacements = page.placements.map((pl, i) => {
+      const pr = result.photos[i];
+      if (pr) {
+        slotOverrides[pl.slotId] = {
+          x: Math.round(pr.x * MM),
+          y: Math.round(pr.y * MM),
+          width: Math.round(pr.width * MM),
+          height: Math.round(pr.height * MM),
+        };
+        mmLayout.push({ photoId: pr.photoId, x: pr.x, y: pr.y, width: pr.width, height: pr.height });
+      }
+      // 迁移照片裁切/缩放：旧槽位尺寸 → 旋转后新槽位尺寸
+      const oldOv = oldOverrides[pl.slotId];
       const newOv = slotOverrides[pl.slotId];
-      const oldOv = baseOverrides[pl.slotId];
       const photo = photoMap.get(pl.photoId ?? '');
       if (!photo || !oldOv || !newOv || photo.width <= 0 || photo.height <= 0) return pl;
       if (pl.panX == null && pl.panY == null && pl.panScale == null && pl.panRotation == null) return pl;
@@ -637,19 +628,15 @@ export const pageLayoutService = {
       const np = [...s.pages];
       // 保留 extraSlots 中用户添加的空槽位的 placement
       const extraSlotPlacements = (page.extraSlots ?? [])
-        .filter((es) => !remappedPlacements.some((p) => p.slotId === es.id))
+        .filter((es) => !rotatedPlacements.some((p) => p.slotId === es.id))
         .map((es) => ({ slotId: es.id, photoId: null as string | null }));
       np[pageIndex] = {
         ...page,
-        placements: [...remappedPlacements, ...extraSlotPlacements],
+        placements: [...rotatedPlacements, ...extraSlotPlacements],
         slotOverrides,
         googlePhotosMmLayout: mmLayout,
-        googlePhotosBaseMmLayout: layoutResult.pages[0].photos,
-        googlePhotosMmConfig: { margin: { ...pageMargin }, gap: slotGap },
-        googlePhotosInternalRows: layoutResult.internalRows[0] || [],
-        googlePhotosLayoutRows: layoutResult.layoutRows[0],
-        googlePhotosBaseLayoutRows: layoutResult.layoutRows[0],
-        googlePhotosBasePageSize: { width: basePageW, height: basePageH },
+        // 稳定基准（行结构/版式/基准页尺寸）保持不动，仅旋转展示角度
+        googlePhotosBasePageSize: { width: albumSize.width, height: albumSize.height },
         perPageBiasX: 0,
         perPageBiasY: 0,
         perPageRotation: newRotation,
