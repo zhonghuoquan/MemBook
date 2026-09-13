@@ -592,8 +592,19 @@ export const pageLayoutService = {
     const oldOverrides = page.slotOverrides ?? {};
     const slotOverrides: Record<string, SlotOverride> = {};
     const mmLayout: AlbumPage['googlePhotosMmLayout'] = [];
-    const rotatedPlacements = page.placements.map((pl, i) => {
-      const pr = result.photos[i];
+    // P0-fix（索引错位）：result.photos 只包含有照片的槽位且顺序由行结构决定，
+    // 与 page.placements 按下标一一对应时，页面含 extraSlot 产生的 photoId=null
+    // 空槽位会导致整体错位。改为按 photoId 建立映射，空槽位保持原状。
+    const resultPhotoByPhotoId = new Map<string, (typeof result.photos)[number]>();
+    for (const pr of result.photos) {
+      if (pr.photoId != null && !resultPhotoByPhotoId.has(pr.photoId)) {
+        resultPhotoByPhotoId.set(pr.photoId, pr);
+      }
+    }
+    const rotatedPlacements = page.placements.map((pl) => {
+      // 空槽位（extraSlot 产生的占位）：无照片几何可旋转，原样保留
+      if (pl.photoId == null) return pl;
+      const pr = resultPhotoByPhotoId.get(pl.photoId);
       if (pr) {
         slotOverrides[pl.slotId] = {
           x: Math.round(pr.x * MM),
@@ -606,7 +617,7 @@ export const pageLayoutService = {
       // 迁移照片裁切/缩放：旧槽位尺寸 → 旋转后新槽位尺寸
       const oldOv = oldOverrides[pl.slotId];
       const newOv = slotOverrides[pl.slotId];
-      const photo = photoMap.get(pl.photoId ?? '');
+      const photo = photoMap.get(pl.photoId);
       if (!photo || !oldOv || !newOv || photo.width <= 0 || photo.height <= 0) return pl;
       if (pl.panX == null && pl.panY == null && pl.panScale == null && pl.panRotation == null) return pl;
 
@@ -716,7 +727,7 @@ export const pageLayoutService = {
   },
 
   convertPageToGooglePhotos(pageIndex: number): boolean {
-    const { pages, albumSize, pageMargin, slotGap } = useEditorStore.getState();
+    const { pages, albumSize, pageMargin, slotGap, defaultSlotCornerRadius } = useEditorStore.getState();
     const page = pages[pageIndex];
     if (!page || !albumSize) return false;
 
@@ -760,6 +771,7 @@ export const pageLayoutService = {
       np[pageIndex] = {
         ...page,
         templateId: GOOGLE_PHOTOS_TEMPLATE_ID,
+        slotCornerRadius: defaultSlotCornerRadius, // 转智能布局页统一采用全局默认圆角（2026-08-31）
         placements: regen.placements,
         slotOverrides: regen.slotOverrides,
         googlePhotosMmLayout: regen.mmLayout,

@@ -753,7 +753,7 @@ export function scheduleAutoSave(delayMs = 5000): void {
   autoSaveTimer = setTimeout(async () => {
     try {
       if (!autoSaveProvider) return;
-      const { pages, photos, guideLines, dirtyPhotoIds, clearDirtyPhotoIds } = autoSaveProvider();
+      const { pages, guideLines, dirtyPhotoIds, clearDirtyPhotoIds } = autoSaveProvider();
       if (pages.length > 0) {
         const projectId = getCurrentProjectId();
         if (projectId) {
@@ -768,11 +768,32 @@ export function scheduleAutoSave(delayMs = 5000): void {
           // 删除由 removePhoto 即时持久化；全量兜底由手动保存/返回主页的 savePhotos 完成。
           if (dirtyPhotoIds.length > 0) {
             const dirtySet = new Set(dirtyPhotoIds);
-            const dirtyPhotos = photos.filter((p) => dirtySet.has(p.id));
+            // P0-fix（丢失更新竞态）：loadProject/saveProject 的 await 窗口内用户可能
+            // 继续编辑照片（updatePhoto 会产生新对象）。写盘前重新拉取最新照片，
+            // 避免把 tick 开始时的陈旧快照写入 DB。
+            const fresh = autoSaveProvider?.();
+            const dirtyPhotos = fresh
+              ? fresh.photos.filter((p) => dirtySet.has(p.id))
+              : [];
             if (dirtyPhotos.length > 0) {
               await savePhotoChanges(dirtyPhotos, projectId);
             }
-            clearDirtyPhotoIds(dirtyPhotoIds);
+            // P0-fix：清除脏标记前做「引用比较」守卫。
+            // 保存期间再次被编辑的照片（updatePhoto 生成新对象，引用已变）不清除，
+            // 保留到下一轮 tick 重写，避免「保存中编辑 → 脏标记被清 → 新内容永不落盘」。
+            // 照片已被删除（不在最新列表中）时无需再保存，直接清除。
+            const current = autoSaveProvider?.();
+            if (fresh && current) {
+              const savedRefById = new Map(fresh.photos.map((p) => [p.id, p] as const));
+              const currentById = new Map(current.photos.map((p) => [p.id, p] as const));
+              const idsToClear = dirtyPhotoIds.filter((id) => {
+                const cur = currentById.get(id);
+                return cur === undefined || cur === savedRefById.get(id);
+              });
+              if (idsToClear.length > 0) {
+                clearDirtyPhotoIds(idsToClear);
+              }
+            }
           }
           // 保存成功：清零失败计数、恢复 UI 提示，并异步写灾难恢复快照
           if (consecutiveFailures > 0) {
@@ -780,7 +801,9 @@ export function scheduleAutoSave(delayMs = 5000): void {
             autoSaveStatusHandler?.(false);
           }
           if (updated) {
-            void writeProjectSnapshot(projectId, updated, photos.map((p) => cleanPhotoForStorage(p)));
+            // P0-fix：快照改用最新照片而非 tick 开始时的快照
+            const latest = autoSaveProvider?.();
+            void writeProjectSnapshot(projectId, updated, (latest?.photos ?? []).map((p) => cleanPhotoForStorage(p)));
           }
         }
       }

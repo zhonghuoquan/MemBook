@@ -10,10 +10,10 @@
  * - 点击选中、拖拽移动
  * - 选中态虚线边框
  */
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Group, Rect, Image as KonvaImage, Circle, Line, Text } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import type Konva from 'konva';
+import Konva from 'konva';
 import { useUIStore } from '../../../store';
 import { useStickerImage } from '../../../hooks/useStickerSrc';
 import type { StickerElement } from '../../../types';
@@ -38,6 +38,12 @@ function StickerNodeImpl({
   /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
   alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
+  // P0-fix：拖拽/旋转中节点被卸载（删除元素/Ctrl+Z/切页/切模板）时手柄的 onUp 永不执行，
+  // stage.on('mousemove.resize'/'mouseup.resize') 命名空间监听器残留在 Stage 上并持续
+  // 空转触发 store 无谓更新，直至下一次 mouseup。卸载时统一清理（同一时刻仅有一个手柄拖拽，安全）。
+  useEffect(() => () => {
+    for (const s of Konva.stages) s.off('mousemove.resize mouseup.resize');
+  }, []);
   const px = sticker.x * mmToPx;
   const py = sticker.y * mmToPx;
   // 本地包装：注入本元素 id，内部既有调用点签名不变；useCallback 保证引用稳定，

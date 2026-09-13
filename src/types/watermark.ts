@@ -14,10 +14,11 @@ export type WatermarkSettings = {
   locationGranularity: LocationGranularity;
 };
 
+/** 默认开启时间水印（激活用户）；未激活走 license 强制关闭，不产生未授权显示。地点精细度默认「详细」。 */
 export const DEFAULT_WATERMARK_SETTINGS: WatermarkSettings = {
-  enabled: false,
+  enabled: true,
   showDate: true,
   showLocation: true,
   includeModified: true,
-  locationGranularity: 'standard',
+  locationGranularity: 'detailed',
 };

@@ -284,6 +284,11 @@ interface RenderOptions {
   /** 绘制时间水印时使用的相册页数组（需与 pageIndex 对应）。
    *  默认用全局 store 的 pages；探索：预览/主页渲染非 store 相册时显式传入以保证水印日期地点正确。 */
   watermarkPages?: AlbumPage[];
+  /** 输出编码格式（默认 'png'）。预览页设为 'jpeg'：体积缩小 5-10 倍，
+   *  大幅降低 pageImages 长字符串与翻页书重解码的内存/传输开销（300+ 页防 OOM）。 */
+  format?: 'png' | 'jpeg';
+  /** JPEG 质量（0-1，默认 0.85），仅 format==='jpeg' 时生效 */
+  quality?: number;
 }
 
 /**
@@ -382,7 +387,11 @@ export function renderPageThumbnail(
   // 避免异常导致整个渲染流程中断、thumbnailUrl 保持 null 导致页面空白
   let dataURL: string;
   try {
-    dataURL = canvas.toDataURL('image/png');
+    if (options?.format === 'jpeg') {
+      dataURL = canvas.toDataURL('image/jpeg', options?.quality ?? 0.85);
+    } else {
+      dataURL = canvas.toDataURL('image/png');
+    }
   } catch {
     return null;
   }

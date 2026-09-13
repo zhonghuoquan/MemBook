@@ -12,10 +12,10 @@
  * 坐标约定：shape.x/y 为页面内中心点（mm），width/height 为外形包围盒尺寸（mm）。
  * Group 无 offset，子元素以 -pw/2 绘于中心两侧，Konva 缩放/旋转以 Group 原点 = 形状中心为基准。
  */
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Group, Rect, Circle, Line, Text } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import type Konva from 'konva';
+import Konva from 'konva';
 import { useUIStore } from '../../../store';
 import type { ShapeElement } from '../../../types';
 import type { AlignBounds } from '../../../engine/alignment-engine';
@@ -46,6 +46,12 @@ function ShapeNodeImpl({
   /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
   alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
+  // P0-fix：拖拽/旋转中节点被卸载（删除元素/Ctrl+Z/切页/切模板）时手柄的 onUp 永不执行，
+  // stage.on('mousemove.resize'/'mouseup.resize') 命名空间监听器残留在 Stage 上并持续
+  // 空转触发 store 无谓更新，直至下一次 mouseup。卸载时统一清理（同一时刻仅有一个手柄拖拽，安全）。
+  useEffect(() => () => {
+    for (const s of Konva.stages) s.off('mousemove.resize mouseup.resize');
+  }, []);
   const px = shape.x * mmToPx;
   const py = shape.y * mmToPx;
   // 本地包装：注入本元素 id，内部既有调用点签名不变；useCallback 保证引用稳定，

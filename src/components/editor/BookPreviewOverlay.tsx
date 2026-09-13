@@ -150,8 +150,8 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
   const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
   // 用户在翻页书就绪前点击封面/封底 → 就绪后自动翻开（不再静默忽略点击）
   const pendingOpenRef = useRef(false);
-  // 批次渲染完成待热替换：翻页进行中（changeState ≠ 'read'）时延后到静止再 updateFromImages
-  const pendingUpdateRef = useRef(false);
+  // 翻页交互进行中（'user_fold'/'fold_corner'/'flipping'）：供后台空闲渲染调度器跳过渲染，保证翻页动画不被抢占
+  const isFlippingRef = useRef(false);
   // 当前翻页书页面图片数组（未渲染部分为加载占位；批次完成后整体热替换）
   const pageImagesRef = useRef<string[]>([]);
 
@@ -184,18 +184,6 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
     }, 550);
   };
 
-  // 批次渲染完成 → 把最新页面图片数组热替换进翻页书（PageFlip.updateFromImages）。
-  // 若用户正在翻页（拖角/翻动中），先标记 pending，等 changeState 回到 'read' 再替换，避免打断翻页动画。
-  const flushPendingUpdate = () => {
-    const flip = flipRef.current;
-    if (!flip) return;
-    if ((flip as any).getState?.() !== 'read') { pendingUpdateRef.current = true; return; }
-    pendingUpdateRef.current = false;
-    try {
-      flip.updateFromImages(pageImagesRef.current);
-    } catch { /* 忽略热替换失败 */ }
-  };
-
   // 打开时渲染封面/封底真实页面 + 内容页，初始化翻页书
   useEffect(() => {
     if (!open) return;
@@ -210,7 +198,7 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
     setBackImage(null);
     setRenderProgress(null);
     pendingOpenRef.current = false;
-    pendingUpdateRef.current = false;
+    isFlippingRef.current = false;
 
     const boot = async () => {
       // 显式传入相册尺寸给渲染引擎：冷启动时全局 store 的 albumSize 为 null，
@@ -257,7 +245,7 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
 
       // 渐进式渲染第一步：只渲染首屏对开附近的前 N 张内容页，即可创建翻页书 → 点封面马上能进翻页
       const FIRST_BATCH = 8;
-      let renderedCount = 0; // 已渲染内容页数（累计，跨批次进度）
+      let renderedCount = 0; // 已渲染内容页数（累计）
       const report = (doneInBatch: number) => {
         if (cancelled) return;
         setRenderProgress({ done: Math.min(renderedCount + doneInBatch, content.length), total: content.length });
@@ -302,7 +290,7 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
           useMouseEvents: true,
           disableFlipByClick: false,
         });
-        // 先加载当前快照（首批真实 + 其余占位），后续批次经 updateFromImages 热替换
+        // 先加载当前快照（首批真实 + 其余占位），后续逐页渲染完成后经 swapPageImage 单页局部热替换
         flip.loadFromImages([...pageImages]);
       } catch (err) {
         console.warn('[BookPreview] 翻页书初始化失败', err);
@@ -320,17 +308,24 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
         if (cancelled) return;
         const raw = e?.data;
         const page = typeof raw === 'number' ? raw : raw?.page;
-        if (typeof page === 'number' && Number.isFinite(page)) setPageIndex(page);
+        if (typeof page === 'number' && Number.isFinite(page)) {
+          setPageIndex(page);
+          // 内存窗口随当前页滑动：翻到哪就把解码窗口挪到哪（释放远处、按需解码附近）
+          currentPageSlot = page;
+          window.setTimeout(applyDecodeWindow, 0);
+          // 位置驱动渲染：翻页/跳页后重新划定前向渲染窗口并继续填充（跳页会乱序渲目标页+前向段）
+          scheduleFill();
+        }
       });
 
       // 翻页交互状态：'read'（静止）| 'user_fold'/'fold_corner'（拖角）| 'flipping'（翻动中）
-      // 翻动中隐藏书脊沟槽阴影（gutter 在画布之上，避免压住翻起页穿模），静止后淡入还原；
-      // 静止时若有待热替换的批次（翻页中完成渲染的），立即执行，避免打断翻页动画。
+      // 翻动中隐藏书脊沟槽阴影（gutter 在画布之上，避免压住翻起页穿模），静止后淡入还原
       flip.on('changeState', (e: FlipEvent) => {
         if (cancelled) return;
         const state = e?.data as unknown as string | undefined;
         setFlipping(state !== 'read');
-        if (state === 'read' && pendingUpdateRef.current) flushPendingUpdate();
+        // 同步翻页进行态，供后台空闲渲染调度器跳过渲染（翻页动画优先于填充加载页）
+        isFlippingRef.current = state !== 'read';
       });
 
       // 响应式尺寸：wrapper 宽度随视口/容器变化，重新触发自动尺寸适配，并重挂缓冲
@@ -357,17 +352,121 @@ export function BookPreviewOverlay({ open, onClose, pages: externalPages, albumS
         window.setTimeout(openFlipBook, 60);
       }
 
-      // 渐进式渲染第二步：其余页面后台分批渲染（每批让出主线程 + 报告进度），
-      // 完成后整体热替换进翻页书（翻页进行中延后，静止后 flushPendingUpdate 生效）。
-      for (let start = FIRST_BATCH; start < content.length && !cancelled; start += FIRST_BATCH) {
-        const batchImages = await renderPageBatch(content.slice(start, start + FIRST_BATCH), photos, renderAlbumSize, pages, report);
+      // 渐进式渲染第二步：其余页面用「空闲调度 + 逐页渲染」填充。
+      // 用 requestIdleCallback（空闲回调，优先级最低）每空闲渲染一页：
+      //   - 翻页动画由 requestAnimationFrame 驱动、优先级高于 idle，翻页时浏览器忙 → idle 不触发 → 不抢占动画；
+      //   - 另以 isFlippingRef 显式门控，翻页进行时跳过本页渲染，保证翻动已生成页不卡；
+      //   - 照片经共享 imgCache 跨页复用，减少重复读库/解码。
+      // 渲染完成先落库为 JPEG dataURL，仅当处于解码窗口内才 decodeSlot 单页热替换
+      // （无整本重绘、无闪烁；窗口外页待翻到附近再按需解码），详见下方内存窗口说明。
+      const reqIdle = (cb: () => void) => {
+        const sch = (window as any).requestIdleCallback;
+        if (sch) sch(cb, { timeout: 800 });
+        else setTimeout(cb, 16);
+      };
+      // 每轮 boot 局部共享照片缓存，跨后台逐页增量复用（整本预览期间不释放，避免重复解码）
+      const imgCache = new Map<string, HTMLImageElement | ImageBitmap>();
+
+      // ── 内存窗口（防 300+ 页 OOM）──────────────────────────────
+      // 原因：PageFlip 每页对象的 image 是完整解码位图（960px 约 3-4MB/页）。若后台把全部页都解码并
+      //  永久挂到页对象上，300+ 页会累积到 GB 级触发 "Out of Memory"。故只保留「当前对开 ±WINDOW」页的
+      //  解码图；窗口外页落到一个共享轻量占位图并丢其解码图引用（GC 回收）；用户翻到附近再按需从缓存的
+      //  JPEG dataURL 重新解码填回。沿用方案A1「直改页对象 image/isLoad + 持续 rAF 下一帧显示」的单页热替换。
+      const WINDOW = 30;                       // 每侧保留的已解码页数（总约 2×WINDOW+1 页落地解码）
+      let currentPageSlot = 1;                 // 当前所在页槽位（pageImages 下标），随翻页更新
+      let decodedSlots = new Set<number>(      // 已在翻页书中解码为真实内容的槽位（窗口管理用）
+        Array.from({ length: FIRST_BATCH }, (_, k) => k + 1), // 首批经 loadFromImages 已是真实图
+      );
+      let lightImage: HTMLImageElement | null = null; // 复用的窗口外占位图（共享轻量，替代被释放的大图）
+      const getPageObj = (slot: number) =>
+        (flipRef.current as unknown as { pages?: { getPage?: (i: number) => { image?: HTMLImageElement; isLoad?: boolean } | undefined } } | null)
+          ?.pages?.getPage?.(slot);
+      const getLight = () => {
+        if (!lightImage) { lightImage = new Image(); lightImage.src = LOADING_PAGE_DATAURL; }
+        return lightImage;
+      };
+      // 把槽位解码为真实图并写入翻页书页对象（会话守卫：cancelled 后 onload 不再写回，防重入污染）
+      const decodeSlot = (slot: number, url: string) => {
+        if (cancelled || decodedSlots.has(slot)) return;
+        if (!getPageObj(slot)) return;
+        const imgEl = new Image();
+        imgEl.onload = () => {
+          try {
+            if (cancelled) return;
+            const p = getPageObj(slot);
+            if (p) { p.image = imgEl; p.isLoad = true; decodedSlots.add(slot); }
+          } catch { /* 忽略 */ }
+        };
+        imgEl.src = url;
+      };
+      // 释放窗口外已解码页：置共享占位图，丢弃大解码位图引用供 GC 回收
+      const releaseSlot = (slot: number) => {
+        const p = getPageObj(slot);
+        if (!p) return;
+        try { p.image = getLight(); p.isLoad = true; } catch { /* 忽略 */ }
+        decodedSlots.delete(slot);
+      };
+      // 按当前页应用解码窗口：窗口外置占位并释放，窗口内未解码的已渲染页重新解码
+      function applyDecodeWindow() {
         if (cancelled) return;
-        for (let k = 0; k < batchImages.length; k++) pageImages[start + 1 + k] = batchImages[k];
-        renderedCount += batchImages.length;
-        pageImagesRef.current = pageImages;
-        flushPendingUpdate();
+        const lo = currentPageSlot - WINDOW;
+        const hi = currentPageSlot + WINDOW;
+        for (const s of [...decodedSlots]) {
+          if (s < lo || s > hi) releaseSlot(s);
+        }
+        for (let s = Math.max(0, lo); s <= Math.min(pageImages.length - 1, hi); s++) {
+          if (decodedSlots.has(s)) continue;
+          const url = pageImages[s];
+          if (url && url !== LOADING_PAGE_DATAURL) decodeSlot(s, url);
+        }
       }
-      if (!cancelled) setRenderProgress(null);
+
+      // ── 位置驱动 + 前向乱序渲染（防 300+ 页 OOM，行业主流按视口渲染）──────────
+      // 顺序游标（nextIdx 逐页全量填充）会在整本预览时把用户没看的页也全渲染，
+      // 300+ 页仍会 OOM。改为"以当前位置为中心"：只渲染 [当前页, 当前页+RENDER_AHEAD]
+      // 区间内未渲染的页；区间内已渲染完则暂停（不预渲染远处页）。
+      // 位置变化（翻页 or 跳页码都走 pf.flip → 'flip' 事件）会更新 currentPageSlot 并再次调度，
+      // 因此跳页会乱序立即渲染目标页+前向一段，中间页完全不渲染。
+      const RENDER_AHEAD = 40;                       // 当前页前向预渲染的内容页数
+      let renderedContent = new Set<number>(         // 已渲染的内容索引集合（乱序）
+        Array.from({ length: FIRST_BATCH }, (_, k) => k), // 首屏前 N 张已在首批渲染
+      );
+      let renderScheduled = false;                   // idle 循环互斥，防同帧重复入队
+      const scheduleFill = () => {
+        if (cancelled || renderScheduled) return;
+        renderScheduled = true;
+        reqIdle(() => {
+          renderScheduled = false;
+          if (cancelled) return;
+          // 翻页中：暂停，等静止后下一空闲再续（防抖，翻页动画优先于填充加载页）
+          if (isFlippingRef.current) { scheduleFill(); return; }
+          // 当前内容索引 = currentPageSlot - 1（pageImages 槽位），前向边界 = +RENDER_AHEAD
+          const cur = Math.max(0, currentPageSlot - 1);
+          const ahead = Math.min(content.length - 1, cur + RENDER_AHEAD);
+          let next = -1;
+          for (let c = cur; c <= ahead; c++) if (!renderedContent.has(c)) { next = c; break; }
+          if (next < 0) {
+            // 前向窗口内均已渲染 → 暂停（不再预渲染用户没看的远页）
+            if (!cancelled) setRenderProgress(null);
+            return;
+          }
+          const item = content[next];
+          const slot = next + 1; // 内容索引 → pageImages 槽位
+          renderPreviewContentPage(item.p, item.i, photos, imgCache, pages, renderAlbumSize).then((img) => {
+            if (cancelled) return;
+            pageImages[slot] = img;
+            renderedContent.add(next);
+            renderedCount += 1;
+            setRenderProgress({ done: Math.min(renderedCount, content.length), total: content.length });
+            pageImagesRef.current = pageImages;
+            // 仅在解码窗口内做单页热替换（直改页对象 image 字段，PageFlip 持续 rAF 下一帧显示，
+            // 无整本重绘、无闪烁，方案A1）。窗口外页只落库 dataURL，待翻到附近经 applyDecodeWindow 按需解码。
+            if (slot >= currentPageSlot - WINDOW && slot <= currentPageSlot + WINDOW) decodeSlot(slot, img);
+            scheduleFill();
+          });
+        });
+      };
+      reqIdle(scheduleFill);
     };
 
     boot();
@@ -930,7 +1029,7 @@ async function renderSinglePage(
         photos,
         1,
         photoImages,
-        { baseWidth: 1440, noCache: true, cacheSuffix: 'book-cover', albumSize },
+        { baseWidth: 960, noCache: true, cacheSuffix: 'book-cover', albumSize, format: 'jpeg', quality: 0.85 },
         stickerImages,
         bgBitmap ?? undefined,
       );
@@ -957,6 +1056,7 @@ async function resolvePhotoSrc(
   readPhotoFromDB: (id: string) => Promise<string | null>,
   makeDirectPhotoUrl: (p: Photo) => Promise<string | null>,
   isBlobUrlAlive: (url: string) => boolean,
+  ownedUrls: Set<string>,
 ): Promise<string | null> {
   const aliveSrc = photo.src?.startsWith('data:')
     ? photo.src
@@ -979,7 +1079,8 @@ async function resolvePhotoSrc(
     if (photo.src?.startsWith('blob:') || photo.src?.startsWith('data:')) return photo.src;
     if (photo.relativePath) {
       const u = await withTimeout(readFileAsBlobUrl(photo.relativePath), 4000);
-      if (u) return u;
+      // P0-fix（内存泄漏）：fs 读取自建的 blob URL 记入 ownedUrls，preloadSharedPhotos 结束后统一 revoke
+      if (u) { ownedUrls.add(u); return u; }
     }
     return withTimeout(makeDirectPhotoUrl(photo), 4000);
   }
@@ -987,39 +1088,86 @@ async function resolvePhotoSrc(
 }
 
 /**
- * 一次性预加载所有页面用到的照片（去重共享）。
+ * 预加载页面用到的照片（去重共享）。
+ * 传入共享缓存 `shared`（如预览后台渲染逐页复用的缓存 Map）时：
+ *  - 已缓存的照片直接跳过，不再重复读库/解码；
+ *  - 缺失的照片加载后写入 `shared`，跨页/跨批复用（降低后台渲染负载）。
  * 每张照片用带超时的 loadImage 加载，失败/超时则跳过，绝不阻塞整体渲染。
  */
 async function preloadSharedPhotos(
   pages: AlbumPage[],
   photos: Photo[],
+  shared?: Map<string, HTMLImageElement | ImageBitmap>,
+  targetWidth?: number,
 ): Promise<Map<string, HTMLImageElement | ImageBitmap>> {
+  const cache = shared ?? new Map<string, HTMLImageElement | ImageBitmap>();
   const neededIds = new Set<string>();
   for (const p of pages) {
     for (const pl of p.placements) if (pl.photoId) neededIds.add(pl.photoId);
   }
-  if (neededIds.size === 0) return new Map();
+  // 共享缓存命中则跳过，跨批次增量复用（2026-09-11：预览后台渲染逐页缓存，避免重复解码）
+  for (const id of [...neededIds]) if (cache.has(id)) neededIds.delete(id);
+  if (neededIds.size === 0) return cache;
   const needed = photos.filter((p) => neededIds.has(p.id));
-  if (needed.length === 0) return new Map();
+  if (needed.length === 0) return cache;
 
-  const result = new Map<string, HTMLImageElement | ImageBitmap>();
   const { readPhotoFromDB, makeDirectPhotoUrl, isBlobUrlAlive } = await import('../../engine/storage-engine');
-
-  await Promise.all(
-    needed.map(async (photo) => {
-      try {
-        const src = await resolvePhotoSrc(photo, readPhotoFromDB, makeDirectPhotoUrl, isBlobUrlAlive);
-        if (!src) return;
-        // 只接受 dataURL/blob（同源，可直接绘制）；其他（如 asset://）通过文件读取已转 blob
-        const img = await withTimeout(loadImage(src, { timeout: 5000 }), 5000);
-        if (!img || img.naturalWidth === 0) return;
-        result.set(photo.id, img);
-      } catch {
-        // 单张照片失败跳过，不阻塞整体
-      }
-    }),
-  );
-  return result;
+  // P0-fix（内存泄漏）：fs 读取自建的 blob URL 集中收集，所有图片加载完成后统一 revoke。
+  // HTMLImageElement/ImageBitmap 加载完成后已持有解码数据，revoke 不影响后续翻页绘制；
+  // effect 重建（尺寸/页数变化）时旧 URL 不再堆积。
+  const ownedUrls = new Set<string>();
+  try {
+    await Promise.all(
+      needed.map(async (photo) => {
+        try {
+          const src = await resolvePhotoSrc(photo, readPhotoFromDB, makeDirectPhotoUrl, isBlobUrlAlive, ownedUrls);
+          if (!src) return;
+          // 只接受 dataURL/blob（同源，可直接绘制）；其他（如 asset://）通过文件读取已转 blob
+          const img = await withTimeout(loadImage(src, { timeout: 5000 }), 5000);
+          if (!img || img.naturalWidth === 0) return;
+          // 方案A（2026-09-11）：立即解码为 ImageBitmap 再入缓存。
+          // 原因：fs 照片经 makeDirectPhotoUrl 生成的 blob URL 在下文 finally 会被 revoke；
+          //   大图/WebView2 下 HTMLImageElement 可能延迟解码并仍引用该 URL，revoke 后再 drawImage
+          //   画不出 → 产出"纯白"dataURL（固定某几页白屏）。ImageBitmap 已持有解码像素、与 URL 解耦，
+          //   后续绘制不再受 revoke 影响。解码失败则回退原 img（HTMLImageElement）。
+          let cached: HTMLImageElement | ImageBitmap = img;
+          if (img instanceof ImageBitmap) {
+            cached = img;
+          } else if (typeof createImageBitmap === 'function') {
+            try {
+              // 按预览显示宽度缩放后再入缓存：相机原图可达数十 MB/张，300+ 页整本预览若全部原图
+              // 常驻解码必 OOM。预览渲染 baseWidth=960，故照片 downscale 到 ≤targetWidth（显示宽）；
+              // 比 targetWidth 小的图保持原尺寸，避免放大糊化。targetWidth 缺省不缩放（保原尺寸）。
+              const scale = targetWidth ? Math.min(1, targetWidth / img.naturalWidth) : 1;
+              const rw = Math.max(1, Math.round(img.naturalWidth * scale));
+              const rh = Math.max(1, Math.round(img.naturalHeight * scale));
+              const bmp = await createImageBitmap(img, { resizeWidth: rw, resizeHeight: rh });
+              if (bmp.width > 0 && bmp.height > 0) cached = bmp;
+            } catch { /* 解码失败，保留原 HTMLImageElement */ }
+          }
+          cache.set(photo.id, cached);
+        } catch {
+          // 单张照片失败跳过，不阻塞整体
+        }
+      }),
+    );
+  } finally {
+    for (const u of ownedUrls) {
+      try { URL.revokeObjectURL(u); } catch { /* noop */ }
+    }
+  }
+  // 防 OOM：共享照片缓存存的是原始照片解码位图（相机原图可达数十 MB/张），
+  // 300+ 页整本预览若全部常驻必爆内存。按 FIFO 逐出最早插入、超上限即释放（ImageBitmap.close()）。
+  // 已绘成页面的 JPEG dataURL 与显示无关，逐出后未来页面再需要时会重新读库/解码（自愈）。
+  const MAX_PHOTO_CACHE = 80;
+  while (cache.size > MAX_PHOTO_CACHE) {
+    const first = cache.keys().next().value as string | undefined;
+    if (first === undefined) break;
+    const v = cache.get(first);
+    cache.delete(first);
+    if (v instanceof ImageBitmap) { try { v.close(); } catch { /* noop */ } }
+  }
+  return cache;
 }
 
 /**
@@ -1037,7 +1185,7 @@ async function renderPageBatch(
   onPage?: (doneInBatch: number) => void,
 ): Promise<string[]> {
   if (items.length === 0) return [];
-  const allPhotoImages = await preloadSharedPhotos(items.map((c) => c.p), photos);
+  const allPhotoImages = await preloadSharedPhotos(items.map((c) => c.p), photos, undefined, 960);
   try {
     const results: string[] = [];
     for (let idx = 0; idx < items.length; idx++) {
@@ -1051,17 +1199,17 @@ async function renderPageBatch(
             photos,
             1,
             allPhotoImages,
-            { baseWidth: 1440, noCache: true, cacheSuffix: 'book-preview', albumSize, pageIndex: i, watermarkPages },
+            { baseWidth: 960, noCache: true, cacheSuffix: 'book-preview', albumSize, pageIndex: i, watermarkPages, format: 'jpeg', quality: 0.85 },
             stickerImages,
             bgBitmap ?? undefined,
           );
-          results.push(img ?? BLANK_PAGE_DATAURL);
+          results.push(img ?? LOADING_PAGE_DATAURL);
         } finally {
           releaseStickerImages(stickerImages);
           if (bgBitmap instanceof ImageBitmap) bgBitmap.close();
         }
       } catch {
-        results.push(BLANK_PAGE_DATAURL);
+        results.push(LOADING_PAGE_DATAURL);
       }
       // 让出主线程：避免整批同步绘制卡死界面，也便于进度条刷新
       await new Promise((r) => setTimeout(r, 0));
@@ -1073,9 +1221,51 @@ async function renderPageBatch(
   }
 }
 
-/** 渲染失败时的空白页面占位（避免翻页书缺页） */
-const BLANK_PAGE_DATAURL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+/**
+ * 渲染单个内容页成翻页书图片，供后台「逐页 + 空闲调度」复用。
+ * 照片经共享 `imgCache` 增量加载并跨页复用（避免每页重复读库/解码）；
+ * 与 renderPageBatch 的单页渲染逻辑等价，但照片缓存生命周期更长（跨后台逐页）。
+ */
+async function renderPreviewContentPage(
+  p: AlbumPage,
+  pageIndex: number,
+  photos: Photo[],
+  imgCache: Map<string, HTMLImageElement | ImageBitmap>,
+  watermarkPages: AlbumPage[],
+  albumSize: { width: number; height: number } | undefined,
+): Promise<string> {
+  try {
+    await preloadSharedPhotos([p], photos, imgCache, 960);
+    // 方案B（2026-09-11）：渲染前校验本页所需全部照片已在缓存且可绘制，缺失/无效则返回灰占位，
+    // 绝不产出"纯白"dataURL（避免固定某几页翻页白屏）。
+    for (const pl of p.placements) {
+      if (!pl.photoId) continue;
+      const img = imgCache.get(pl.photoId);
+      if (!img) return LOADING_PAGE_DATAURL;
+      const effW = img instanceof ImageBitmap ? img.width : img.naturalWidth;
+      if (!effW || effW === 0) return LOADING_PAGE_DATAURL;
+    }
+    const stickerImages = await preloadStickers(p);
+    const bgBitmap = p.backgroundImage ? await loadBackgroundBitmap(p.backgroundImage) : null;
+    try {
+      return renderPageThumbnail(
+        p,
+        photos,
+        1,
+        imgCache,
+        { baseWidth: 960, noCache: true, cacheSuffix: 'book-preview', albumSize, pageIndex, watermarkPages, format: 'jpeg', quality: 0.85 },
+        stickerImages,
+        bgBitmap ?? undefined,
+      ) ?? LOADING_PAGE_DATAURL;
+    } finally {
+      releaseStickerImages(stickerImages);
+      if (bgBitmap instanceof ImageBitmap) bgBitmap.close();
+    }
+  } catch {
+    // 渲染失败兜底：用浅灰占位而非透明图，避免翻页时页面突然白屏（2026-09-11）
+    return LOADING_PAGE_DATAURL;
+  }
+}
 
 /** 渐进式渲染中尚未渲染完成的内容页占位（浅灰加载页），后台批次渲染完成后由真实页热替换 */
 const LOADING_PAGE_DATAURL =

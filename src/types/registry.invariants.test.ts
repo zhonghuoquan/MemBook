@@ -23,6 +23,7 @@ import {
   GOOGLE_PHOTOS_TEMPLATE_ID,
   findTemplateById,
   normalizeSlotCornerRadius,
+  DEFAULT_SLOT_CORNER_RADIUS,
   DEFAULT_WATERMARK_SETTINGS,
   DEFAULT_TEXT_LINE_HEIGHT,
   DEFAULT_SHAPE_STYLE,
@@ -69,7 +70,8 @@ describe('types 基础层不变量', () => {
   });
 
   it('normalizeSlotCornerRadius 归一化', () => {
-    expect(normalizeSlotCornerRadius(undefined)).toBe(2);
+    // 缺省回退到全局默认圆角（DEFAULT_SLOT_CORNER_RADIUS），而非硬编码 2（2026-08-30 修复一键成册圆角脱钩）
+    expect(normalizeSlotCornerRadius(undefined)).toBe(DEFAULT_SLOT_CORNER_RADIUS);
     expect(normalizeSlotCornerRadius(4)).toBe(4);
     const avg = normalizeSlotCornerRadius([6, 10, 14, 18] as never);
     expect(avg).toBe((6 + 10 + 14 + 18) / 4);
@@ -94,9 +96,9 @@ describe('types 基础层不变量', () => {
   });
 
   it('水印默认设置形状正确', () => {
-    expect(DEFAULT_WATERMARK_SETTINGS.enabled).toBe(false);
+    expect(DEFAULT_WATERMARK_SETTINGS.enabled).toBe(true);
     expect(DEFAULT_WATERMARK_SETTINGS.showDate).toBe(true);
     expect(DEFAULT_WATERMARK_SETTINGS.showLocation).toBe(true);
-    expect(['coarse', 'standard', 'detailed']).toContain(DEFAULT_WATERMARK_SETTINGS.locationGranularity);
+    expect(DEFAULT_WATERMARK_SETTINGS.locationGranularity).toBe('detailed');
   });
 });

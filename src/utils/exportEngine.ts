@@ -19,7 +19,7 @@ import { makeDirectPhotoUrl, readPhotoFromDB } from '../engine/storage-engine';
 import { invalidateBlobUrlCache } from '../engine/storage/import-store';
 import { SLOT_CANVAS_PALETTE, SLOT_BORDER_COLORS } from '../constants/templatePalette';
 import { toRgba, linearGradientEndpoints } from '../constants/colorPalette';
-import { isTauri, loadImage, readFileAsBlobUrl, saveFile, type SaveFileResult } from './tauri';
+import { isTauri, loadImage, readFileAsBlobUrl, saveFile } from './tauri';
 import {
   MM_TO_PX,
   getSlotRect,
@@ -34,7 +34,6 @@ import { createTextureCanvas, MIN_STROKE_WIDTH } from '../components/editor/canv
 import {
   resolveTemplate,
   isCoverPage,
-  isBackCoverPage,
 } from '../types';
 import {
   shouldShowWatermark,
@@ -192,7 +191,7 @@ function isCanvasSafeUrl(url: string): boolean {
  * - 纯文件名/相对路径 → 尝试用 photo.relativePath 读取
  * - 失败时返回 null
  */
-async function ensureCanvasSafeUrl(src: string, photo?: Photo): Promise<string | null> {
+async function ensureCanvasSafeUrl(src: string, photo: Photo | undefined, ownedUrls: Set<string>): Promise<string | null> {
   if (isCanvasSafeUrl(src)) return src;
 
   // Tauri 桌面端：本地绝对路径或 asset:// 文件，用 fs 读取为 blob
@@ -226,7 +225,8 @@ async function ensureCanvasSafeUrl(src: string, photo?: Photo): Promise<string |
 
     if (/^[a-zA-Z]:[\\/]|^\//.test(filePath)) {
       const blobUrl = await readFileAsBlobUrl(filePath);
-      if (blobUrl) return blobUrl;
+      // P0-fix（内存泄漏）：fs 读取自建的 blob URL 记入 ownedUrls，由调用方统一 revoke
+      if (blobUrl) { ownedUrls.add(blobUrl); return blobUrl; }
     }
   }
 
@@ -237,7 +237,10 @@ async function ensureCanvasSafeUrl(src: string, photo?: Photo): Promise<string |
       if (!resp.ok) return null;
       const blob = await resp.blob();
       if (blob.size === 0) return null;
-      return URL.createObjectURL(blob);
+      // P0-fix（内存泄漏）：fetch 自建的 blob URL 记入 ownedUrls，由调用方统一 revoke
+      const objUrl = URL.createObjectURL(blob);
+      ownedUrls.add(objUrl);
+      return objUrl;
     } catch {
       logger.warn(`[Export] 无法获取远程图片: ${src.slice(0, 80)}`);
       return null;
@@ -253,7 +256,7 @@ async function ensureCanvasSafeUrl(src: string, photo?: Photo): Promise<string |
 
 /* ══════════════════════════ 照片预加载 ══════════════════════════ */
 
-async function resolvePhotoSrc(photo: Photo): Promise<string | null> {
+async function resolvePhotoSrc(photo: Photo, ownedUrls: Set<string>): Promise<string | null> {
   // 导出优先使用高清原图；旧数据没有 originalBlobId 时回退到 blobId/previewBlobId/src
   if (photo.storageMode === 'import') {
     const originalId = photo.originalBlobId || photo.blobId;
@@ -278,6 +281,8 @@ async function resolvePhotoSrc(photo: Photo): Promise<string | null> {
       const blobUrl = await readFileAsBlobUrl(photo.relativePath);
       if (blobUrl) {
         logger.debug(`[Export] resolvePhotoSrc import 使用本地文件 blob: ${photo.name}`);
+        // P0-fix（内存泄漏）：fs 读取自建的 blob URL 记入 ownedUrls，由调用方统一 revoke
+        ownedUrls.add(blobUrl);
         return blobUrl;
       }
       logger.warn(`[Export] import 模式 fs 读取失败，尝试回退 src: ${photo.name}, path=${photo.relativePath}`);
@@ -299,6 +304,8 @@ async function resolvePhotoSrc(photo: Photo): Promise<string | null> {
       const blobUrl = await readFileAsBlobUrl(photo.relativePath);
       if (blobUrl) {
         logger.debug(`[Export] resolvePhotoSrc direct 使用本地文件 blob: ${photo.name}`);
+        // P0-fix（内存泄漏）：fs 读取自建的 blob URL 记入 ownedUrls，由调用方统一 revoke
+        ownedUrls.add(blobUrl);
         return blobUrl;
       }
       logger.warn(`[Export] direct 模式 fs 读取失败，尝试回退 src: ${photo.name}, path=${photo.relativePath}`);
@@ -359,19 +366,32 @@ function downscaleIfNeeded(img: HTMLImageElement, maxDim: number): ExportImage {
 
 /** 加载单张照片（含 URL 重建重试与 Canvas 安全转换） */
 async function loadOnePhoto(photo: Photo, maxDim: number): Promise<ExportImage | null> {
+  // P0-fix（内存泄漏）：resolvePhotoSrc/ensureCanvasSafeUrl 的 fs/http 分支每次调用都会
+  // 自建新 blob URL（底层 Blob 即原图数据 3-10MB），此前全程不 revoke，导出 300 张原图
+  // ≈ 1-3GB 驻留。此处集中收集"本函数自建"的 URL，生命周期结束时统一 revoke。
+  // readPhotoFromDB 的 URL 由 blobUrlCache 全局管理、photo.src/makeDirectPhotoUrl 为
+  // 共享或缓存 URL，均不加入 ownedUrls，绝不误 revoke。
+  const ownedUrls = new Set<string>();
+  const revokeOwned = (url: string) => {
+    if (ownedUrls.delete(url)) {
+      try { URL.revokeObjectURL(url); } catch { /* noop */ }
+    }
+  };
   try {
-    let src = await resolvePhotoSrc(photo);
+    let src = await resolvePhotoSrc(photo, ownedUrls);
     if (!src) {
       logger.warn(`[Export] 无法解析照片源: ${photo.name} (id=${photo.id}, mode=${photo.storageMode})`);
       return null;
     }
 
     // 关键：导出用 Canvas 必须避免跨域污染，强制转换为同源 blob URL
-    const safeSrc = await ensureCanvasSafeUrl(src, photo);
+    const safeSrc = await ensureCanvasSafeUrl(src, photo, ownedUrls);
     if (!safeSrc) {
       logger.warn(`[Export] 照片 URL 无法转为 Canvas 安全 URL: ${photo.name}, src=${src.slice(0, 80)}`);
       return null;
     }
+    // 转换产生了新 URL 时，旧的自建 URL 不再需要，立即释放
+    if (safeSrc !== src) revokeOwned(src);
     src = safeSrc;
 
     let img: HTMLImageElement | undefined;
@@ -391,16 +411,17 @@ async function loadOnePhoto(photo: Photo, maxDim: number): Promise<ExportImage |
           if (photo.previewBlobId) invalidateBlobUrlCache(photo.previewBlobId);
         }
         // 尝试重新解析 URL（例如缓存的 blob URL 已失效）
-        const rebuilt = await resolvePhotoSrc(photo);
+        const rebuilt = await resolvePhotoSrc(photo, ownedUrls);
         if (!rebuilt) {
           logger.warn(`[Export] 照片 URL 重建失败，停止重试: ${photo.name}`);
           break;
         }
-        const rebuiltSafe = await ensureCanvasSafeUrl(rebuilt, photo);
+        const rebuiltSafe = await ensureCanvasSafeUrl(rebuilt, photo, ownedUrls);
         if (!rebuiltSafe || rebuiltSafe === src) {
           logger.warn(`[Export] 照片 URL 重建无变化，停止重试: ${photo.name}`);
           break;
         }
+        revokeOwned(src);
         src = rebuiltSafe;
       }
     }
@@ -419,13 +440,17 @@ async function loadOnePhoto(photo: Photo, maxDim: number): Promise<ExportImage |
   } catch (err) {
     logger.warn(`[Export] loadOnePhoto 异常: ${photo.name}`, err);
     return null;
+  } finally {
+    // img/Canvas 已加载完成并持有解码数据，自建 URL 的底层 Blob 不再被引用，统一释放
+    for (const u of [...ownedUrls]) revokeOwned(u);
   }
 }
 
 /**
  * 滑动窗口照片缓存：逐页加载、淘汰窗口外位图。
- * 位图是导出内存大头（12MP ≈ 48MB/张），淘汰引用后由 GC 回收；
- * blob URL 字符串不占多少内存，且 readPhotoFromDB 的 URL 被全局缓存，不可撤销。
+ * 位图是导出内存大头（12MP ≈ 48MB/张），淘汰引用后由 GC 回收。
+ * 自建 blob URL 的底层 Blob 同样占内存（原图 3-10MB/个），已在 loadOnePhoto
+ * 结束时统一 revoke；readPhotoFromDB 的 URL 由 blobUrlCache 全局管理，不在此 revoke。
  */
 export class SlidingPhotoCache {
   private cache = new Map<string, ExportImage>();
@@ -1469,8 +1494,6 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 export interface RenderPageOptions {
   /** 出血边（mm）：四周扩展出血，页面内容偏移到出血区外沿 */
   bleed?: number;
-  /** 书脊宽度（mm）：封面向右偏移半书脊、封底向左偏移半书脊，模拟装订翻阅观感 */
-  spineWidth?: number;
 }
 
 /** 页面导出的物理宽度（mm）计算来自共享 pageExportWidthMm（exportGeometry.ts，与测试同源） */
@@ -1484,7 +1507,6 @@ export async function renderPage(
 ): Promise<string> {
   const pageMM = getPageSizeMM();
   const bleed = opts.bleed ?? 0;
-  const bindingSpine = opts.spineWidth ?? 0;
   // 封面页：书脊背面 + 封面正面 印刷一体排布（无编辑器视觉间隙 SPINE_GAP_MM），
   // 画布逻辑宽度 += 书脊宽；封底无书脊
   const isCoverLike = isCoverPage(page);
@@ -1520,15 +1542,9 @@ export async function renderPage(
   const bleedPx = bleed * MM_TO_PX;
   ctx.translate(bleedPx, bleedPx);
 
-  // 装订偏移：封面向右、封底向左偏移半书脊（仅竖版书刊有意义，横版不偏移）
-  const bindingSpinePx = bindingSpine * MM_TO_PX;
-  if (bindingSpine > 0 && pageMM.w < pageMM.h) {
-    if (isCoverPage(page)) {
-      ctx.translate(bindingSpinePx / 2, 0);
-    } else if (isBackCoverPage(page)) {
-      ctx.translate(-bindingSpinePx / 2, 0);
-    }
-  }
+  // 移除「装订让位偏移」（封面右移 / 封底左移半书脊）：该偏移是印刷成书时的让位设计，
+  // 画布中并无此显示，导出若保留会让封底内容偏左、与画布不一致。为满足「所见即所得」，
+  // 全格式（PDF/JPG/PNG）统一去掉，封面/封底均按画布原样导出。（2026-09-10）
 
   // 书脊偏移（书脊向左扩展、封面内容固定）：整体平移 (书脊宽 - 锚点)，
   // 背景、书脊底色、内容、logo 同坐标系连续（背景铺满 [0, logicalW]，内容落于书脊之后）
@@ -1587,7 +1603,6 @@ export interface ExportResult {
 export async function exportToPDF(options: ExportOptions): Promise<ExportResult> {
   const { pageRange, dpi, projectName, outputPath, onProgress } = options;
   const bleed = options.bleed ?? 0;
-  const spine = options.spineWidth ?? 0;
   const pageMM = getPageSizeMM();
   const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
@@ -1642,7 +1657,7 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
       await sleep(0);
 
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed });
 
       // 直接用 data URL 添加到 PDF，避免 jsPDF 处理 HTMLImageElement 时同步阻塞或挂起
       const effW = pageExportWidthMm(page, pageMM, bleed);
@@ -1666,10 +1681,22 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
   if (task.isCancelled) { return { success: false, path: null, fileName: `${projectName}.pdf`, warnings: task.getWarnings(), cancelled: true }; }
 
   const arrBuf = pdf.output('arraybuffer') as ArrayBuffer;
-  const result = await saveFile(new Blob([arrBuf], { type: 'application/pdf' }), `${projectName}.pdf`, outputPath);
+  // PDF 是单文件且逐页 addImage（非 blobs+JSZip 那套 OOM 路径），无需拆多文件。
+  // 这里有给输出路径时直接一次性写盘，避免 saveFile 再把 Blob arrayBuffer 复制一整份（大 PDF 省一次整份拷贝）。
+  let path: string | null = null;
+  if (isTauri() && outputPath && outputPath.trim()) {
+    const fs = await import('@tauri-apps/plugin-fs');
+    const filePath = `${outputPath.replace(/[/\\]$/, '')}/${projectName}.pdf`;
+    await fs.writeFile(filePath, new Uint8Array(arrBuf));
+    path = filePath;
+  } else {
+    // 弹保存对话框 / 浏览器下载兜底
+    const result = await saveFile(new Blob([arrBuf], { type: 'application/pdf' }), `${projectName}.pdf`, outputPath);
+    path = result.path;
+  }
   return {
     success: true,
-    path: result.path,
+    path,
     fileName: `${projectName}.pdf`,
     warnings: task.getWarnings(),
     cancelled: false,
@@ -1683,7 +1710,6 @@ export async function exportToPDF(options: ExportOptions): Promise<ExportResult>
 export interface PdfOptions {
   grayscale?: boolean;
   bleed?: number;
-  spineWidth?: number;
   onProgress?: (current: number, total: number) => void;
 }
 
@@ -1696,7 +1722,6 @@ export async function generatePdfBlob(
 ): Promise<Blob> {
   const pageMM = getPageSizeMM();
   const bleed = printOpts?.bleed ?? 0;
-  const spine = printOpts?.spineWidth ?? 0;
   // 有出血时 PDF 页面向四周扩展出血边（印刷裁切用）
   const pdfH = pageMM.h + bleed * 2;
   const total = pageRange.end - pageRange.start + 1;
@@ -1735,7 +1760,7 @@ export async function generatePdfBlob(
       await sleep(0);
 
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      let jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
+      let jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed });
       if (grayscale) {
         jpgURL = await applyGrayscale(jpgURL);
       }
@@ -1778,7 +1803,6 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
   const { pageRange, dpi, projectName, outputPath, onProgress, pageNumberStart } = options;
   const pageStart = pageNumberStart ?? 1;
   const bleed = options.bleed ?? 0;
-  const spine = options.spineWidth ?? 0;
   const total = pageRange.end - pageRange.start + 1;
   const task = beginTask();
   const pageMM = getPageSizeMM();
@@ -1795,10 +1819,24 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
     .filter((p): p is Photo => !!p);
   await preheatContentAnalysis(Array.from(new Map(exportPhotosPng.map(p => [p.id, p])).values()));
   const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
-  const blobs: Blob[] = [];
-  const names: string[] = [];
+
+  // ── 方案A（同 JPG）：逐页直接写单个 PNG 文件，写一页释放一页内存，避免全量驻留 + JSZip OOM ──
+  // PNG 无损、单页体积大（300DPI 每张可达数 MB~十几 MB），全量累积极易爆内存。目标目录：
+  // 用户显式给 outputPath 时当目录；否则（Tauri）弹一次目录选择器；浏览器降级逐张下载。
+  const tauri = isTauri();
+  let outDir: string | null = outputPath && outputPath.trim() ? outputPath.replace(/[/\\]$/, '') : null;
+  if (tauri && !outDir) {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const dir = await open({ directory: true });
+    if (!dir) return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false };
+    outDir = dir as string;
+  }
+  const fs = tauri ? await import('@tauri-apps/plugin-fs') : null;
+
   // 内容页编号计数（封面/封底固定命名、不占用页码）
   let contentIndex = 0;
+  let savedCount = 0;
+  let firstFilePath: string | null = null;
 
   for (let i = pageRange.start - 1; i < pageRange.end; i++) {
     if (task.isCancelled) break;
@@ -1812,7 +1850,7 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
           ? `${projectName}_封底`
           : `${projectName}_第${pageStart + contentIndex++}页`;
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed });
       // 转 PNG
       const img = await loadImage(jpgURL);
       const c = document.createElement('canvas');
@@ -1820,8 +1858,18 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
       c.getContext('2d')!.drawImage(img, 0, 0);
       const blob = await new Promise<Blob | null>(r => c.toBlob(b => r(b), 'image/png'));
       if (!blob) throw new Error('Canvas toBlob 返回 null（可能被污染）');
-      blobs.push(blob);
-      names.push(name);
+      const fileName = `${name}.png`;
+      if (tauri && fs && outDir) {
+        // 逐张写盘，写完后 blob 即释放，单页内存即可
+        const filePath = `${outDir}/${fileName}`;
+        const buf = await blob.arrayBuffer();
+        await fs.writeFile(filePath, new Uint8Array(buf));
+        firstFilePath = firstFilePath ?? filePath;
+      } else {
+        // 浏览器降级：逐张触发下载
+        await saveFile(blob, fileName);
+      }
+      savedCount++;
     } catch (err) {
       task.addWarning({ pageIndex: i, pageLabel: `第 ${i + 1} 页`, message: `${(err as Error).message}` });
     }
@@ -1831,28 +1879,16 @@ export async function exportToPNG(options: ExportOptions): Promise<ExportResult>
   photoCache.clear();
 
   if (task.isCancelled) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: true }; }
-  if (blobs.length === 0) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false }; }
+  if (savedCount === 0) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false }; }
 
-  let result: SaveFileResult;
-  let fileName: string;
-  if (blobs.length === 1) {
-    fileName = `${names[0]}.png`;
-    result = await saveFile(blobs[0], fileName, outputPath);
-  } else {
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-    blobs.forEach((b, idx) => zip.file(`${names[idx]}.png`, b));
-    fileName = `${projectName}_导出.zip`;
-    result = await saveFile(await zip.generateAsync({ type: 'blob' }), fileName, outputPath);
-  }
-  return { success: true, path: result.path, fileName, warnings: task.getWarnings(), cancelled: false };
+  // 已逐张落盘，命中路径取首个文件所在目录（供展示/打开）
+  return { success: true, path: firstFilePath ? (firstFilePath.substring(0, firstFilePath.lastIndexOf('/')) || outDir) : outDir, fileName: `${projectName}_导出`, warnings: task.getWarnings(), cancelled: false };
 }
 
 export async function exportToJPG(options: ExportOptions): Promise<ExportResult> {
   const { pageRange, dpi, quality, projectName, outputPath, onProgress, pageNumberStart } = options;
   const pageStart = pageNumberStart ?? 1;
   const bleed = options.bleed ?? 0;
-  const spine = options.spineWidth ?? 0;
   const total = pageRange.end - pageRange.start + 1;
   const task = beginTask();
   const pageMM = getPageSizeMM();
@@ -1869,10 +1905,24 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
     .filter((p): p is Photo => !!p);
   await preheatContentAnalysis(Array.from(new Map(exportPhotosJpg.map(p => [p.id, p])).values()));
   const photoCache = new SlidingPhotoCache(calcExportMaxDim(pageMM, dpi));
-  const blobs: Blob[] = [];
-  const names: string[] = [];
+
+  // ── 方案A：逐页直接写单个 JPG 文件，写一页释放一页内存，避免全量驻留 + JSZip OOM ──
+  // 目标目录：用户显式给 outputPath 时当作目录；否则（Tauri）弹一次目录选择器。
+  // 浏览器环境无法多文件落盘到同一目录，降级为逐张触发浏览器下载。
+  const tauri = isTauri();
+  let outDir: string | null = outputPath && outputPath.trim() ? outputPath.replace(/[/\\]$/, '') : null;
+  if (tauri && !outDir) {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const dir = await open({ directory: true });
+    if (!dir) return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false };
+    outDir = dir as string;
+  }
+  const fs = tauri ? await import('@tauri-apps/plugin-fs') : null;
+
   // 内容页编号计数（封面/封底固定命名、不占用页码）
   let contentIndex = 0;
+  let savedCount = 0;
+  let firstFilePath: string | null = null;
 
   for (let i = pageRange.start - 1; i < pageRange.end; i++) {
     if (task.isCancelled) break;
@@ -1886,7 +1936,8 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
           ? `${projectName}_封底`
           : `${projectName}_第${pageStart + contentIndex++}页`;
       const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed, spineWidth: spine });
+      const jpgURL = await renderPage(page, dpi, photoImages, photoDataMap, { bleed });
+      let jpgBlob: Blob;
       if (Math.abs(quality - 92) > 1) {
         const img = await loadImage(jpgURL);
         const c = document.createElement('canvas');
@@ -1894,14 +1945,24 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
         c.getContext('2d')!.drawImage(img, 0, 0);
         const jpegBlob = await new Promise<Blob | null>(r => c.toBlob(b => r(b), 'image/jpeg', quality / 100));
         if (!jpegBlob) throw new Error('Canvas toBlob 返回 null（可能被污染）');
-        blobs.push(jpegBlob);
-        names.push(name);
+        jpgBlob = jpegBlob;
       } else {
         // P0-fix CSP: jpgURL 是 data: URL，fetch(dataURL) 会触发 CSP connect-src 违规。
         //   用 atob 解码替代 fetch（JS 内存操作，不发起网络请求）。
-        blobs.push(dataURLtoBlob(jpgURL));
-        names.push(name);
+        jpgBlob = dataURLtoBlob(jpgURL);
       }
+      const fileName = `${name}.jpg`;
+      if (tauri && fs && outDir) {
+        // 逐张写盘，写完后 jpgBlob 即释放（不再积压全量到数组），单页内存即可
+        const filePath = `${outDir}/${fileName}`;
+        const buf = await jpgBlob.arrayBuffer();
+        await fs.writeFile(filePath, new Uint8Array(buf));
+        firstFilePath = firstFilePath ?? filePath;
+      } else {
+        // 浏览器降级：逐张触发下载
+        await saveFile(jpgBlob, fileName);
+      }
+      savedCount++;
     } catch (err) {
       task.addWarning({ pageIndex: i, pageLabel: `第 ${i + 1} 页`, message: `${(err as Error).message}` });
     }
@@ -1911,19 +1972,8 @@ export async function exportToJPG(options: ExportOptions): Promise<ExportResult>
   photoCache.clear();
 
   if (task.isCancelled) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: true }; }
-  if (blobs.length === 0) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false }; }
+  if (savedCount === 0) { return { success: false, path: null, fileName: '', warnings: task.getWarnings(), cancelled: false }; }
 
-  let result: SaveFileResult;
-  let fileName: string;
-  if (blobs.length === 1) {
-    fileName = `${names[0]}.jpg`;
-    result = await saveFile(blobs[0], fileName, outputPath);
-  } else {
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-    blobs.forEach((b, idx) => zip.file(`${names[idx]}.jpg`, b));
-    fileName = `${projectName}_导出.zip`;
-    result = await saveFile(await zip.generateAsync({ type: 'blob' }), fileName, outputPath);
-  }
-  return { success: true, path: result.path, fileName, warnings: task.getWarnings(), cancelled: false };
+  // 已逐张落盘，命中路径取首个文件所在目录（供展示/打开）
+  return { success: true, path: firstFilePath ? (firstFilePath.substring(0, firstFilePath.lastIndexOf('/')) || outDir) : outDir, fileName: `${projectName}_导出`, warnings: task.getWarnings(), cancelled: false };
 }

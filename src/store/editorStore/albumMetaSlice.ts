@@ -92,17 +92,35 @@ function mergeManualSlotOverrides(config: {
   return out;
 }
 
+/* ── 页面设置的持久化键：让"应用到全部"的边距/间距/圆角在重启后保持用户偏好，供一键成册等复用 ── */
+const PAGE_MARGIN_KEY = 'membook_page_margin';
+const SLOT_GAP_KEY = 'membook_slot_gap';
+const SLOT_CORNER_RADIUS_KEY = 'membook_slot_corner_radius';
+
+function loadStoredJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJson(key: string, value: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
 /* ── 相册元数据 slice ── */
 export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => ({
   albumSize: null,
   projectName: '',
   albumType: undefined,
-  pageMargin: { top: PAGE_MARGIN_DEFAULT, bottom: PAGE_MARGIN_DEFAULT, left: PAGE_MARGIN_DEFAULT, right: PAGE_MARGIN_DEFAULT },
+  pageMargin: loadStoredJson(PAGE_MARGIN_KEY, { top: PAGE_MARGIN_DEFAULT, bottom: PAGE_MARGIN_DEFAULT, left: PAGE_MARGIN_DEFAULT, right: PAGE_MARGIN_DEFAULT }),
   applyMarginToAll: false,
   showGuides: false,
   showMarginGuide: false,
-  slotGap: PAGE_GAP_DEFAULT,
-  defaultSlotCornerRadius: DEFAULT_SLOT_CORNER_RADIUS,
+  slotGap: loadStoredJson<number>(SLOT_GAP_KEY, PAGE_GAP_DEFAULT),
+  defaultSlotCornerRadius: loadStoredJson<number>(SLOT_CORNER_RADIUS_KEY, DEFAULT_SLOT_CORNER_RADIUS),
   /** 相册级参考线（编辑辅助，跨页共享，随项目持久化；不参与导出/缩略图/打印） */
   guideLines: [],
 
@@ -166,6 +184,13 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
       showGuides,
       showMarginGuide,
     });
+    // 持久化全局页面设置偏好，重启后保持并可供一键成册复用
+    saveJson(PAGE_MARGIN_KEY, margin);
+    saveJson(SLOT_GAP_KEY, gap);
+    if (cornerRadius !== undefined) {
+      set({ defaultSlotCornerRadius: cornerRadius });
+      saveJson(SLOT_CORNER_RADIUS_KEY, cornerRadius);
+    }
 
     if (applyAll) {
       // 全局应用：立即重算所有内容页（含圆角），并重新约束照片位置防止露白
@@ -215,6 +240,7 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
   setPageMargin: (margin: PageMarginSettings) => {
     const { applyMarginToAll, currentPageIndex, pages: pgs } = get();
     set({ pageMargin: margin });
+    saveJson(PAGE_MARGIN_KEY, margin);
     // 当前页即时重算并重新约束照片位置；其余页标记脏，翻页时懒计算
     const result = pageMarginService.calcMarginForPage(currentPageIndex, get().pages);
     if (result) {
@@ -237,6 +263,7 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
   setSlotGap: (gap) => {
     const { applyMarginToAll, currentPageIndex, pages: pgs } = get();
     set({ slotGap: gap });
+    saveJson(SLOT_GAP_KEY, gap);
     // 当前页即时重算并重新约束照片位置；其余标记脏，翻页时懒计算
     const result = pageMarginService.calcMarginForPage(currentPageIndex, get().pages);
     if (result) {
@@ -256,7 +283,10 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
     // 间距调整需记历史，否则 Ctrl+Z 撤销不生效（2026-08-19）
     pushSnapshot(get);
   },
-  setDefaultSlotCornerRadius: (r) => set({ defaultSlotCornerRadius: r }),
+  setDefaultSlotCornerRadius: (r) => {
+    set({ defaultSlotCornerRadius: r });
+    saveJson(SLOT_CORNER_RADIUS_KEY, r);
+  },
   /** 设置当前页的槽位圆角（按页独立，开启"应用到全部页面"时同步所有内容页，封面/封底不受影响） */
   setPageSlotCornerRadius: (pageIndex, r) => {
     const { applyMarginToAll } = get();
@@ -273,6 +303,12 @@ export const createAlbumMetaSlice: EditorSlice<AlbumMetaSlice> = (set, get) => (
       }
       return { pages: newPages };
     });
+    // 开启「应用到全部页面」时同步全局默认值并持久化，保证一键成册等读 defaultSlotCornerRadius 的链路
+    // 与当前相册页面实际生效的圆角保持一致（2026-08-29）。
+    if (applyMarginToAll) {
+      set({ defaultSlotCornerRadius: r });
+      saveJson(SLOT_CORNER_RADIUS_KEY, r);
+    }
     pushSnapshot(get);
   },
   setShowGuides: (v) => set({ showGuides: v }),

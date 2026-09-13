@@ -529,6 +529,8 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
     setExecuting(true);
     try {
       const now = Date.now();
+      // 沿用编辑器全局页面的圆角默认值，保证智能编排生成页与页面设置里配置的槽位圆角一致（2026-08-31）
+      const defaultSlotCornerRadius = useEditorStore.getState().defaultSlotCornerRadius;
       const newPages: AlbumPage[] = layoutResult.pages.map((gpPage, pageIdx) => {
         const placements: PhotoPlacement[] = [];
         const slotOverrides: Record<string, SlotOverride> = {};
@@ -546,6 +548,7 @@ export function GooglePhotosLayoutDialog({ selectedPhotos, onClose, onComplete }
           placements,
           background: '#FFFFFF',
           slotOverrides,
+          slotCornerRadius: defaultSlotCornerRadius,
           googlePhotosMmLayout: mmLayout,
           googlePhotosBaseMmLayout: mmLayout,
           googlePhotosMmConfig: { margin: config.margin, gap: config.gap },

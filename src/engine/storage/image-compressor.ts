@@ -35,32 +35,52 @@ class CompressWorkerPool {
   private workers: Worker[] = [];
   private pending = new Map<Worker, Map<string, { resolve: (r: CompressWorkerResponse['results']) => void; reject: (e: Error) => void }>>();
   private roundRobinIndex = 0;
+  private disposed = false;
 
   constructor() {
     for (let i = 0; i < WORKER_POOL_SIZE; i++) {
-      const w = new Worker(new URL('./compress.worker.ts', import.meta.url), { type: 'module' });
-      const taskMap = new Map<string, { resolve: (r: CompressWorkerResponse['results']) => void; reject: (e: Error) => void }>();
-      this.pending.set(w, taskMap);
-      w.addEventListener('message', (e: MessageEvent<CompressWorkerResponse | CompressWorkerError>) => {
-        const data = e.data;
-        if ('error' in data) {
-          const t = taskMap.get(data.id);
-          if (t) {
-            taskMap.delete(data.id);
-            t.reject(new Error(data.error));
-          }
-          return;
-        }
-        if ('results' in data) {
-          const t = taskMap.get(data.id);
-          if (t) {
-            taskMap.delete(data.id);
-            t.resolve(data.results);
-          }
-        }
-      });
-      this.workers.push(w);
+      this.workers.push(this.createWorker());
     }
+  }
+
+  private createWorker(): Worker {
+    const w = new Worker(new URL('./compress.worker.ts', import.meta.url), { type: 'module' });
+    const taskMap = new Map<string, { resolve: (r: CompressWorkerResponse['results']) => void; reject: (e: Error) => void }>();
+    this.pending.set(w, taskMap);
+    w.addEventListener('message', (e: MessageEvent<CompressWorkerResponse | CompressWorkerError>) => {
+      const data = e.data;
+      if ('error' in data) {
+        const t = taskMap.get(data.id);
+        if (t) {
+          taskMap.delete(data.id);
+          t.reject(new Error(data.error));
+        }
+        return;
+      }
+      if ('results' in data) {
+        const t = taskMap.get(data.id);
+        if (t) {
+          taskMap.delete(data.id);
+          t.resolve(data.results);
+        }
+      }
+    });
+    // P0-fix：监听 worker 加载/运行错误（CSP 拦截、打包缺文件等）。原实现未监听，
+    // 此类错误会让任务 Promise 永久挂起（主线程 fallback 永远不触发，进度条冻结）。
+    // reject 该 worker 的全部在途任务并重建，避免后续任务继续分配到已死 worker。
+    w.addEventListener('error', () => {
+      if (this.disposed) return;
+      for (const t of taskMap.values()) {
+        t.reject(new Error('压缩 Worker 发生错误'));
+      }
+      taskMap.clear();
+      this.pending.delete(w);
+      const idx = this.workers.indexOf(w);
+      if (idx >= 0) {
+        this.workers[idx] = this.createWorker();
+      }
+    });
+    return w;
   }
 
   compress(file: File, sizes: CompressSizeSpec[]): Promise<CompressWorkerResponse['results']> {
@@ -76,10 +96,20 @@ class CompressWorkerPool {
   /** P0: 终止所有 Worker，释放线程内存。
    *  8 个 Worker 常驻约 160-400MB，导入完成后不再需要，应终止释放。 */
   dispose(): void {
+    this.disposed = true;
     for (const w of this.workers) {
       w.terminate();
     }
     this.workers = [];
+    // P0-fix：终止前 reject 全部在途任务。原实现直接 pending.clear()，
+    // await compressImageInWorker(...) 永久挂起 → 导入 pump 卡死、进度条冻结。
+    // reject 后调用方走 catch → 主线程 fallback，导入链路能正常收尾。
+    for (const taskMap of this.pending.values()) {
+      for (const t of taskMap.values()) {
+        t.reject(new Error('压缩 Worker 池已终止'));
+      }
+      taskMap.clear();
+    }
     this.pending.clear();
   }
 }

@@ -153,8 +153,13 @@ async function processOneFileInner(
   // 避免照片被标记为 direct 但实际没有可用路径。
   const canUsePathReference = isTauri() && !actuallyHeic && !!options.originalPath;
   const effectiveMode = actuallyHeic || (mode === 'direct' && isTauri() && !canUsePathReference) ? 'import' : mode;
+  // P0-fix：onlyPreview=true 会让 originalBlobId 缺失（原图不入库），而 import 模式
+  // 向用户承诺「原图完整离线保存」。原判断 canUsePathReference 未限定 direct 模式，
+  // 导致 Tauri 下用户明确选择「导入存储」时原图被跳过——原文件移动/删除后导出画质
+  // 静默降级。direct+路径引用的场景已由上方 early-return 分支处理，
+  // 因此此处统一全量入库（relativePath 仍保留作为来源元数据）。
   const importResult = await importPhotoToDB(processFile, {
-    onlyPreview: canUsePathReference,
+    onlyPreview: false,
     originalWidth: dims.width,
     originalHeight: dims.height,
   });

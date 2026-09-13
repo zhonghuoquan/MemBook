@@ -86,7 +86,7 @@ async function renderPagesForPrint(
     const page = pages[i];
     if (!page) continue;
     const photoImages = await photoCache.preparePage(pages, i, photoDataMap);
-    const url = await renderPage(page, dpi, photoImages, photoDataMap, { bleed: 0, spineWidth: 0 });
+    const url = await renderPage(page, dpi, photoImages, photoDataMap, { bleed: 0 });
     dataUrls.push(url);
     pageIndices.push(i);
     // 流式回调：每生成一页立即通知调用方，支持增量渲染
@@ -145,7 +145,7 @@ export async function printPages(options: PrintOptions): Promise<void> {
     PRINT_DPI,
     options.color === 'grayscale',
     options.onProgress,
-    { bleed: options.bleed, spineWidth: options.spineWidth },
+    { bleed: options.bleed },
   );
 
   const dir = await tempDir();

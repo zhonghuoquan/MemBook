@@ -1,11 +1,10 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore } from '../../store';
 import type { ExportOptions, ExportFormat, ExportResult } from '../../utils/exportEngine';
 import { exportToPNG, exportToJPG, exportToPDF, cancelExport } from '../../utils/exportEngine';
 import { useDraggable } from '../../hooks/useDraggable';
 import { useDialogHotkeys } from '../../hooks/useDialogHotkeys';
-import { SPINE_WIDTH_MIN_MM, SPINE_WIDTH_MAX_MM } from './canvas/constants';
 import { useLicenseStore } from '../../license/licenseStore';
 import { logger } from '../../utils/logger';
 
@@ -160,7 +159,6 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [quality, setQuality] = useState(90);
   const [dpi, setDpi] = useState(300);
   const [bleed, setBleed] = useState(0);
-  const [spineWidth, setSpineWidth] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -175,14 +173,6 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   // Free 档（未激活且试用期结束）导出清晰度上限，Pro 不受限
   const isProExport = useLicenseStore((s) => s.isActivated);
 
-  // 读取页面设置中书脊宽度（封面页 spineWidth），打开对话框时同步到导出设置，避免默认 0 与页面不一致
-  const coverSpineWidth = useMemo(
-    () => pages.find((p) => p.pageKind === 'cover')?.spineWidth ?? 0,
-    [pages],
-  );
-  useEffect(() => {
-    if (isOpen) setSpineWidth(coverSpineWidth);
-  }, [isOpen, coverSpineWidth]);
   const drag = useDraggable(isOpen && !isExporting);
   const cancellingRef = useRef(false);
 
@@ -269,7 +259,6 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       pageNumberStart: Number.isFinite(startPageNumber) && startPageNumber >= 1 ? startPageNumber : 1,
       outputPath: exportPath || undefined,
       bleed,
-      spineWidth,
       onProgress: (current, total) => {
         setCurrentPage(current);
         setTotalPages(total);
@@ -311,7 +300,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       setIsExporting(false);
       setProgress(0);
     }
-  }, [format, quality, dpi, bleed, spineWidth, pageRange, startPage, endPage, startPageNumber, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
+  }, [format, quality, dpi, bleed, pageRange, startPage, endPage, startPageNumber, pages.length, defaultName, fileName, fullFileName, exportPath, addToast, t]);
 
   const handleOpenFile = useCallback(async () => {
     if (!exportResult?.path) return;
@@ -366,7 +355,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
       {/* 设置弹窗（导出中和有结果时隐藏） */}
       {isOpen && !isExporting && !exportResult && (
-        <div className="fixed inset-0 bg-black/40 z-[var(--z-overlay)]">
+        <div className="fixed inset-0 bg-black/40 z-[var(--z-modal)]">
           <div ref={drag.ref}
             className="absolute bg-white rounded-[var(--radius-xl)] shadow-[var(--shadow-lg)] w-[520px] max-h-[90vh] flex flex-col"
             style={{ left: drag.pos.x || '50%', top: drag.pos.y || '50%', transform: 'translate(-50%, -50%)' }}>
@@ -461,7 +450,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   </div>
                 )}
 
-                {/* 印刷增强：出血 + 书脊（PDF / PNG / JPG 通用） */}
+                {/* 印刷增强：出血（PDF / PNG / JPG 通用） */}
                 {(format === 'pdf' || format === 'png' || format === 'jpg') && (
                   <div className="pt-2 border-t border-[var(--color-border-light)]">
                     <div className="text-[12px] font-[600] text-[var(--color-gray-700)] mb-2">{t('editor.exportDialog.printEnhance')}</div>
@@ -472,13 +461,6 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                           onChange={(e) => setBleed(Number(e.target.value))}
                           className="w-full accent-[var(--color-brand)]" />
                         <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.bleedHint')}</p>
-                      </div>
-                      <div>
-                        <label className="block text-[var(--text-body-sm)] font-[500] text-[var(--color-gray-600)] mb-1">{t('editor.print.spine')} · <span className="text-[var(--color-primary-600)]">{spineWidth} mm</span></label>
-                        <input type="range" min={SPINE_WIDTH_MIN_MM} max={SPINE_WIDTH_MAX_MM} step={1} value={spineWidth}
-                          onChange={(e) => setSpineWidth(Number(e.target.value))}
-                          className="w-full accent-[var(--color-brand)]" />
-                        <p className="text-[var(--text-nano)] text-[var(--color-gray-400)] mt-0.5">{t('editor.print.spineHint')}</p>
                       </div>
                     </div>
                   </div>

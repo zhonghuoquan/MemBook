@@ -37,6 +37,8 @@ export interface TrialRecord {
   machine_id: string;
   trial_start: string;
   trial_used: boolean;
+  /** P0-fix（时钟回拨）：上次启动见到的系统时间（ms）；旧版本记录无此字段 */
+  last_seen_ms?: number;
 }
 
 /** 生成器使用的密钥对（JWK） */

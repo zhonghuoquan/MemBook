@@ -7,7 +7,7 @@
  * 3. calcSlotPixelSize 边界：slot.width=100 时占满画布宽度
  */
 import { describe, it, expect } from 'vitest';
-import { calcSlotPixelSize, buildRegenPageData } from './helpers';
+import { calcSlotPixelSize, buildRegenPageData, fitPageToSafeBox } from './helpers';
 import type { SlotLayout, SlotOverride, PhotoPlacement } from '../../types';
 
 const EPS = 1e-6;
@@ -101,5 +101,50 @@ describe('buildRegenPageData', () => {
     expect(result.placements[0].rotation).toBe(90);
     expect(result.placements[0].flipH).toBe(true);
     expect(result.placements[0].adjustments?.exposure).toBe(10);
+  });
+});
+
+describe('fitPageToSafeBox', () => {
+  // 模拟 Google Photos 页面：210×280mm、四边距 15mm，安全区像素框 [30..390]×[30..530]
+  const safeL = 30, safeT = 30, safeR = 390, safeB = 530;
+
+  it('逐张独立取整会越界，整体缩放后任一照片位都不越出安全区', () => {
+    // 两图一上一下：mm 布局填满安全区（各高 123mm + gap 4mm）
+    const mm = [
+      { x: 15, y: 15, width: 90, height: 123 },
+      { x: 15, y: 142, width: 90, height: 123 },
+    ];
+    const px = fitPageToSafeBox(mm, safeL, safeT, safeR, safeB);
+    // 所有槽位左上角 ≥ 安全区左上，右下角 ≤ 安全区右下
+    for (const r of px) {
+      expect(r!.x).toBeGreaterThanOrEqual(safeL);
+      expect(r!.y).toBeGreaterThanOrEqual(safeT);
+      expect(r!.x + r!.width).toBeLessThanOrEqual(safeR);
+      expect(r!.y + r!.height).toBeLessThanOrEqual(safeB);
+    }
+  });
+
+  it('两图一上一线的垂直间距约等于 slotGap（4mm → 8px），不再被撑宽', () => {
+    const mm = [
+      { x: 15, y: 15, width: 90, height: 123 },
+      { x: 15, y: 142, width: 90, height: 123 },
+    ];
+    const px = fitPageToSafeBox(mm, safeL, safeT, safeR, safeB);
+    const bottom1 = px[0]!.y + px[0]!.height;
+    const gap = px[1]!.y - bottom1;
+    expect(gap).toBeGreaterThanOrEqual(7);
+    expect(gap).toBeLessThanOrEqual(9);
+  });
+
+  it('同一排照片的水平缝隙约等于 slotGap（4mm → 8px），并保持对齐', () => {
+    const mm = [
+      { x: 15, y: 15, width: 80, height: 100 },
+      { x: 99, y: 15, width: 80, height: 100 },
+    ];
+    const px = fitPageToSafeBox(mm, safeL, safeT, safeR, safeB);
+    const gap = px[1]!.x - (px[0]!.x + px[0]!.width);
+    expect(gap).toBeGreaterThanOrEqual(7);
+    expect(gap).toBeLessThanOrEqual(9);
+    expect(px[0]!.y).toBe(px[1]!.y); // 同排上缘对齐
   });
 });

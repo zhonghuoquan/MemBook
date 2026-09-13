@@ -8,10 +8,10 @@
  * - 8 方向 resize（角点独立宽高 + 边点单维度），缩放锚点含旋转修正
  * - rotation === -90 时保持竖排（春联）模式，逐字正立排列
  */
-import { memo, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { Group, Rect, Text, Circle, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import type Konva from 'konva';
+import Konva from 'konva';
 import type { PageTextElement } from '../../../types';
 import type { AlignBounds } from '../../../engine/alignment-engine';
 
@@ -33,6 +33,12 @@ function TextElementNodeImpl({
   /** 对齐吸附 + 引导线（返回逻辑像素偏移）；省略 = 该元素不参与对齐 */
   alignDrag?: (bounds: AlignBounds, excludeId: string | string[]) => { offsetX: number; offsetY: number };
 }) {
+  // P0-fix：拖拽/旋转中节点被卸载（删除元素/Ctrl+Z/切页/切模板）时手柄的 onUp 永不执行，
+  // stage.on('mousemove.resize'/'mouseup.resize') 命名空间监听器残留在 Stage 上并持续
+  // 空转触发 store 无谓更新，直至下一次 mouseup。卸载时统一清理（同一时刻仅有一个手柄拖拽，安全）。
+  useEffect(() => () => {
+    for (const s of Konva.stages) s.off('mousemove.resize mouseup.resize');
+  }, []);
   // 对齐：el.x/y 为左上角，以候选左上角计算包围盒（左上角基准 px），叠加吸附偏移
   const alignCandidate = (x: number, y: number) => {
     if (!alignDrag) return { x, y };

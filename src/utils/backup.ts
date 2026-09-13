@@ -32,6 +32,10 @@ export async function exportBackupZip(projectId?: string, projectName?: string):
       : `membook-backup-${ts}.zip`;
     const saved = await saveBackupFile(blob, filename);
     if (!saved.downloaded) {
+      // P0-fix：区分「用户取消」与「写盘失败」，失败必须如实提示
+      if (saved.error) {
+        return { ok: false, message: `备份写入失败: ${saved.error}` };
+      }
       return { ok: false, cancelled: true, message: '已取消导出' };
     }
     const baseMsg = saved.path ? `备份已保存到 ${saved.path}` : '备份已下载';

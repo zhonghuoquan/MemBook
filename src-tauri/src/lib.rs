@@ -9,6 +9,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, WS_SYSMENU,
 };
 
+/// HEIC 转换临时文件序号：同一进程内可能并发转换多张 HEIC（批量导入），
+/// 临时文件仅用 PID 区分会互相覆盖/串图，追加原子递增序号保证唯一（P0-fix）。
+use std::sync::atomic::{AtomicU64, Ordering};
+static HEIC_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// 把命令放在独立模块中，避免 tauri::command 宏生成的内部标识符与当前模块冲突。
 mod commands {
     use super::*;
@@ -66,7 +71,12 @@ mod commands {
                     .map_err(|e| format!("获取 HEIC 帧失败: {}", e))?;
 
                 // 使用临时文件接收编码后的 JPEG（WIC 编码到内存流需要自定义 IStream，临时文件更简单稳定）
-                let temp_name = format!("membook_heic_{}.jpg", std::process::id());
+                // P0-fix：追加原子序号，避免并发转换共用同一路径互相覆盖/串图
+                let temp_name = format!(
+                    "membook_heic_{}_{}.jpg",
+                    std::process::id(),
+                    HEIC_TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+                );
                 let temp_path = std::env::temp_dir().join(&temp_name);
 
                 let stream = factory
@@ -120,7 +130,12 @@ mod commands {
         {
             // macOS: 用系统自带的 sips 命令解码 HEIC → JPEG
             // sips 是 macOS 内置的图像处理工具，原生支持 HEIC
-            let temp_name = format!("membook_heic_{}.jpg", std::process::id());
+            // P0-fix：追加原子序号，避免并发转换共用同一路径互相覆盖/串图
+            let temp_name = format!(
+                "membook_heic_{}_{}.jpg",
+                std::process::id(),
+                HEIC_TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+            );
             let temp_path = std::env::temp_dir().join(&temp_name);
 
             let output = std::process::Command::new("sips")
@@ -492,12 +507,18 @@ mod commands {
         pub machine_id: String,
         pub trial_start: String,
         pub trial_used: bool,
+        /// P0-fix（时钟回拨）：上次启动见到的系统时间（ms）。
+        /// 旧版本 trial.json 无此字段，serde default(None) 保持向后兼容。
+        #[serde(default)]
+        pub last_seen_ms: Option<u64>,
     }
 
-    /// 获取机器指纹。
-    /// 基于 Windows MachineGuid + 计算机名 + 用户名做 SHA-256 哈希，
-    /// 普通卸载应用不会清除注册表中的 MachineGuid，因此能识别同一台设备。
-    /// macOS: 基于 IOPlatformUUID + hostname + 用户名做 SHA-256 哈希
+    /// 获取机器指纹（v2，当前版本）。
+    /// P0-fix：仅基于硬件级稳定标识（Windows MachineGuid / macOS IOPlatformUUID）
+    /// 做 SHA-256 哈希。不再混入计算机名/用户名——用户改名计算机/账户会导致指纹
+    /// 变化、付费激活失效（license.machineId 不匹配 → 变回未激活）。
+    /// MachineGuid 读取失败时直接报错而非静默生成退化指纹（空输入或仅可变因素
+    /// 会生成跨机器相同的弱指纹，等于全网共用一个"机器码"）。
     #[tauri::command]
     pub fn get_machine_fingerprint() -> Result<String, String> {
         use sha2::{Digest, Sha256};
@@ -510,21 +531,11 @@ mod commands {
 
             // Windows 安装时生成的稳定 GUID，普通卸载不会清除
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(key) = hklm.open_subkey("SOFTWARE\\Microsoft\\Cryptography") {
-                if let Ok(guid) = key.get_value::<String, _>("MachineGuid") {
-                    hasher.update(guid.as_bytes());
-                }
-            }
-
-            // 计算机名
-            if let Ok(name) = std::env::var("COMPUTERNAME") {
-                hasher.update(name.as_bytes());
-            }
-
-            // 用户名
-            if let Ok(name) = std::env::var("USERNAME") {
-                hasher.update(name.as_bytes());
-            }
+            let guid = hklm
+                .open_subkey("SOFTWARE\\Microsoft\\Cryptography")
+                .and_then(|key| key.get_value::<String, _>("MachineGuid"))
+                .map_err(|e| format!("读取 MachineGuid 失败: {}", e))?;
+            hasher.update(guid.as_bytes());
         }
 
         #[cfg(target_os = "macos")]
@@ -535,7 +546,65 @@ mod commands {
                 .output()
                 .map_err(|e| format!("执行 ioreg 失败: {}", e))?;
             let stdout = String::from_utf8_lossy(&output.stdout);
-            // 从输出中提取 "IOPlatformUUID" = "XXXX-XXXX-XXXX"
+            let mut uuid_found = false;
+            for line in stdout.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(uuid) = line.split('=').nth(1) {
+                        let uuid = uuid.trim().trim_matches('"');
+                        hasher.update(uuid.as_bytes());
+                        uuid_found = true;
+                        break;
+                    }
+                }
+            }
+            if !uuid_found {
+                return Err("未能从 ioreg 提取 IOPlatformUUID".to_string());
+            }
+        }
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            let _ = &mut hasher;
+            return Err("机器指纹仅支持 Windows 和 macOS".to_string());
+        }
+
+        let result = hasher.finalize();
+        Ok(format!("{:x}", result))
+    }
+
+    /// 旧版机器指纹（v1：MachineGuid/IOPlatformUUID + 计算机名/主机名 + 用户名）。
+    /// 仅用于把老用户已激活的 license / 试用期记录迁移到 v2 指纹，后续版本可移除。
+    #[tauri::command]
+    pub fn get_machine_fingerprint_v1() -> Result<String, String> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+
+        #[cfg(windows)]
+        {
+            use winreg::enums::HKEY_LOCAL_MACHINE;
+            use winreg::RegKey;
+
+            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(key) = hklm.open_subkey("SOFTWARE\\Microsoft\\Cryptography") {
+                if let Ok(guid) = key.get_value::<String, _>("MachineGuid") {
+                    hasher.update(guid.as_bytes());
+                }
+            }
+            if let Ok(name) = std::env::var("COMPUTERNAME") {
+                hasher.update(name.as_bytes());
+            }
+            if let Ok(name) = std::env::var("USERNAME") {
+                hasher.update(name.as_bytes());
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = std::process::Command::new("ioreg")
+                .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+                .output()
+                .map_err(|e| format!("执行 ioreg 失败: {}", e))?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("IOPlatformUUID") {
                     if let Some(uuid) = line.split('=').nth(1) {
@@ -545,12 +614,9 @@ mod commands {
                     }
                 }
             }
-
-            // hostname
             if let Ok(name) = std::env::var("HOSTNAME") {
                 hasher.update(name.as_bytes());
             }
-            // 用户名
             if let Ok(name) = std::env::var("USER") {
                 hasher.update(name.as_bytes());
             }
@@ -558,7 +624,7 @@ mod commands {
 
         #[cfg(all(not(windows), not(target_os = "macos")))]
         {
-            let _ = hasher;
+            let _ = &mut hasher;
             return Err("机器指纹仅支持 Windows 和 macOS".to_string());
         }
 
@@ -1115,15 +1181,40 @@ mod commands {
             });
 
         // GPS 经纬度（kamadak-exif 的 In::PRIMARY 包含 GPS IFD）
+        // P0-fix：应用 GPSLatitudeRef/GPSLongitudeRef 半球符号（S/W 为负）。
+        // 原实现忽略参考方向，南半球/西半球照片坐标恒为正，地图归类完全错误。
+        let lat_sign = exif
+            .get_field(Tag::GPSLatitudeRef, In::PRIMARY)
+            .map(|f| gps_ref_multiplier(&f.value))
+            .unwrap_or(1.0);
+        let lon_sign = exif
+            .get_field(Tag::GPSLongitudeRef, In::PRIMARY)
+            .map(|f| gps_ref_multiplier(&f.value))
+            .unwrap_or(1.0);
         let gps_lat = exif
             .get_field(Tag::GPSLatitude, In::PRIMARY)
-            .and_then(|f| rational_to_gps_coord(&f.value));
+            .and_then(|f| rational_to_gps_coord(&f.value))
+            .map(|v| v * lat_sign);
 
         let gps_lon = exif
             .get_field(Tag::GPSLongitude, In::PRIMARY)
-            .and_then(|f| rational_to_gps_coord(&f.value));
+            .and_then(|f| rational_to_gps_coord(&f.value))
+            .map(|v| v * lon_sign);
 
         (date_taken, gps_lat, gps_lon, false)
+    }
+
+    /// GPS 参考方向（N/S/E/W）→ 符号系数：南纬（S）与西经（W）为负值。
+    fn gps_ref_multiplier(value: &exif::Value) -> f64 {
+        if let exif::Value::Ascii(vec) = value {
+            if let Some(bytes) = vec.first() {
+                let s = String::from_utf8_lossy(bytes).trim().to_ascii_uppercase();
+                if s.starts_with('S') || s.starts_with('W') {
+                    return -1.0;
+                }
+            }
+        }
+        1.0
     }
 
     /// 手动解析 JPEG EXIF 日期（kamadak-exif 严格解析失败时的 fallback）
@@ -1473,6 +1564,7 @@ pub fn run() {
         commands::get_printers,
         commands::print_pdf,
         commands::get_machine_fingerprint,
+        commands::get_machine_fingerprint_v1,
         commands::load_trial_record,
         commands::save_trial_record,
         commands::load_trial_anchor,
@@ -1492,6 +1584,7 @@ pub fn run() {
         commands::get_printers,
         commands::print_pdf,
         commands::get_machine_fingerprint,
+        commands::get_machine_fingerprint_v1,
         commands::load_trial_record,
         commands::save_trial_record,
         commands::load_trial_anchor,

@@ -101,6 +101,16 @@ describe('shouldShowWatermark — 展示判定', () => {
     const samePages = Array.from({ length: 7 }, (_, i) => page(`pg${i}`, ['s1'], ['p2']));
     expect(shouldShowWatermark(6, samePages, PHOTOS, settings())).toBe(true);
   });
+  it('封面 / 封底不显示时间水印（pageKind 非 content → false）', () => {
+    const cover = PAGES.map((p, i) => (i === 0 ? { ...p, pageKind: 'cover' as const } : p));
+    const back = PAGES.map((p, i) => (i === 0 ? { ...p, pageKind: 'backCover' as const } : p));
+    expect(shouldShowWatermark(0, cover, PHOTOS, settings())).toBe(false);
+    expect(shouldShowWatermark(0, back, PHOTOS, settings())).toBe(false);
+  });
+  it('单页隐藏时间水印（watermarkHidden）→ 画布 / 导出都不显示', () => {
+    const hidden = PAGES.map((p, i) => (i === 0 ? { ...p, watermarkHidden: true } : p));
+    expect(shouldShowWatermark(0, hidden, PHOTOS, settings())).toBe(false);
+  });
 });
 
 describe('getWatermarkText — 水印文本', () => {
@@ -109,11 +119,11 @@ describe('getWatermarkText — 水印文本', () => {
       .toMatch(/^\d{4}年\d{1,2}月\d{1,2}日$/);
   });
   it('仅地点（showDate=false）→ 回退首地点', () => {
-    const s = settings({ showDate: false, showLocation: true });
+    const s = settings({ showDate: false, showLocation: true, locationGranularity: 'standard' });
     expect(getWatermarkText(0, PAGES, PHOTOS, s)).toBe('杭州 - 西湖区');
   });
   it('同页同天多地点去重合并', () => {
-    const s = settings({ showDate: false, showLocation: true });
+    const s = settings({ showDate: false, showLocation: true, locationGranularity: 'standard' });
     // pg1 同日(03-22) 含 p2(西湖) + p3(浦东) → 合并
     expect(getWatermarkText(1, PAGES, PHOTOS, s)).toBe('杭州 - 西湖区, 上海 - 浦东新区');
   });

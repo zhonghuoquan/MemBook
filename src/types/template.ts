@@ -6,6 +6,7 @@ import type { SlotOverride } from './photo';
 import type { GradientStop, ShapeType } from './elements';
 import { GENERATED_TEMPLATES } from './generated-templates';
 import { ALL_COVER_TEMPLATES, findCoverTemplateById } from './cover-templates';
+import { DEFAULT_SLOT_CORNER_RADIUS } from './ui';
 
 /** Google Photos 智能编排使用的特殊模板 ID（不匹配任何真实模板） */
 export const GOOGLE_PHOTOS_TEMPLATE_ID = '__google_photos__';
@@ -72,7 +73,7 @@ export function isCoverOrBackCoverPage(page: { templateId: string }): boolean {
  * 编辑器 Canvas 与导出引擎走 roundRect 原生支持联合类型，无需归一化。
  */
 export function normalizeSlotCornerRadius(r: number | [number, number, number, number] | undefined): number {
-  if (r === undefined) return 2;
+  if (r === undefined) return DEFAULT_SLOT_CORNER_RADIUS;
   if (typeof r === 'number') return r;
   return (r[0] + r[1] + r[2] + r[3]) / 4;
 }

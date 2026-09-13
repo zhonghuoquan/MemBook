@@ -710,11 +710,14 @@ export async function detectFaces(
       throw new DOMException('已取消', 'AbortError');
     }
 
-    // 诊断日志：输出距离矩阵统计
+    // 诊断日志：距离统计。P0-fix：原实现 O(n²) 全量两两计算（上限 5000 张人脸时
+    // 约 1250 万次 128 维欧氏距离），仅为打一条日志却把主线程冻结数十秒。
+    // 改为抽样前 200 张（≈2 万次计算，毫秒级），统计意义足够。
     if (allFaces.length > 1) {
+      const SAMPLE = Math.min(allFaces.length, 200);
       let minDist = Infinity, maxDist = 0, avgDist = 0, count = 0;
-      for (let i = 0; i < allFaces.length; i++) {
-        for (let j = i + 1; j < allFaces.length; j++) {
+      for (let i = 0; i < SAMPLE; i++) {
+        for (let j = i + 1; j < SAMPLE; j++) {
           const d = euclideanDistance(allFaces[i].descriptor, allFaces[j].descriptor);
           if (d < minDist) minDist = d;
           if (d > maxDist) maxDist = d;
@@ -723,7 +726,7 @@ export async function detectFaces(
         }
       }
       avgDist /= count || 1;
-      logger.info(`[face-cluster] 距离统计: min=${minDist.toFixed(3)} max=${maxDist.toFixed(3)} avg=${avgDist.toFixed(3)} faces=${allFaces.length} threshold=${options.similarityThreshold ?? 0.6}`);
+      logger.info(`[face-cluster] 距离统计(抽样 ${SAMPLE}/${allFaces.length}): min=${minDist.toFixed(3)} max=${maxDist.toFixed(3)} avg=${avgDist.toFixed(3)} threshold=${options.similarityThreshold ?? 0.6}`);
     }
 
     return {

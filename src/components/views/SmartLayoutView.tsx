@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditorStore, useUIStore, usePhotoStore } from '../../store';
-import { GOOGLE_PHOTOS_TEMPLATE_ID, normalizeSlotCornerRadius } from '../../types';
+import { GOOGLE_PHOTOS_TEMPLATE_ID } from '../../types';
 import type { Photo, AlbumPage, PhotoPlacement, SlotOverride } from '../../types';
 import type { SmartLayoutSettings } from '../../store';
 import {
@@ -67,7 +67,7 @@ const THUMB_MAX_SIZE = 400; // 缩略图最大边长，足够 200px 卡片显示
  * 重要：direct 模式的 photo.src 可能是 asset:// 跨域 URL，画到 Canvas 会污染画布导致 toDataURL 失败。
  *      必须通过 readFileAsBlobUrl 转换为同源 blob URL。
  */
-async function resolvePhotoSrcForCanvas(photo: Photo): Promise<string | null> {
+async function resolvePhotoSrcForCanvas(photo: Photo, ownedUrls: Set<string>): Promise<string | null> {
   // 优先使用 thumbBlobId（256px），降低解码与内存开销
   const thumbId = photo.thumbBlobId || photo.previewBlobId || photo.blobId || photo.originalBlobId;
   if (thumbId) {
@@ -86,7 +86,8 @@ async function resolvePhotoSrcForCanvas(photo: Photo): Promise<string | null> {
       if (directUrl.startsWith('blob:') || directUrl.startsWith('data:')) return directUrl;
       if (photo.relativePath && isTauri()) {
         const blobUrl = await readFileAsBlobUrl(photo.relativePath);
-        if (blobUrl) return blobUrl;
+        // P0-fix（内存泄漏）：fs 读取自建的 blob URL 记入 ownedUrls，generateThumbnail 加载后 revoke
+        if (blobUrl) { ownedUrls.add(blobUrl); return blobUrl; }
       }
       return directUrl;
     }
@@ -98,12 +99,22 @@ async function resolvePhotoSrcForCanvas(photo: Photo): Promise<string | null> {
 async function generateThumbnail(photo: Photo, maxSize = THUMB_MAX_SIZE): Promise<string | null> {
   if (photo.width <= 0 || photo.height <= 0) return null;
   // 解析安全的图片源（处理 import/direct 模式 + Tauri asset:// 跨域）
-  const resolvedSrc = await resolvePhotoSrcForCanvas(photo);
+  // P0-fix（内存泄漏）：fs 读取自建的 blob URL 在图片加载完成后 revoke
+  const ownedUrls = new Set<string>();
+  const resolvedSrc = await resolvePhotoSrcForCanvas(photo, ownedUrls);
   if (!resolvedSrc) return null;
+  const revokeOwned = () => {
+    for (const u of ownedUrls) {
+      try { URL.revokeObjectURL(u); } catch { /* noop */ }
+    }
+    ownedUrls.clear();
+  };
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      // P0-fix（内存泄漏）：img 已加载完成并持有解码数据，自建 URL 立即释放
+      revokeOwned();
       const scale = Math.min(1, maxSize / Math.max(img.naturalWidth, img.naturalHeight));
       const w = Math.max(1, Math.round(img.naturalWidth * scale));
       const h = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -128,7 +139,7 @@ async function generateThumbnail(photo: Photo, maxSize = THUMB_MAX_SIZE): Promis
         resolve(null);
       }
     };
-    img.onerror = () => resolve(null);
+    img.onerror = () => { revokeOwned(); resolve(null); };
     img.src = resolvedSrc;
   });
 }
@@ -462,10 +473,10 @@ interface SmartLayoutViewProps {
 export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
   const { t } = useTranslation();
   const editorPages = useEditorStore((s) => s.pages);
-  const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const albumSize = useEditorStore((s) => s.albumSize);
   const pageMargin = useEditorStore((s) => s.pageMargin);
   const slotGap = useEditorStore((s) => s.slotGap);
+  const defaultSlotCornerRadius = useEditorStore((s) => s.defaultSlotCornerRadius);
   const appendPages = useEditorStore((s) => s.appendPages);
   const addToast = useUIStore((s) => s.addToast);
   const smartLayoutSelectedIds = useUIStore((s) => s.smartLayoutSelectedIds);
@@ -893,6 +904,7 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
         return {
           id: `page-gp-${now}-${pageIdx}`,
           templateId: GOOGLE_PHOTOS_TEMPLATE_ID,
+          slotCornerRadius: defaultSlotCornerRadius, // 智能编排生成页统一采用全局默认圆角（2026-08-31）
           placements,
           background: '#FFFFFF',
           slotOverrides,
@@ -989,7 +1001,8 @@ export function SmartLayoutView({ onBack }: SmartLayoutViewProps) {
   const pageW = albumSize.width;
   const pageH = albumSize.height;
   const pageRatio = pageW / pageH;
-  const slotCornerRadius = normalizeSlotCornerRadius(editorPages[currentPageIndex]?.slotCornerRadius);
+  // 预览展示生成页将采用的圆角：全局默认圆角（与 GooglePhotosLayoutDialog 生成页写入的 defaultSlotCornerRadius 一致，2026-08-31）
+  const slotCornerRadius = defaultSlotCornerRadius;
   const scaledCornerRadius = Math.max(0, slotCornerRadius * (thumbZoom / (pageW * MM_TO_PX)));
 
   return (

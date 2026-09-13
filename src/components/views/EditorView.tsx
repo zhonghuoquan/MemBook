@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Toolbar } from '../editor/Toolbar';
 import { LeftPanel } from '../editor/LeftPanel';
 import { Canvas } from '../editor/Canvas';
+import { ErrorBoundary } from '../common/ErrorBoundary';
 import { EditorEmptyState } from '../editor/EditorEmptyState';
 import { EditFlyout } from '../editor/EditFlyout';
 import { ObjectPropertiesPanel } from '../editor/ObjectPropertiesPanel';
@@ -484,7 +485,35 @@ export function EditorView({ onBack, onNavigateToSmartLayout }: EditorViewProps)
               {pages.length === 0 ? (
                 <EditorEmptyState onAddPage={() => useEditorStore.getState().addPage()} />
               ) : (
-                <Canvas />
+                <ErrorBoundary
+                  fallback={(error, reset) => (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-8 bg-[var(--color-surface)] text-center">
+                      <h2 className="text-[var(--text-h2)] font-[700] text-[var(--color-gray-800)]">{t('common.errorBoundary.title')}</h2>
+                      <p className="max-w-md text-[var(--color-text-secondary)] text-[var(--text-body)]">{t('common.errorBoundary.description')}</p>
+                      {import.meta.env.DEV && (
+                        <pre className="max-w-lg overflow-auto whitespace-pre-wrap rounded-[var(--radius-md)] bg-[var(--color-gray-100)] p-3 text-left text-[11px] text-[var(--color-error)]">
+                          {error.message}
+                        </pre>
+                      )}
+                      <div className="flex gap-3">
+                        <button
+                          className="cursor-pointer rounded-[var(--radius-lg)] border-none bg-[var(--color-brand)] px-5 py-2.5 text-[var(--text-body-sm)] font-[600] text-white transition-colors hover:bg-[var(--color-primary-600)]"
+                          onClick={reset}
+                        >
+                          {t('common.retry')}
+                        </button>
+                        <button
+                          className="cursor-pointer rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-white px-5 py-2.5 text-[var(--text-body-sm)] font-[600] text-[var(--color-gray-700)] transition-colors hover:bg-[var(--color-surface-hover)]"
+                          onClick={onBack}
+                        >
+                          {t('common.errorBoundary.backHome')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                >
+                  <Canvas />
+                </ErrorBoundary>
               )}
             </div>
             {/* 引导 Step 5 高亮：模拟页面区域 */}

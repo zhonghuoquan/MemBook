@@ -183,6 +183,14 @@ export function shouldShowWatermark(
 ): boolean {
   if (!settings.enabled) return false;
 
+  // 封面 / 封底不显示时间水印：时间水印只在普通内容页展示。
+  // 收敛在统一判定函数，画布 / 导出 / 缩略图 / 预览四端自动同步（预览此前已单独过滤内容页，不受影响）。
+  const page = pages[pageIndex];
+  const kind = page?.pageKind ?? 'content';
+  if (kind !== 'content') return false;
+  // 单页隐藏时间水印：隐藏后画布与导出都不再显示（此前导出漏检查该字段，隐藏页导出仍带水印）。
+  if (page?.watermarkHidden) return false;
+
   const current = getPageDateLocationKey(pages[pageIndex], photos, settings);
   if (!current.date) return false;
 

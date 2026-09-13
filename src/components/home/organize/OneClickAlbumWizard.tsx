@@ -19,8 +19,6 @@ import { createAndSaveProject, savePhotoChanges } from '../../../db';
 import { importPhotoToDB, ensureSupportedFormat, isHeicFile } from '../../../engine/storage-engine';
 import {
   ALBUM_SIZES,
-  PAGE_MARGIN_DEFAULT,
-  PAGE_GAP_DEFAULT,
   GOOGLE_PHOTOS_TEMPLATE_ID,
   type AlbumPage,
   type PhotoPlacement,
@@ -28,6 +26,7 @@ import {
   type Photo,
 } from '../../../types';
 import type { PhotoFileInfo } from '../../../photo-tools';
+import { useEditorStore } from '../../../store/editorStore';
 import { ThumbImage } from './shared';
 
 const MM_TO_PX = 2;
@@ -86,17 +85,19 @@ export function OneClickAlbumWizard({
   /** 预览排版结果（仅统计，用于 Step 2/3 展示） */
   const previewLayout = useMemo<GooglePhotosLayoutResult | null>(() => {
     if (layoutPhotos.length === 0) return null;
+    // 沿用编辑器里用户已设置的全局页面参数（边距/间距），实现一键成册与页面设置一致
+    const { pageMargin, slotGap } = useEditorStore.getState();
     try {
       return googlePhotosLayout(layoutPhotos, {
         pageWidth: albumSize.width,
         pageHeight: albumSize.height,
         margin: {
-          top: PAGE_MARGIN_DEFAULT,
-          bottom: PAGE_MARGIN_DEFAULT,
-          left: PAGE_MARGIN_DEFAULT,
-          right: PAGE_MARGIN_DEFAULT,
+          top: pageMargin.top,
+          bottom: pageMargin.bottom,
+          left: pageMargin.left,
+          right: pageMargin.right,
         },
-        gap: PAGE_GAP_DEFAULT,
+        gap: slotGap,
         density,
       });
     } catch {
@@ -113,6 +114,8 @@ export function OneClickAlbumWizard({
     if (!previewLayout || generating) return;
     setGenerating(true);
     try {
+      // 沿用编辑器全局页面设置（边距/间距/圆角），保持一键成册与用户在页面设置里配置的一致
+      const { pageMargin, slotGap, defaultSlotCornerRadius } = useEditorStore.getState();
       const now = Date.now();
       const newPages: AlbumPage[] = previewLayout.pages.map((gpPage, pageIdx) => {
         const placements: PhotoPlacement[] = [];
@@ -135,9 +138,10 @@ export function OneClickAlbumWizard({
           placements,
           background: '#FFFFFF',
           slotOverrides,
+          slotCornerRadius: defaultSlotCornerRadius,
           googlePhotosMmLayout: mmLayout,
           googlePhotosBaseMmLayout: mmLayout,
-          googlePhotosMmConfig: { margin: { top: PAGE_MARGIN_DEFAULT, bottom: PAGE_MARGIN_DEFAULT, left: PAGE_MARGIN_DEFAULT, right: PAGE_MARGIN_DEFAULT }, gap: PAGE_GAP_DEFAULT },
+          googlePhotosMmConfig: { margin: { top: pageMargin.top, bottom: pageMargin.bottom, left: pageMargin.left, right: pageMargin.right }, gap: slotGap },
           googlePhotosInternalRows: previewLayout.internalRows[pageIdx],
           googlePhotosLayoutRows: previewLayout.layoutRows[pageIdx],
           googlePhotosBaseLayoutRows: previewLayout.layoutRows[pageIdx],
@@ -147,7 +151,7 @@ export function OneClickAlbumWizard({
       });
 
       const name = albumName.trim() || t('organize.oneClickAlbum.defaultName', '一键成册');
-      const margin = { margin: PAGE_MARGIN_DEFAULT, gap: PAGE_GAP_DEFAULT };
+      const margin: { margin: number; gap: number } = { margin: pageMargin.top, gap: slotGap };
       const projectId = await createAndSaveProject(name, albumSize, newPages, margin);
 
       // 保存照片（import 到库内）：读取原数据 → 压缩生成 thumb/preview/original 三级 blob 存入 IndexedDB，

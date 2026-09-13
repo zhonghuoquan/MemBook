@@ -216,6 +216,60 @@ function slotsHaveOverlap(slots: { x: number; y: number; width: number; height: 
   return false;
 }
 
+/** 同排槽位几何（像素，已独立取整） */
+type PxRect = { x: number; y: number; width: number; height: number };
+
+/**
+ * 把 Google Photos 页面的毫米布局整体等比缩放并贴合到「安全区像素框」。
+ *
+ * 背景：refitPage 产出的毫米布局本来精确填满安全区、且同排/相邻间隙严格等于 slotGap。
+ * 若像旧实现那样「逐张独立 Math.round + 横向累加定位」，取整误差会在多图同排时累积，
+ * 导致①整行照片向右越出安全区、②缝隙不再等于设置间距。
+ *
+ * 本函数改为：每一张的像素坐标都直接从毫米坐标（非累加）按同一缩放系数换算，
+ * 使整个页面等比塞进 [safeL..safeR]×[safeT..safeB] 整数安全框内——
+ * 位置向下取整保证不越界，同排/相邻缝隙由同一 scale 产生，天然统一且≈设置间距。
+ *
+ * @param mm 毫米布局（refitPage 输出，顺序对应 placements）
+ * @param safeL/safeT/safeR/safeB 安全区像素边界（含边距）
+ */
+export function fitPageToSafeBox(
+  mm: Array<{ x: number; y: number; width: number; height: number } | null>,
+  safeL: number, safeT: number, safeR: number, safeB: number,
+): Array<PxRect | null> {
+  const BASE = 2; // mm → px 基准缩放（MM_TO_PX）
+  if (mm.length === 0) return [];
+  // 包围盒只统计有照片的槽位，空槽位（null）不参与缩放，原样透传 null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let allEmpty = true;
+  for (const p of mm) {
+    if (!p) continue;
+    allEmpty = false;
+    const x = p.x * BASE, y = p.y * BASE, w = p.width * BASE, h = p.height * BASE;
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+  }
+  if (allEmpty || maxX - minX <= 0 || maxY - minY <= 0) {
+    return mm.map((p) => p ? { x: Math.round(p.x * BASE), y: Math.round(p.y * BASE), width: Math.round(p.width * BASE), height: Math.round(p.height * BASE) } : null);
+  }
+  const safeW = safeR - safeL, safeH = safeB - safeT;
+  // 等比缩放：取两轴的较小比，确保横纵都不越界
+  let scale = Math.min(safeW / (maxX - minX), safeH / (maxY - minY));
+  // 预留像素：抵消向下取整对右/下边缘的逼近，保证绝不越界
+  scale = Math.max(0, Math.min(1, scale)) * (1 - 1e-3);
+  const out: Array<PxRect | null> = new Array(mm.length);
+  for (let i = 0; i < mm.length; i++) {
+    const p = mm[i];
+    if (!p) { out[i] = null; continue; }
+    const x = safeL + (p.x * BASE - minX) * scale;
+    const y = safeT + (p.y * BASE - minY) * scale;
+    const w = p.width * BASE * scale;
+    const h = p.height * BASE * scale;
+    out[i] = { x: Math.floor(x), y: Math.floor(y), width: Math.floor(w), height: Math.floor(h) };
+  }
+  return out;
+}
+
 /* 根据 pageMargin + slotGap 计算槽位在安全区内的 slotOverrides（像素值） */
 export function calcMarginOverrides(pageIndex: number, get: () => EditorState, photos: Photo[]): Record<string, SlotOverride> | null {
   const { pages, albumSize, pageMargin: pm, slotGap } = get();
@@ -271,14 +325,30 @@ export function calcMarginOverrides(pageIndex: number, get: () => EditorState, p
     // 重建 slotOverrides + mmLayout
     const overrides: Record<string, SlotOverride> = {};
     const mmLayout: Array<{ photoId: string; x: number; y: number; width: number; height: number }> = [];
+    // mm 布局已由 refitPage/refitPageWithRotation 填满安全区（含边距偏移）。
+    // 用 fitPageToSafeBox 对整个布局做整体等比缩放并向下取整贴合安全区像素框：
+    //  1. 所有槽位共用同一 scale，同排水平缝隙与上下行垂直缝隙由同一比例产生，统一 ≈ slotGap；
+    //  2. 一律向下取整，物理上保证任一照片位都不会越出安全区边界。
+    const safeL = pm.left * MM;
+    const safeT = pm.top * MM;
+    const safeR = (pw - pm.right) * MM;
+    const safeB = (ph - pm.bottom) * MM;
+    const mmInput = page.placements.map((_pl, i) => {
+      const pr = result.photos[i];
+      if (!pr) return null;
+      return { x: pr.x, y: pr.y, width: pr.width, height: pr.height };
+    });
+    const fitted = fitPageToSafeBox(mmInput, safeL, safeT, safeR, safeB);
     page.placements.forEach((pl, i) => {
       const pr = result.photos[i];
       if (!pr) return;
+      const a = fitted[i];
+      if (!a) return;
       overrides[pl.slotId] = {
-        x: Math.round(pr.x * MM),
-        y: Math.round(pr.y * MM),
-        width: Math.round(pr.width * MM),
-        height: Math.round(pr.height * MM),
+        x: a.x,
+        y: a.y,
+        width: a.width,
+        height: a.height,
       };
       mmLayout.push({ photoId: pr.photoId, x: pr.x, y: pr.y, width: pr.width, height: pr.height });
     });

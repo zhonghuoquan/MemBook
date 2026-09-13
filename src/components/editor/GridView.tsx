@@ -68,6 +68,12 @@ export function GridView({ onBack }: GridViewProps) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const [containerWidth, setContainerWidth] = useState(0);
+  // 虚拟滚动（内存窗口化）：只渲染滚动视口内的一屏+缓冲卡片，DOM 与缩略图数量恒定。
+  // scrollTop/viewH 驱动可见范围；rowPitch 为每行实际行距（卡片高+页码标签+间距），首次渲染测量校准。
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(0);
+  const [rowPitch, setRowPitch] = useState(0);
+  const startVisibleRef = useRef(0);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,16 +119,65 @@ export function GridView({ onBack }: GridViewProps) {
     return Math.max(1, Math.floor((containerWidth - GRID_PADDING * 2 + CARD_GAP) / unit));
   }, [containerWidth, cardWidth]);
 
-  // 监听容器宽度变化
+  // 监听容器宽度变化（同时记录视口高度，供虚拟滚动窗口计算）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => setContainerWidth(el.clientWidth);
+    const update = () => {
+      setContainerWidth(el.clientWidth);
+      setViewH(el.clientHeight);
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // 虚拟滚动行距/范围：行数、总高、可见窗口（一屏 + 上下缓冲）
+  const effPitch = rowPitch > 0 ? rowPitch : cardHeight + 36; // 首次测量前用占位估算
+  const rowCount = useMemo(
+    () => (columns > 0 ? Math.ceil(visiblePages.length / columns) : 0),
+    [visiblePages.length, columns],
+  );
+  const totalH = rowCount * effPitch;
+  const OVERSCAN_ROWS = 2;
+  const startRow = rowCount === 0 ? 0 : Math.max(0, Math.floor(scrollTop / effPitch) - OVERSCAN_ROWS);
+  const endRow = rowCount === 0 ? 0 : Math.min(rowCount, Math.ceil((scrollTop + viewH) / effPitch) + OVERSCAN_ROWS);
+  const startVisible = startRow * columns;
+  const endVisible = Math.min(visiblePages.length, endRow * columns);
+  const windowItems = visiblePages.slice(startVisible, endVisible);
+
+  // 同步起始可见索引，供 findDropGap 把「窗口内局部索引」映射回全局可见索引
+  useEffect(() => {
+    startVisibleRef.current = startVisible;
+  }, [startVisible]);
+
+  // 滚动：rAF 节流更新 scrollTop，驱动可见窗口滑动
+  const scrollRafRef = useRef(0);
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el || scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      setScrollTop(el.scrollTop);
+    });
+  }, []);
+  useEffect(() => () => { if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current); }, []);
+
+  // 测量首个渲染卡片的真实高度 → 校准行距（含页码标签；稳定后不再触发重渲）
+  const measureFirst = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const h = el.getBoundingClientRect().height + CARD_GAP;
+    setRowPitch((prev) => (Math.abs(prev - h) > 1 ? h : prev));
+  }, []);
+
+  // 页数/列数/行距变化后，把 scrollTop 收敛回合法范围，避免落在空白区
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!c) return;
+    const max = Math.max(0, c.scrollHeight - c.clientHeight);
+    if (c.scrollTop > max) c.scrollTop = max;
+  }, [columns, visiblePages.length, totalH]);
 
   // 退出网格视图时清空选择，避免状态残留
   useEffect(() => {
@@ -336,11 +391,15 @@ export function GridView({ onBack }: GridViewProps) {
   }, [pages, gridSelectedPages]);
 
   // 根据鼠标位置计算应插入的可见缺口索引（0..visiblePages.length）；空白处返回 -1，避免误触发到行末尾
+  // 虚拟滚动：DOM 中只存在「可见窗口」的卡片，故 querySelectorAll 得到的是窗口内局部索引。
+  // 把局部索引映射回「全局可见索引」= startVisibleRef + 局部，才能被 reorderPages/visiblePages 正确使用。
   const findDropGap = useCallback((clientX: number, clientY: number): number => {
     const container = containerRef.current;
     if (!container) return -1;
     const cards = Array.from(container.querySelectorAll('[data-page-card]')) as HTMLElement[];
     if (cards.length === 0) return 0;
+    const off = startVisibleRef.current; // 窗口起始全局索引
+    const toGlobal = (local: number) => off + local;
 
     // 优先取鼠标正下方的卡片，按卡片左右半区决定插入位置
     const el = document.elementFromPoint(clientX, clientY);
@@ -349,11 +408,11 @@ export function GridView({ onBack }: GridViewProps) {
       const idx = cards.indexOf(hoveredCard);
       if (idx >= 0) {
         const r = hoveredCard.getBoundingClientRect();
-        return clientX < r.left + r.width / 2 ? idx : idx + 1;
+        return toGlobal(clientX < r.left + r.width / 2 ? idx : idx + 1);
       }
     }
 
-    // 计算网格整体边界与行列尺寸
+    // 计算窗口网格边界与行列尺寸
     const first = cards[0].getBoundingClientRect();
     const last = cards[cards.length - 1].getBoundingClientRect();
     const colWidth = first.width + CARD_GAP;
@@ -363,7 +422,7 @@ export function GridView({ onBack }: GridViewProps) {
     const gridTop = first.top;
     const gridBottom = last.bottom;
 
-    // 明显超出网格区域视为空白，不响应
+    // 明显超出窗口网格区域视为空白，不响应（拖到窗口下方会自动滚动带入新卡片）
     if (clientY < gridTop - rowHeight / 2 || clientY > gridBottom + rowHeight / 2) return -1;
     if (clientX < gridLeft - colWidth / 2 || clientX > gridRight + colWidth / 2) return -1;
 
@@ -378,17 +437,17 @@ export function GridView({ onBack }: GridViewProps) {
     if (rowCards.length > 0) {
       rowCards.sort((a, b) => a.r.left - b.r.left);
       for (const { idx, r } of rowCards) {
-        if (clientX < r.left + r.width / 2) return idx;
+        if (clientX < r.left + r.width / 2) return toGlobal(idx);
       }
-      return rowCards[rowCards.length - 1].idx + 1;
+      return toGlobal(rowCards[rowCards.length - 1].idx + 1);
     }
 
     // 未命中任何行，按垂直方向最近行推断
     for (let i = 0; i < cards.length; i++) {
       const r = cards[i].getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) return i;
+      if (clientY < r.top + r.height / 2) return toGlobal(i);
     }
-    return cards.length;
+    return toGlobal(cards.length);
   }, []);
 
   // 拖拽排序：按下后先不启动，满足“移动超过阈值 + 延迟”才真正激活，避免快速点击误判为拖拽
@@ -463,6 +522,14 @@ export function GridView({ onBack }: GridViewProps) {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
+        // 跨视口拖拽：指针靠近滚动容器上/下边缘时自动滚动，把新卡片带入窗口，实现拖到视口外/跨屏
+        const c = containerRef.current;
+        if (c) {
+          const cr = c.getBoundingClientRect();
+          const margin = 70;
+          if (ev.clientY < cr.top + margin) c.scrollTop -= 24;
+          else if (ev.clientY > cr.bottom - margin) c.scrollTop += 24;
+        }
         const gap = findDropGap(ev.clientX, ev.clientY);
         if (gap >= 0 && gap !== st.overOriginal) {
           st.overOriginal = gap;
@@ -589,6 +656,7 @@ export function GridView({ onBack }: GridViewProps) {
           backgroundImage: 'var(--gradient-surface)',
         }}
         onClick={handleContainerClick}
+        onScroll={handleScroll}
       >
         {visiblePages.length === 0 ? (
           <div className="flex flex-col items-center justify-center w-full h-full text-[var(--color-gray-500)]">
@@ -629,63 +697,79 @@ export function GridView({ onBack }: GridViewProps) {
             )}
           </div>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${columns}, ${cardWidth}px)`,
-              gap: CARD_GAP,
-              justifyContent: 'center',
-              alignContent: 'start',
-            }}
-          >
-            {visiblePages.map(({ page, originalIndex }, visibleIndex) => {
-              const isSelected = gridSelectedPages.includes(page.id);
-              let shiftX = 0;
-              // 悬停插入：在 insertIndex 处打开较小缺口，减少抖动
-              if (insertHoverIndex !== null) {
-                if (visibleIndex === insertHoverIndex) shiftX += 10;
-                if (visibleIndex === insertHoverIndex - 1) shiftX -= 10;
-              }
-              // 拖拽排序：在 dragOverIndex 处打开较小缺口
-              const srcVisible = dragRef.current.active
-                ? visiblePages.findIndex((v) => v.originalIndex === dragRef.current.srcOriginal)
-                : -1;
-              const isDropTarget = dragRef.current.active && dragOverIndex !== null && dragOverIndex !== srcVisible && dragOverIndex !== srcVisible + 1;
-              if (isDropTarget) {
-                if (visibleIndex === dragOverIndex) shiftX += 10;
-                if (visibleIndex === dragOverIndex - 1) shiftX -= 10;
-              }
-              return (
-                <GridPageItem
-                  key={page.id}
-                  page={page}
-                  originalIndex={originalIndex}
-                  visibleIndex={visibleIndex}
-                  visibleCount={visiblePages.length}
-                  columns={columns}
-                  cardWidth={cardWidth}
-                  cardHeight={cardHeight}
-                  isSelected={isSelected}
-                  isMultiSelected={gridSelectedPages.length > 1 && isSelected}
-                  gridZoom={gridZoom}
-                  shiftX={shiftX}
-                  insertHoverIndex={insertHoverIndex}
-                  dragOverIndex={dragOverIndex}
-                  isDragging={dragRef.current.active}
-                  onMouseDown={handleDragStart}
-                  onClick={handlePageClick}
-                  onActivateInsert={setInsertHoverIndex}
-                  onDeactivateInsert={() => setInsertHoverIndex(null)}
-                  onInsertAt={handleInsertPage}
-                  onMenuOpen={(e) => {
-                    e.stopPropagation();
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setPageMenu({ originalIndex, x: rect.right - 4, y: rect.top + 4 });
-                  }}
-                />
-              );
-            })}
-          </div>
+          <>
+            {/* 占位撑起真实滚动高度（虚拟滚动：卡片绝对定位叠加其上） */}
+            <div style={{ height: GRID_PADDING / 2 + totalH }} />
+            {/* 可视窗口容器：按当前起始行整体下移，内为与全量一致的网格布局，只渲染窗口内卡片 */}
+            <div
+              className="absolute left-0 right-0"
+              style={{ top: GRID_PADDING / 2, transform: `translateY(${startRow * effPitch}px)` }}
+            >
+              <div
+                style={{
+                  display: windowItems.length > 0 ? 'grid' : 'none',
+                  gridTemplateColumns: `repeat(${columns}, ${cardWidth}px)`,
+                  gap: CARD_GAP,
+                  justifyContent: 'center',
+                  alignContent: 'start',
+                }}
+              >
+                {windowItems.map(({ page, originalIndex }, j) => {
+                  const visibleIndex = startVisible + j; // 全局可见索引（与全量渲染时一致，交互零改动）
+                  const isSelected = gridSelectedPages.includes(page.id);
+                  let shiftX = 0;
+                  // 悬停插入：在 insertIndex 处打开较小缺口，减少抖动
+                  if (insertHoverIndex !== null) {
+                    if (visibleIndex === insertHoverIndex) shiftX += 10;
+                    if (visibleIndex === insertHoverIndex - 1) shiftX -= 10;
+                  }
+                  // 拖拽排序：在 dragOverIndex 处打开较小缺口
+                  const srcLocal = dragRef.current.active ? windowItems.findIndex((w) => w.originalIndex === dragRef.current.srcOriginal) : -1;
+                  const srcVisible = srcLocal >= 0 ? startVisible + srcLocal : -1;
+                  const isDropTarget = dragRef.current.active && dragOverIndex !== null && dragOverIndex !== srcVisible && dragOverIndex !== srcVisible + 1;
+                  if (isDropTarget) {
+                    if (visibleIndex === dragOverIndex) shiftX += 10;
+                    if (visibleIndex === dragOverIndex - 1) shiftX -= 10;
+                  }
+                  return (
+                    <div
+                      key={page.id}
+                      ref={j === 0 ? measureFirst : undefined}
+                      className="flex justify-center"
+                      style={{ width: cardWidth }}
+                    >
+                      <GridPageItem
+                        page={page}
+                        originalIndex={originalIndex}
+                        visibleIndex={visibleIndex}
+                        visibleCount={visiblePages.length}
+                        columns={columns}
+                        cardWidth={cardWidth}
+                        cardHeight={cardHeight}
+                        isSelected={isSelected}
+                        isMultiSelected={gridSelectedPages.length > 1 && isSelected}
+                        gridZoom={gridZoom}
+                        shiftX={shiftX}
+                        insertHoverIndex={insertHoverIndex}
+                        dragOverIndex={dragOverIndex}
+                        isDragging={dragRef.current.active}
+                        onMouseDown={handleDragStart}
+                        onClick={handlePageClick}
+                        onActivateInsert={setInsertHoverIndex}
+                        onDeactivateInsert={() => setInsertHoverIndex(null)}
+                        onInsertAt={handleInsertPage}
+                        onMenuOpen={(e) => {
+                          e.stopPropagation();
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setPageMenu({ originalIndex, x: rect.right - 4, y: rect.top + 4 });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
       </div>
 

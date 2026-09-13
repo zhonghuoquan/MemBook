@@ -16,7 +16,7 @@ import { listProjects, saveProject, listCustomTemplates, saveCustomTemplate, loa
 import { getPhotoBlob, savePhotoBlob } from '../engine/handle-store';
 import { isTauri } from '../engine/storage-engine';
 import { APP_VERSION } from '../version';
-import type { AlbumProject, AlbumSize, Photo, CustomTemplate } from '../types';
+import type { AlbumProject, AlbumPage, AlbumSize, Photo, CustomTemplate } from '../types';
 import { logger } from './logger';
 
 const MANIFEST_VERSION = 2;
@@ -208,21 +208,27 @@ export async function exportAllData(opts: ExportOptions = {}): Promise<ExportRes
 }
 
 /** 选择保存路径并把 zip 写入磁盘（Tauri）；浏览器环境回退到下载 */
-export async function saveBackupFile(blob: Blob, filename: string): Promise<{ path?: string; downloaded: boolean }> {
-  try {
-    if (isTauri()) {
-      const { writeFile } = await import('@tauri-apps/plugin-fs');
-      const { save } = await import('@tauri-apps/plugin-dialog');
-      const path = await save({
-        defaultPath: filename,
-        filters: [{ name: 'ZIP 备份', extensions: ['zip'] }],
-      });
-      if (!path) return { downloaded: false };
+export async function saveBackupFile(blob: Blob, filename: string): Promise<{ path?: string; downloaded: boolean; error?: string }> {
+  if (isTauri()) {
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const path = await save({
+      defaultPath: filename,
+      filters: [{ name: 'ZIP 备份', extensions: ['zip'] }],
+    });
+    if (!path) return { downloaded: false };
+    try {
       const buf = await blob.arrayBuffer();
       await writeFile(path, new Uint8Array(buf));
       return { path, downloaded: true };
+    } catch (e) {
+      // P0-fix：写盘失败（磁盘满/权限/路径失效）必须如实上报。原实现 catch 后
+      // 静默回退「浏览器下载」，桌面端用户完全无感知，会误以为备份成功——
+      // 数据安全兜底反而变成最大的隐患。
+      logger.error('[backup] Tauri 写盘失败:', e);
+      return { downloaded: false, error: (e as Error).message || String(e) };
     }
-  } catch { /* fallback to browser download */ }
+  }
 
   downloadBlob(blob, filename);
   return { downloaded: true };
@@ -428,6 +434,9 @@ export async function importAllData(zipBlob: Blob, opts: ImportOptions = {}): Pr
   /* ── 恢复照片记录 ── */
   const photoEntries = await readFolderFiles<Photo & { backupBlobId?: string }>('photos');
   const photosToSave: Photo[] = [];
+  // P0-fix（rename 断链）：rename 模式下冲突照片被分配新 ID，记录 旧ID→新ID 映射，
+  // 照片导入完成后用于修正项目页面中的 photoId 引用，否则打开项目后所有照片位变空。
+  const photoIdMap = new Map<string, string>();
   for (let i = 0; i < photoEntries.length; i++) {
     const { data: p } = photoEntries[i];
     onProgress?.({ phase: 'photos', current: i + 1, total: photoEntries.length, message: `恢复照片 ${i + 1}/${photoEntries.length}` });
@@ -478,6 +487,7 @@ export async function importAllData(zipBlob: Blob, opts: ImportOptions = {}): Pr
 
     photosToSave.push(finalPhoto);
     existingPhotos.set(id, finalPhoto);
+    photoIdMap.set(p.id, id);
     if (action === 'overwrite') result.photos.overwritten++;
     else result.photos.added++;
   }
@@ -487,6 +497,62 @@ export async function importAllData(zipBlob: Blob, opts: ImportOptions = {}): Pr
       await savePhotoChanges(photosToSave);
     } catch (e) {
       result.errors.push(`保存照片记录失败: ${(e as Error).message}`);
+    }
+  }
+
+  // P0-fix（rename 断链）：修正本批导入项目中指向旧照片 ID 的引用
+  //（placements.photoId / googlePhotosMmLayout.photoId / googlePhotosBaseMmLayout.photoId），
+  // 否则 rename 模式下打开项目后照片位全部变空。
+  if (photoIdMap.size > 0) {
+    const mapPhotoId = (photoId: string | null): string | null => {
+      if (photoId == null) return photoId;
+      return photoIdMap.get(photoId) ?? photoId;
+    };
+    const fixLayout = (
+      layout: AlbumPage['googlePhotosMmLayout'],
+    ): AlbumPage['googlePhotosMmLayout'] => {
+      if (!layout) return layout;
+      let layoutChanged = false;
+      const newLayout = layout.map((it) => {
+        const mapped = mapPhotoId(it.photoId);
+        if (mapped === it.photoId) return it;
+        layoutChanged = true;
+        return { ...it, photoId: mapped as string };
+      });
+      return layoutChanged ? newLayout : layout;
+    };
+    for (const newProjId of projectIdMap.values()) {
+      const proj = existingProjects.get(newProjId);
+      if (!proj) continue;
+      let changed = false;
+      const fixedPages = proj.pages.map((page) => {
+        let pg = page;
+        const placements = pg.placements.map((pl) => {
+          const mapped = mapPhotoId(pl.photoId);
+          if (mapped === pl.photoId) return pl;
+          changed = true;
+          return { ...pl, photoId: mapped };
+        });
+        if (placements !== pg.placements) pg = { ...pg, placements };
+        const mmLayout = fixLayout(pg.googlePhotosMmLayout);
+        if (mmLayout && mmLayout !== pg.googlePhotosMmLayout) {
+          pg = { ...pg, googlePhotosMmLayout: mmLayout };
+        }
+        const baseMmLayout = fixLayout(pg.googlePhotosBaseMmLayout);
+        if (baseMmLayout && baseMmLayout !== pg.googlePhotosBaseMmLayout) {
+          pg = { ...pg, googlePhotosBaseMmLayout: baseMmLayout };
+        }
+        return pg;
+      });
+      if (changed) {
+        try {
+          const fixedProj = { ...proj, pages: fixedPages, updatedAt: new Date().toISOString() };
+          await saveProject(fixedProj);
+          existingProjects.set(newProjId, fixedProj);
+        } catch (e) {
+          result.errors.push(`修正项目 ${proj.name} 的照片引用失败: ${(e as Error).message}`);
+        }
+      }
     }
   }
 

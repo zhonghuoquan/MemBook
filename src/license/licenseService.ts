@@ -27,10 +27,15 @@ const TRIAL_START_KEY = 'membook-trial-start';
 /** 试用期天数 */
 const TRIAL_DAYS = 7;
 
+/** 时钟回拨容差：小于该幅度的回拨视为正常 NTP 校时，不触发保护 */
+const CLOCK_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+
 /** 机器码与试用期缓存（初始化后保持同步读取） */
 let _machineId: string | null = null;
 let _trialRecord: TrialRecord | null = null;
 let _initialized = false;
+/** P0-fix（防篡改）：启动时/激活时对已存储许可证重新验签的结果 */
+let _licenseVerified = false;
 
 export interface StoredLicense {
   isActivated: boolean;
@@ -73,6 +78,7 @@ export function saveStoredLicense(license: StoredLicense): void {
 
 /** 清除许可证 */
 export function clearStoredLicense(): void {
+  _licenseVerified = false;
   try {
     localStorage.removeItem(LICENSE_STORAGE_KEY);
   } catch (err) {
@@ -137,6 +143,9 @@ export async function initLicenseService(): Promise<void> {
   if (_initialized) return;
 
   const machineId = await getMachineFingerprint();
+  // P0-fix（指纹算法升级 v2）：旧版指纹混入计算机名/用户名，改名即失效。
+  // 用 v1 指纹识别旧激活记录并迁移到新指纹，避免已付费用户掉激活。
+  const v1Fingerprint = await invoke<string>('get_machine_fingerprint_v1').catch(() => null);
 
   // 老版本迁移：如果 localStorage 中有旧的随机机器码，且当前 license 绑定的是旧机器码，
   // 则把 license 的 machineId 更新为新的真实机器码，避免老用户需要重新激活。
@@ -146,16 +155,44 @@ export async function initLicenseService(): Promise<void> {
     license.machineId = machineId;
     saveStoredLicense(license);
   }
+  // P0-fix（指纹算法升级）：v1 指纹激活的记录迁移到 v2 指纹
+  if (license && v1Fingerprint && license.machineId === v1Fingerprint && machineId !== 'unknown') {
+    license.machineId = machineId;
+    saveStoredLicense(license);
+  }
+
+  // P0-fix（防篡改）：启动时对已存储的许可证重新验签。原先 isActivated() 只查
+  // isActivated 标记与机器码，直接编辑 localStorage 中的 base64 即可永久解锁。
+  if (license && license.isActivated === true) {
+    const hasSig = typeof license.signature === 'string' && license.signature.length > 0;
+    if (!hasSig) {
+      _licenseVerified = false;
+      logger.warn('[license] 已存储的许可证缺少签名，按未激活处理');
+    } else {
+      // 优先按绑定机器码的方式验签；不匹配时回退尝试仅验码（早期版本签名未绑机器）
+      const boundOk =
+        license.machineId && license.machineId === machineId
+          ? await verifyActivationCode(license.activatedCode, license.signature, license.machineId)
+          : false;
+      _licenseVerified = boundOk || (await verifyActivationCode(license.activatedCode, license.signature));
+      if (!_licenseVerified) {
+        logger.warn('[license] 已存储的许可证验签失败，按未激活处理');
+      }
+    }
+  }
 
   let record = await loadTrialRecord();
   const anchor = await loadTrialAnchor();
 
-  if (record && record.machine_id !== machineId) {
+  // P0-fix：machineId === 'unknown'（指纹命令瞬时失败）时不得换绑，
+  // 否则会把 trial.json 的 machine_id 污染成 'unknown'
+  if (record && machineId !== 'unknown' && record.machine_id !== machineId) {
     // 机器码变化（例如更换硬件或重装系统）：保留原试用期，防止换硬件重新白嫖
     record = {
       machine_id: machineId,
       trial_start: record.trial_start,
       trial_used: record.trial_used,
+      last_seen_ms: record.last_seen_ms,
     };
     await saveTrialRecord(record);
     await saveTrialAnchor(record.trial_start);
@@ -184,6 +221,25 @@ export async function initLicenseService(): Promise<void> {
     await saveTrialAnchor(record.trial_start);
   }
   // record && anchor && 同机器：无需处理
+
+  // P0-fix（时钟回拨）：记录本次见到的系统时间。若当前时间明显早于上次记录
+  // （回拨超过容差，容忍正常的 NTP 校时），把 trial_start 等量前移——已流逝的
+  // 试用天数不因回拨而「返还」。同步更新注册表锚点，防止清 AppData 后用旧锚点绕过。
+  if (record) {
+    const nowMs = Date.now();
+    const lastSeen = record.last_seen_ms;
+    if (lastSeen && nowMs < lastSeen - CLOCK_TOLERANCE_MS) {
+      const startMs = new Date(record.trial_start).getTime();
+      if (Number.isFinite(startMs)) {
+        const elapsed = Math.max(0, lastSeen - startMs);
+        record.trial_start = new Date(nowMs - elapsed).toISOString();
+        logger.warn('[license] 检测到系统时钟回拨，试用期起点已前移');
+      }
+    }
+    record.last_seen_ms = nowMs;
+    await saveTrialRecord(record);
+    await saveTrialAnchor(record.trial_start);
+  }
 
   _machineId = machineId;
   _trialRecord = record;
@@ -322,6 +378,7 @@ export async function activateLicense(code: string, signature: string): Promise<
     machineId,
   };
   saveStoredLicense(license);
+  _licenseVerified = true; // P0-fix：本次验签刚通过，立即生效（无需重启应用）
   return { success: true };
 }
 
@@ -337,6 +394,10 @@ export function isActivated(): boolean {
     // 未激活 — 检查是否在试用期内
     return isTrialActive();
   }
+  // P0-fix（防篡改）：只信任启动时（或激活时）重新验签通过的许可证，
+  // 防止直接编辑 localStorage 中的 base64 绕过激活。验签失败时按未激活处理
+  //（试用期内仍有试用权限），用户重新输入激活码即可恢复。
+  if (!_licenseVerified) return isTrialActive();
   // 已激活 — 校验机器码
   if (license.machineId && license.machineId !== getMachineId()) return false;
   return true;
