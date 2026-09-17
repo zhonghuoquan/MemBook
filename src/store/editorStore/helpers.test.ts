@@ -122,6 +122,36 @@ describe('fitPageToSafeBox', () => {
       expect(r!.x + r!.width).toBeLessThanOrEqual(safeR);
       expect(r!.y + r!.height).toBeLessThanOrEqual(safeB);
     }
+    // 未填满方向不被强行填充：X 方向（bbox 宽 180px ≪ 360px）保持原形状，不被拉大到安全区宽
+    expect(px[0]!.width).toBeLessThan(safeR - safeL);
+  });
+
+  it('双轴填满时，贴右/贴下槽位精确锚定到安全线（右缘=safeR、下缘=safeB），消除向下取整的内缩', () => {
+    // 双行双列填满安全区（内容区 180×250mm，每格 88×123mm + gap 4mm）
+    const mm = [
+      { x: 15, y: 15, width: 88, height: 123 },
+      { x: 107, y: 15, width: 88, height: 123 },
+      { x: 15, y: 142, width: 88, height: 123 },
+      { x: 107, y: 142, width: 88, height: 123 },
+    ];
+    const px = fitPageToSafeBox(mm, safeL, safeT, safeR, safeB);
+    // 右上角槽位（index1）右缘精确贴右安全线
+    expect(px[1]!.x + px[1]!.width).toBe(safeR);
+    // 左下角槽位（index2）下缘精确贴下安全线
+    expect(px[2]!.y + px[2]!.height).toBe(safeB);
+    // 右下角槽位（index3）右缘、下缘同时精确贴安全线
+    expect(px[3]!.x + px[3]!.width).toBe(safeR);
+    expect(px[3]!.y + px[3]!.height).toBe(safeB);
+    // 左上角槽位（index0）保持原形状（不贴右/不贴下，宽高按 scale 取整）
+    expect(px[0]!.x + px[0]!.width).toBeLessThan(safeR);
+    expect(px[0]!.y + px[0]!.height).toBeLessThan(safeB);
+    // 所有槽位仍不越界（锚定不破坏硬约束）
+    for (const r of px) {
+      expect(r!.x).toBeGreaterThanOrEqual(safeL);
+      expect(r!.y).toBeGreaterThanOrEqual(safeT);
+      expect(r!.x + r!.width).toBeLessThanOrEqual(safeR);
+      expect(r!.y + r!.height).toBeLessThanOrEqual(safeB);
+    }
   });
 
   it('两图一上一线的垂直间距约等于 slotGap（4mm → 8px），不再被撑宽', () => {

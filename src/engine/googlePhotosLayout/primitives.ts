@@ -938,7 +938,12 @@ export function detectSpanOpportunities(
   return result;
 }
 
-/** 将 mm 坐标矩形从 base 页面坐标系按内容区中心旋转 90° 整数倍，映射到 target 页面坐标系 */
+/**
+ * 物理旋转：将 mm 矩形绕 base 内容区中心旋转 90° 整数倍，
+ * **保持照片的毫米尺寸与相对间距不变**（不再按内容区宽/高各自归一化再回放——
+ * 旧做法在非正方内容区下会把间距按纵横比拉长/压缩，导致角度切换后照片位宽窄不一）。
+ * 返回坐标以 base 内容区中心为原点；整体缩放/居中由调用方（refitPageWithRotation）统一处理。
+ */
 export function rotateMmRect(
   mx: number, my: number, mw: number, mh: number,
   basePageW: number, basePageH: number,
@@ -949,29 +954,22 @@ export function rotateMmRect(
   if (rotation === 0) return { x: mx, y: my, width: mw, height: mh };
   const baseCW = basePageW - margin.left - margin.right;
   const baseCH = basePageH - margin.top - margin.bottom;
-  const targetCW = targetPageW - margin.left - margin.right;
-  const targetCH = targetPageH - margin.top - margin.bottom;
-  if (baseCW <= 0 || baseCH <= 0 || targetCW <= 0 || targetCH <= 0) return { x: mx, y: my, width: mw, height: mh };
+  if (baseCW <= 0 || baseCH <= 0 || targetPageW <= 0 || targetPageH <= 0) return { x: mx, y: my, width: mw, height: mh };
 
-  // 归一化到 base 内容区
-  const nx = (mx - margin.left) / baseCW;
-  const ny = (my - margin.top) / baseCH;
-  const nw = mw / baseCW;
-  const nh = mh / baseCH;
+  // 平移到 base 内容区中心坐标系
+  const nx = mx - margin.left - baseCW / 2;
+  const ny = my - margin.top - baseCH / 2;
 
-  // 旋转归一化坐标
-  let rx = nx, ry = ny, rw = nw, rh = nh;
+  // 物理旋转（屏幕坐标系 y 向下，顺时针 90°；毫米尺寸与相对间距不变）。
+  // 旋转后格子的左上角 = 四个角点旋转后的最小坐标（不是把原左上角简单取反——
+  // 那样每格会差自身 w/h 的偏移，格子宽高不一时相对位置扭曲 → 重叠/缝隙错乱）：
+  //   180°：(nx,ny) → (-(nx+mw), -(ny+mh))；90°：左上 → (-(ny+mh), nx)；
+  //   270°：左上 → (ny, -(nx+mw))；90°/270° 宽高互换。
+  let rx = nx, ry = ny, rw = mw, rh = mh;
   switch (rotation) {
-    case 90:  rx = 1 - ny - nh; ry = nx;       rw = nh; rh = nw; break;
-    case 180: rx = 1 - nx - nw; ry = 1 - ny - nh;               break;
-    case 270: rx = ny;          ry = 1 - nx - nw; rw = nh; rh = nw; break;
+    case 90:  rx = -(ny + mh); ry = nx; rw = mh; rh = mw; break;
+    case 180: rx = -(nx + mw); ry = -(ny + mh); break;
+    case 270: rx = ny;  ry = -(nx + mw); rw = mh; rh = mw; break;
   }
-
-  // 映射到 target 内容区
-  return {
-    x: margin.left + rx * targetCW,
-    y: margin.top + ry * targetCH,
-    width: rw * targetCW,
-    height: rh * targetCH,
-  };
+  return { x: rx, y: ry, width: rw, height: rh };
 }

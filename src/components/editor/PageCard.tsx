@@ -116,8 +116,8 @@ export const PageCard = memo(function PageCard({
     // 右键菜单由父组件 GridView 统一处理
   }, []);
 
-  // 圆角随卡片宽度自适应，避免缩放后视觉上圆角过大或过小
-  const borderRadius = Math.max(4, Math.round(cardWidth * 0.08));
+  // 圆角固定为极小值（2px），贴近真实书页的锐利纸边质感；不再随卡片宽度变大
+  const borderRadius = 2;
 
   const cardStyle: React.CSSProperties = {
     width: cardWidth,
@@ -202,7 +202,7 @@ export function AddPageCard({
       style={{
         width: cardWidth,
         height: cardHeight,
-        borderRadius: Math.max(4, Math.round(cardWidth * 0.08)),
+        borderRadius: 2, // 与 PageCard 保持一致：接近直角的小圆角
         boxSizing: 'border-box',
         border: '2px dashed var(--color-border)',
         display: 'flex',

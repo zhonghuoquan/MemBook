@@ -8,7 +8,7 @@
  *   4. 矩形不重叠：同页照片两两不相交
  */
 import { describe, it, expect } from 'vitest';
-import { googlePhotosLayout, generateMultipleLayouts, layoutSinglePage } from './google-photos-layout';
+import { googlePhotosLayout, generateMultipleLayouts, layoutSinglePage, refitPageWithRotation } from './google-photos-layout';
 import type { GooglePhotosConfig, RowTier, TierPattern } from './google-photos-layout';
 import type { Photo } from '../types';
 
@@ -700,5 +700,250 @@ describe('一键成册·2026-08-22 布局多元化三块', () => {
     const openingPool = new Set<TierPattern>(['opening', 'hero-first', 'bold', 'hero-tail']);
     const firstPattern = result.tierPatterns[0];
     expect(openingPool.has(firstPattern)).toBe(true);
+  });
+});
+
+describe('refitPageWithRotation 行列转置填满', () => {
+  const margin = { top: 15, bottom: 15, left: 15, right: 15 };
+  const EPS = 0.6;
+  let seq = 0;
+  const mkPhoto = (w: number, h: number): Photo => ({
+    id: `p${++seq}`, src: '', name: `p${seq}`, date: '2024-05-01T10:00:00.000Z',
+    width: w, height: h, orientation: (w > h ? 'landscape' : w < h ? 'portrait' : 'square') as any,
+  });
+  const shapePool: Array<[number, number]> = [[4000, 3000], [3000, 4000], [3000, 3000], [4608, 2592]];
+
+  it('所有多图场景（含 span）：守恒/不越界/不重叠/间距统一/填满', () => {
+    const failures: string[] = [];
+    for (let trial = 0; trial < 20; trial++) {
+      const n = 3 + (trial % 7);
+      const photos = Array.from({ length: n }, (_, i) => {
+        const [w, h] = shapePool[(trial + i) % shapePool.length];
+        return mkPhoto(w, h);
+      });
+      const gen = googlePhotosLayout(photos, { pageWidth: 210, pageHeight: 280, margin, gap: 5, density: 'balanced' });
+      for (let pageIdx = 0; pageIdx < gen.pages.length; pageIdx++) {
+        const rowsMeta = gen.layoutRows[pageIdx] as any;
+        const expectedIds = new Set(gen.pages[pageIdx].photos.map((r) => r.photoId));
+        const photoMap = new Map(photos.map((p) => [p.id, p]));
+        // base（0°）布局：用于逐照片面积比断言（防「重新排版式」的照片大小洗牌回归）
+        const base = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, 0, 210, 280, 210, 280, margin as any, 'hero-first' as any);
+        const areaBase = new Map(base.photos.map((p) => [p.photoId, p.width * p.height]));
+        for (const rot of [90, 180, 270] as Array<0 | 90 | 180 | 270>) {
+          const res = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, rot, 210, 280, 210, 280, margin as any, 'hero-first' as any);
+          const tag = `trial${trial} n=${n} page${pageIdx} rot${rot}`;
+          // 守恒
+          const ids = res.photos.map((r) => r.photoId);
+          if (ids.length !== expectedIds.size || new Set(ids).size !== expectedIds.size) {
+            failures.push(`${tag} 守恒失败 len=${ids.length} expect=${expectedIds.size}`);
+            continue;
+          }
+          // 输出顺序保持 base 原序（LayoutAdjustPanel 按下标消费 result.photos[i]，防照片-格子错位）
+          if (JSON.stringify(res.photos.map((p) => p.photoId)) !== JSON.stringify(base.photos.map((p) => p.photoId))) {
+            failures.push(`${tag} 输出顺序漂移`);
+          }
+          let minY = Infinity, maxB = -Infinity, minX = Infinity, maxR = -Infinity;
+          let overlap = false;
+          for (let i = 0; i < res.photos.length; i++) {
+            const a = res.photos[i];
+            minY = Math.min(minY, a.y); maxB = Math.max(maxB, a.y + a.height);
+            minX = Math.min(minX, a.x); maxR = Math.max(maxR, a.x + a.width);
+            if (a.x < 10.5 || a.x + a.width > 199.5 || a.y < 10.5 || a.y + a.height > 269.5) {
+              failures.push(`${tag} 越界 ${a.x.toFixed(1)},${a.y.toFixed(1)},${a.width.toFixed(1)}x${a.height.toFixed(1)}`);
+            }
+            for (let j = i + 1; j < res.photos.length; j++) {
+              const b = res.photos[j];
+              if (a.x < b.x + b.width - 0.1 && b.x < a.x + a.width - 0.1 && a.y < b.y + b.height - 0.1 && b.y < a.y + a.height - 0.1) {
+                overlap = true;
+              }
+            }
+          }
+          if (overlap) failures.push(`${tag} 重叠`);
+          // 填满：四边贴安全区（span 页也要求填满）
+          if (Math.abs(minY - 15) > EPS) failures.push(`${tag} 顶部未填满 top=${minY.toFixed(1)}`);
+          if (Math.abs(maxB - 265) > EPS) failures.push(`${tag} 底部未填满 bottom=${maxB.toFixed(1)}`);
+          if (Math.abs(minX - 15) > EPS) failures.push(`${tag} 左侧未填满 left=${minX.toFixed(1)}`);
+          if (Math.abs(maxR - 195) > EPS) failures.push(`${tag} 右侧未填满 right=${maxR.toFixed(1)}`);
+          // 逐照片面积比保持（±30% 容差：转置规整的非等比缩放 / 物理旋转 scale=1）——
+          // 照片跟格子（各自绑定自己 base 格子的旋转/转置结果），防止「重新排版」导致照片大小洗牌
+          for (const p of res.photos) {
+            const a0 = areaBase.get(p.photoId);
+            if (a0 == null || a0 <= 0) continue;
+            const r = (p.width * p.height) / a0;
+            if (r < 0.7 || r > 1.3) failures.push(`${tag} 面积比漂移 ${p.photoId} r=${r.toFixed(2)}`);
+          }
+          // 间距统一：同行水平 gap、同列垂直 gap 差异 ≤ 0.8（固定 slotGap=5）
+          const groupBy = <T,>(arr: T[], key: (t: T) => number): T[][] => {
+            const groups: T[][] = [];
+            for (const it of arr) {
+              const g = groups.find((gr) => Math.abs(key(gr[0]) - key(it)) < 0.3);
+              if (g) g.push(it); else groups.push([it]);
+            }
+            return groups;
+          };
+          const hGaps: number[] = [];
+          for (const grp of groupBy(res.photos, (a) => a.y)) {
+            const s = grp.slice().sort((a, b) => a.x - b.x);
+            for (let i = 0; i < s.length - 1; i++) hGaps.push(s[i + 1].x - (s[i].x + s[i].width));
+          }
+          const vGaps: number[] = [];
+          for (const grp of groupBy(res.photos, (a) => a.x)) {
+            const s = grp.slice().sort((a, b) => a.y - b.y);
+            for (let i = 0; i < s.length - 1; i++) vGaps.push(s[i + 1].y - (s[i].y + s[i].height));
+          }
+          const pos = [...hGaps, ...vGaps].filter((g) => g > 0.1);
+          if (pos.length > 1) {
+            const mx = Math.max(...pos), mn = Math.min(...pos);
+            if (mx - mn > 0.8) {
+              failures.push(`${tag} 间距不一致 max=${mx.toFixed(2)} min=${mn.toFixed(2)}`);
+            }
+          }
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('结构映射保持：span「竖图+右堆叠」→ 旋转后「顶部通栏横条 + 底部并排」', () => {
+    const p1 = mkPhoto(3000, 4000), p2 = mkPhoto(4000, 3000), p3 = mkPhoto(4608, 2592);
+    const rowsMeta = [{ type: 'span' as const, portraitPhotoId: p1.id, portraitTotalHeight: 240, subRows: [{ photoIds: [p2.id], rowHeight: 118, tier: 'standard' as RowTier }, { photoIds: [p3.id], rowHeight: 118, tier: 'standard' as RowTier }], side: 'left' as const }];
+    const photoMap = new Map([[p1.id, p1], [p2.id, p2], [p3.id, p3]]);
+    const rot = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 4, 0, 0, 90, 210, 280, 210, 280, margin, 'standard' as TierPattern);
+    expect(rot.photos).toHaveLength(3);
+    const byId = new Map(rot.photos.map((p) => [p.photoId, p]));
+    const port = byId.get(p1.id)!;
+    const s1 = byId.get(p2.id)!;
+    const s2 = byId.get(p3.id)!;
+    // 竖图 → 顶部通栏横条：贴顶、填满宽度（原竖图较宽时段高可大于宽，通栏性质由贴边保证）
+    expect(Math.abs(port.y - 15)).toBeLessThan(EPS);
+    expect(Math.abs(port.x - 15)).toBeLessThan(EPS);
+    expect(Math.abs(port.x + port.width - 195)).toBeLessThan(EPS);
+    // 子行照片 → 底部并排：同一水平线、在竖图下方
+    expect(Math.abs(s1.y - s2.y)).toBeLessThan(EPS);
+    expect(s1.y).toBeGreaterThan(port.y + port.height);
+    // 底部填满
+    expect(Math.abs(Math.max(s1.y + s1.height, s2.y + s2.height) - 265)).toBeLessThan(EPS);
+    // 间距统一 = 4
+    const vGap = s1.y - (port.y + port.height);
+    const hGap = Math.abs(s2.x - s1.x - s1.width) < Math.abs(s2.x - s1.x) ? s2.x - (s1.x + s1.width) : (s1.x - (s2.x + s2.width));
+    expect(Math.abs(vGap - 4)).toBeLessThan(0.5);
+    expect(Math.abs(hGap - 4)).toBeLessThan(0.5);
+  });
+
+  it('2 图横排 → 旋转 90° 变上下排列：填满安全区、间距统一', () => {
+    const pA = mkPhoto(4000, 3000), pB = mkPhoto(3000, 4000);
+    const rowsMeta = [{ photoIds: [pA.id, pB.id], rowHeight: 100, tier: 'standard' as RowTier }];
+    const photoMap = new Map([[pA.id, pA], [pB.id, pB]]);
+    const rot = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, 90, 210, 280, 210, 280, margin, 'standard' as TierPattern);
+    expect(rot.photos).toHaveLength(2);
+    const [a, b] = rot.photos;
+    // 上下排列：x 中心对齐（同一列）
+    expect(a.x + a.width / 2).toBeCloseTo(b.x + b.width / 2, 0);
+    // 垂直间距为正（不重叠）
+    expect(b.y - (a.y + a.height)).toBeGreaterThan(0);
+    // 不越安全区 + 填满（顶贴/底贴）
+    const minY = Math.min(...rot.photos.map((p) => p.y));
+    const maxBottom = Math.max(...rot.photos.map((p) => p.y + p.height));
+    expect(Math.abs(minY - 15)).toBeLessThan(EPS);
+    expect(Math.abs(maxBottom - 265)).toBeLessThan(EPS);
+    // 间距 ≈ 5
+    const gap = b.y - (a.y + a.height);
+    expect(Math.abs(gap - 5)).toBeLessThan(0.6);
+  });
+
+  it('span 竖图跨行 → 旋转 90° 仍填满、不重叠', () => {
+    const sPort = mkPhoto(3000, 4000), sA = mkPhoto(4000, 3000), sB = mkPhoto(4608, 2592);
+    const rowsMeta = [{ type: 'span' as const, portraitPhotoId: sPort.id, portraitTotalHeight: 100, subRows: [{ photoIds: [sA.id, sB.id], rowHeight: 60, tier: 'standard' as RowTier }], side: 'left' as const }];
+    const photoMap = new Map([[sPort.id, sPort], [sA.id, sA], [sB.id, sB]]);
+    const rot = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, 90, 210, 280, 210, 280, margin, 'standard' as TierPattern);
+    expect(rot.photos).toHaveLength(3);
+    const minY = Math.min(...rot.photos.map((p) => p.y));
+    const maxBottom = Math.max(...rot.photos.map((p) => p.y + p.height));
+    expect(Math.abs(minY - 15)).toBeLessThan(EPS);
+    expect(Math.abs(maxBottom - 265)).toBeLessThan(EPS);
+    let overlap = false;
+    for (let i = 0; i < rot.photos.length; i++) {
+      for (let j = i + 1; j < rot.photos.length; j++) {
+        const a = rot.photos[i], b = rot.photos[j];
+        if (a.x < b.x + b.width - 0.1 && b.x < a.x + a.width - 0.1 && a.y < b.y + b.height - 0.1 && b.y < a.y + a.height - 0.1) {
+          overlap = true;
+        }
+      }
+    }
+    expect(overlap).toBe(false);
+  });
+
+  it('照片跟格子：5 图两行（含 span side right）四角度守恒/输出原序/不越界 + 回原位', () => {
+    const p1 = mkPhoto(4000, 3000), p2 = mkPhoto(3000, 4000), p3 = mkPhoto(4608, 2592), p4 = mkPhoto(3000, 3000), p5 = mkPhoto(4000, 3000);
+    const rowsMeta = [
+      { photoIds: [p1.id, p3.id], rowHeight: 120, tier: 'standard' as RowTier },
+      { type: 'span' as const, portraitPhotoId: p2.id, portraitTotalHeight: 125, subRows: [{ photoIds: [p4.id], rowHeight: 60, tier: 'standard' as RowTier }, { photoIds: [p5.id], rowHeight: 60, tier: 'standard' as RowTier }], side: 'right' as const },
+    ];
+    const photoMap = new Map([[p1.id, p1], [p2.id, p2], [p3.id, p3], [p4.id, p4], [p5.id, p5]]);
+    const call = (rot: 0 | 90 | 180 | 270) =>
+      refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, rot, 210, 280, 210, 280, margin, 'standard' as TierPattern);
+    const base = call(0);
+    expect(base.photos).toHaveLength(5);
+    for (const rot of [90, 180, 270] as Array<0 | 90 | 180 | 270>) {
+      const res = call(rot);
+      // 守恒：照片恰好出现一次（照片跟格子，无遗漏/重复）
+      expect(new Set(res.photos.map((p) => p.photoId)).size).toBe(5);
+      // 输出顺序保持 base 原序（LayoutAdjustPanel 按下标消费 result.photos[i]，防照片-格子错位）
+      expect(res.photos.map((p) => p.photoId)).toEqual(base.photos.map((p) => p.photoId));
+      // 不越安全区
+      for (const r of res.photos) {
+        expect(r.x).toBeGreaterThanOrEqual(15 - EPS);
+        expect(r.y).toBeGreaterThanOrEqual(15 - EPS);
+        expect(r.x + r.width).toBeLessThanOrEqual(195 + EPS);
+        expect(r.y + r.height).toBeLessThanOrEqual(265 + EPS);
+      }
+    }
+    // 回原位：rot=0 确定性返回 base（连续切换四次恢复原样）
+    expect(call(0).photos).toEqual(base.photos);
+  });
+
+  it('2 图一左一右：照片跟格子——180° 物理旋转阅读序倒置（版式旋转的预期语义）+ 输出原序', () => {
+    const pA = mkPhoto(4000, 3000), pB = mkPhoto(3000, 4000);
+    const rowsMeta = [{ photoIds: [pA.id, pB.id], rowHeight: 100, tier: 'standard' as RowTier }];
+    const photoMap = new Map([[pA.id, pA], [pB.id, pB]]);
+    const call = (rot: 0 | 90 | 180 | 270) =>
+      refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, rot, 210, 280, 210, 280, margin, 'standard' as TierPattern);
+    const ordered = (rot: 0 | 90 | 180 | 270) => {
+      const res = call(rot);
+      return res.photos.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x)).map((p) => p.photoId);
+    };
+    // 0°：pA 左、pB 右 → 阅读序 pA→pB
+    expect(ordered(0)).toEqual([pA.id, pB.id]);
+    // 180° 物理旋转（照片跟格子）：pA 翻到右、pB 翻到左 → 阅读序倒置（版式转 180° 的自然结果）
+    expect(ordered(180)).toEqual([pB.id, pA.id]);
+    // 90° 转置：单行 → 单列，列内顺序 = 原行内顺序 → pA 上、pB 下
+    expect(ordered(90)).toEqual([pA.id, pB.id]);
+    // 270° 转置 + 垂直镜像：pB 上、pA 下
+    expect(ordered(270)).toEqual([pB.id, pA.id]);
+    // 输出顺序保持 base 原序（LayoutAdjustPanel 按下标消费，防照片-格子错位）
+    expect(call(180).photos.map((p) => p.photoId)).toEqual([pA.id, pB.id]);
+  });
+
+  it('1+3 hero 页 180° 物理旋转：hero 行翻到底部、照片跟格子、阅读序倒置 + 输出原序', () => {
+    const h = mkPhoto(4000, 3000), a = mkPhoto(3000, 4000), b = mkPhoto(4000, 3000), c = mkPhoto(3000, 3000);
+    const rowsMeta = [
+      { photoIds: [h.id], rowHeight: 150, tier: 'hero' as RowTier },
+      { photoIds: [a.id, b.id, c.id], rowHeight: 90, tier: 'standard' as RowTier },
+    ];
+    const photoMap = new Map([[h.id, h], [a.id, a], [b.id, b], [c.id, c]]);
+    const base = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, 0, 210, 280, 210, 280, margin, 'hero-first' as TierPattern);
+    const rot = refitPageWithRotation(rowsMeta, photoMap, 180, 250, 15, 15, 5, 0, 0, 180, 210, 280, 210, 280, margin, 'hero-first' as TierPattern);
+    expect(rot.photos).toHaveLength(4);
+    const byId = new Map(rot.photos.map((p) => [p.photoId, p]));
+    const hRect = byId.get(h.id)!;
+    const aRect = byId.get(a.id)!;
+    // hero 行翻到底部：h 在 3 图行下方（照片跟格子）
+    expect(hRect.y).toBeGreaterThan(aRect.y + aRect.height);
+    // 阅读序完全倒置：base [h,a,b,c] → [c,b,a,h]（中心对称翻转的自然结果）
+    const baseOrder = base.photos.slice().sort((p, q) => (p.y - q.y) || (p.x - q.x)).map((p) => p.photoId);
+    const rotOrder = rot.photos.slice().sort((p, q) => (p.y - q.y) || (p.x - q.x)).map((p) => p.photoId);
+    expect(rotOrder).toEqual([...baseOrder].reverse());
+    // 输出顺序保持 base 原序（LayoutAdjustPanel 按下标消费，防照片-格子错位）
+    expect(rot.photos.map((p) => p.photoId)).toEqual(base.photos.map((p) => p.photoId));
   });
 });

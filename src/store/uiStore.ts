@@ -206,7 +206,7 @@ export const useUIStore = create<UIState>((set) => ({
   isDraggingLayout: false,
   multiSelectMode: false,
   selectedProjectIds: [],
-  gridZoom: 1.0,
+  gridZoom: 2.0, // 网格视图缩放 0.5 ~ 5.0，默认 2.0（200%）
   gridSelectedPages: [],
   hiddenGridPageIds: [],
   smartLayoutSelectedIds: [],
@@ -326,7 +326,7 @@ export const useUIStore = create<UIState>((set) => ({
   selectAll: (ids) => set({ selectedProjectIds: ids }),
   deselectAll: () => set({ selectedProjectIds: [] }),
   /* 网格视图 actions */
-  setGridZoom: (zoom) => set({ gridZoom: Math.max(0.5, Math.min(3.0, zoom)) }),
+  setGridZoom: (zoom) => set({ gridZoom: Math.max(0.5, Math.min(5.0, zoom)) }),
   toggleGridPageSelect: (pageId) =>
     set((s) => ({
       gridSelectedPages: s.gridSelectedPages.includes(pageId)

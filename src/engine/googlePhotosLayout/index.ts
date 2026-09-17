@@ -985,7 +985,183 @@ export function refitPage(
   return fillPage(pageRows, contentWidth, contentHeight, marginLeft, marginTop, gap, biasX, biasY, pattern);
 }
 
-/** 基于基准行结构做偏压填充，再按当前旋转角度从 base 页面坐标系映射到 target 页面坐标系 */
+/**
+ * 「数学转置 + 网格规整」：把 base 行结构布局转置（行→列、行内横排→列内竖排）
+ * 并规整填满目标内容区。
+ *
+ * 与「重新排版」的本质区别：**不重新计算行高/照片宽度**，只按 base 布局的原比例缩放——
+ * 格子的相对位置、大小比例全部保持（视觉旋转语义），间距重置为 gap，安全区填满。
+ *
+ * 照片跟格子走：每个照片绑定自己 base 格子的转置结果——照片的顺序/相对位置随版式
+ * 几何变化自然改变（转置后阅读序随几何重排），这是「角度切换」的预期语义
+ * （版式转方向，照片跟着格子走；输出顺序仍保持 basePage.photos 原序，调用方按下标消费）。
+ *
+ * 结构映射（90°）：
+ * - 普通行 → 单列：列宽 = 原行高（按比例分摊页宽），列内格子自上而下 = 原行内自左而右，高 = 原宽按比例分摊页高；
+ * - span（竖图 + 子行堆叠）→「通栏横条 + 多列并排」：竖图格变条带内通栏（原 side left → 顶部 / right → 底部），
+ *   子行格变列并排，列内竖排 = 原子行内横排；
+ * - 条带（rowsMeta 顺序，原自上而下）→ 转置后自左而右。
+ * 270° = 转置 + 垂直镜像。所有间距（条带间/段间/列间/列内）统一 = gap。
+ *
+ * @returns 规整失败（结构不完整/退化）返回 null，调用方回退物理旋转
+ */
+function transposeNormalizePage(
+  basePage: GooglePhotosPage,
+  rowsMeta: Array<{
+    type?: 'span'; portraitPhotoId?: string;
+    photoIds?: string[]; subRows?: Array<{ photoIds: string[]; rowHeight: number; tier?: RowTier }>;
+    rowHeight?: number; side?: 'left' | 'right'; tier?: RowTier;
+  }>,
+  baseMarginLeft: number, baseMarginTop: number,
+  targetMarginLeft: number, targetMarginTop: number,
+  targetCW: number, targetCH: number,
+  gap: number,
+  mirrorY: boolean,
+): GooglePhotosPage | null {
+  const rectOf = new Map(basePage.photos.map((p) => [p.photoId, p]));
+  const toLocal = (p: PhotoRect): PhotoRect => ({ ...p, x: p.x - baseMarginLeft, y: p.y - baseMarginTop });
+
+  // 1. 构建条带（顺序 = rowsMeta = 原页面自上而下）
+  type Strip =
+    | { kind: 'row'; h: number; photos: PhotoRect[] }
+    | { kind: 'span'; h: number; portrait: PhotoRect; subRows: PhotoRect[][]; side: 'left' | 'right'; contentW: number };
+  const strips: Strip[] = [];
+  for (const m of rowsMeta) {
+    if (m.type === 'span' && m.portraitPhotoId != null) {
+      const portraitRaw = rectOf.get(m.portraitPhotoId);
+      if (!portraitRaw) continue;
+      const portrait = toLocal(portraitRaw);
+      const subRows: PhotoRect[][] = [];
+      let maxRight = portrait.x + portrait.width;
+      for (const sr of m.subRows || []) {
+        const photos = (sr.photoIds || [])
+          .map((id) => (id != null ? rectOf.get(id) : undefined))
+          .filter((p): p is PhotoRect => p != null)
+          .map(toLocal);
+        if (photos.length > 0) {
+          for (const p of photos) maxRight = Math.max(maxRight, p.x + p.width);
+          subRows.push(photos);
+        }
+      }
+      if (subRows.length === 0) {
+        // 退化为普通行（仅竖图自身）
+        strips.push({ kind: 'row', h: portrait.height, photos: [portrait] });
+      } else {
+        strips.push({ kind: 'span', h: portrait.height, portrait, subRows, side: m.side ?? 'left', contentW: maxRight });
+      }
+    } else {
+      const photos = (m.photoIds || [])
+        .map((id) => (id != null ? rectOf.get(id) : undefined))
+        .filter((p): p is PhotoRect => p != null)
+        .map(toLocal);
+      if (photos.length > 0) {
+        strips.push({ kind: 'row', h: photos[0].height, photos });
+      }
+    }
+  }
+  if (strips.length === 0) return null;
+
+  // 2. 条带宽（= 原条带高）按比例分摊 targetCW，条带间距 = gap
+  const totalH = strips.reduce((s, st) => s + st.h, 0);
+  const availW = targetCW - (strips.length - 1) * gap;
+  if (totalH <= 0 || availW <= 0) return null;
+  const sStrip = availW / totalH;
+
+  // 3. 逐条带产出转置格子（内容区坐标，原点 0,0）——照片跟格子：photoId 直接绑定自己
+  //    base 格子的转置结果，顺序/相对位置随版式几何自然变化
+  type Cell = { photoId: string; x: number; y: number; width: number; height: number };
+  const cells: Cell[] = [];
+  let stripX = 0;
+  for (const st of strips) {
+    const stripW = st.h * sStrip;
+    if (st.kind === 'row') {
+      // 单列：列内格子高 = 原宽按比例分摊页高（每列独立归一，填满）
+      const totalW = st.photos.reduce((s, p) => s + p.width, 0);
+      const availH = targetCH - (st.photos.length - 1) * gap;
+      if (totalW <= 0 || availH <= 0) return null;
+      const sCol = availH / totalW;
+      let y = 0;
+      for (const p of st.photos) {
+        const ph = p.width * sCol;
+        cells.push({ photoId: p.photoId, x: stripX, y, width: stripW, height: ph });
+        y += ph + gap;
+      }
+    } else {
+      // span：竖图段（条带内通栏）+ 子行段（多列并排），段间距 = gap
+      const pw = st.portrait.width; // 竖图原宽 → 转置后段高
+      const subSegH = Math.max(0, st.contentW - pw - gap); // 子行段原高（子行区宽）
+      const segTotal = pw + subSegH;
+      const availSeg = targetCH - gap;
+      if (segTotal <= 0 || availSeg <= 0) return null;
+      const sSeg = availSeg / segTotal;
+      const portSegH = pw * sSeg;
+      const subSegH2 = subSegH * sSeg;
+      // side left → 竖图段在顶；right → 在底（270° 的垂直镜像在最后统一处理）
+      const portTop = st.side === 'left' ? 0 : subSegH2 + gap;
+      const subTop = st.side === 'left' ? portSegH + gap : 0;
+      // 竖图格：填满条带宽
+      cells.push({ photoId: st.portrait.photoId, x: stripX, y: portTop, width: stripW, height: portSegH });
+      // 子行列们：列宽 = 原子行高按比例分摊条带宽（扣除列间 gap）
+      const sumSubH = st.subRows.reduce((s, sr) => s + sr[0].height, 0);
+      const availStripW = stripW - (st.subRows.length - 1) * gap;
+      if (sumSubH <= 0 || availStripW <= 0) return null;
+      const sSub = availStripW / sumSubH;
+      let colX = stripX;
+      for (const sr of st.subRows) {
+        const colW = sr[0].height * sSub;
+        // 列内格子：高 = 原宽按比例分摊子行段高（每列独立归一，填满）
+        const totalW = sr.reduce((s, p) => s + p.width, 0);
+        const availColH = subSegH2 - (sr.length - 1) * gap;
+        if (totalW <= 0 || availColH <= 0) return null;
+        const sCol = availColH / totalW;
+        let y = subTop;
+        for (const p of sr) {
+          const ph = p.width * sCol;
+          cells.push({ photoId: p.photoId, x: colX, y, width: colW, height: ph });
+          y += ph + gap;
+        }
+        colX += colW + gap;
+      }
+    }
+    stripX += stripW + gap;
+  }
+
+  // 守卫：格子数必须与 base 照片数一致（结构不完整则回退物理旋转）
+  if (cells.length !== basePage.photos.length) return null;
+
+  // 4. 垂直镜像（270°）→ 平移到页面绝对坐标 → 按 basePage.photos 原序输出
+  //    （LayoutAdjustPanel 按下标消费 result.photos[i]，输出顺序必须与 placements 对齐）
+  const cellById = new Map(
+    (mirrorY ? cells.map((c) => ({ ...c, y: targetCH - c.y - c.height })) : cells)
+      .map((c) => [c.photoId, c] as const),
+  );
+  return {
+    photos: basePage.photos.map((p) => {
+      const c = cellById.get(p.photoId);
+      if (!c) return p; // 理论不可达（上方长度守卫保证一一对应）
+      return {
+        photoId: p.photoId,
+        x: targetMarginLeft + c.x,
+        y: targetMarginTop + c.y,
+        width: c.width,
+        height: c.height,
+      };
+    }),
+  };
+}
+
+/**
+ * 基于基准行结构做偏压填充，再旋转到目标角度。
+ * - 0°：直接返回 base 布局。
+ * - 90°/270°：**数学转置 + 网格规整**——照片相对位置/顺序/大小比例保持（视觉旋转语义），
+ *   间距统一 = gap，填满安全区；规整失败回退物理旋转。
+ * - 180°：**物理旋转 + 整体等比缩放 + 居中**（180° footprint 尺寸不变，无留白）。
+ *
+ * 所有角度均为「照片跟格子走」：照片绑定自己 base 格子的旋转/转置结果，
+ * 顺序与相对位置随版式几何自然变化（如 180° 阅读序倒置）——这是「角度切换」的
+ * 预期语义（版式转方向，照片跟着格子走）。输出顺序保持 basePage.photos 原序
+ * （LayoutAdjustPanel 按下标消费 result.photos[i]，与 placements 对齐，防错位）。
+ */
 export function refitPageWithRotation(
   rowsMeta: Array<{
     type?: 'span'; portraitPhotoId?: string; portraitTotalHeight?: number;
@@ -1004,10 +1180,52 @@ export function refitPageWithRotation(
 ): GooglePhotosPage {
   const basePage = refitPage(rowsMeta, photoMap, baseContentWidth, baseContentHeight, marginLeft, marginTop, gap, biasX, biasY, pattern);
   if (rotation === 0) return basePage;
+
+  const ml = pageMargin.left, mt = pageMargin.top;
+  const targetCW = targetPageWidth - ml - pageMargin.right;
+  const targetCH = targetPageHeight - mt - pageMargin.bottom;
+
+  // ── 90°/270°：数学转置 + 网格规整（照片跟格子，间距统一 = gap，填满）──
+  if ((rotation === 90 || rotation === 270) && targetCW > 0 && targetCH > 0) {
+    const transposed = transposeNormalizePage(
+      basePage, rowsMeta,
+      marginLeft, marginTop,
+      ml, mt,
+      targetCW, targetCH,
+      gap,
+      rotation === 270,
+    );
+    if (transposed) return transposed;
+  }
+
+  // ── 180° / 转置规整失败回退：物理旋转 + 整体等比缩放 + 居中（照片跟格子）──
+  // 180° footprint 尺寸不变（base 填满时 scale=1 纯旋转居中）；规整失败时保证功能可用
+  const rotated = basePage.photos.map((p) => ({
+    ...p,
+    ...rotateMmRect(p.x, p.y, p.width, p.height, basePageWidth, basePageHeight, targetPageWidth, targetPageHeight, pageMargin, rotation),
+  }));
+  if (targetCW <= 0 || targetCH <= 0) return { photos: rotated };
+
+  // 统一等比缩放 + 居中：旋转后占位整体塞进 target 内容区
+  // （同一 scale ⇒ 所有间距同比例缩放，保持统一）
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of rotated) {
+    minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height);
+  }
+  const rotW = maxX - minX, rotH = maxY - minY;
+  if (rotW <= 0 || rotH <= 0) return { photos: rotated };
+  const scale = Math.min(targetCW / rotW, targetCH / rotH);
+  const offX = ml + (targetCW - rotW * scale) / 2 - minX * scale;
+  const offY = mt + (targetCH - rotH * scale) / 2 - minY * scale;
+
   return {
-    photos: basePage.photos.map((p) => ({
+    photos: rotated.map((p) => ({
       ...p,
-      ...rotateMmRect(p.x, p.y, p.width, p.height, basePageWidth, basePageHeight, targetPageWidth, targetPageHeight, pageMargin, rotation),
+      x: offX + p.x * scale,
+      y: offY + p.y * scale,
+      width: p.width * scale,
+      height: p.height * scale,
     })),
   };
 }

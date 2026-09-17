@@ -230,13 +230,22 @@ type PxRect = { x: number; y: number; width: number; height: number };
  * 使整个页面等比塞进 [safeL..safeR]×[safeT..safeB] 整数安全框内——
  * 位置向下取整保证不越界，同排/相邻缝隙由同一 scale 产生，天然统一且≈设置间距。
  *
+ * 右/下锚定：贴整体包围盒右/下边缘的槽位，把宽/高补齐到「该方向缩放后的整体精确右/下缘」
+ * （alignRight/alignBottom），消除「一律向下取整」对右/下边缘的 1~2px 内缩，使边缘照片位
+ * 精确贴合。该方向整体填满安全区时，精确缘即安全线（右=safeR、下=safeB）；未填满方向
+ * （受限于另一轴，如偏压留白）则保持布局形状，仅消除边缘截断，不强行填充留白。
+ * 左上仍 floor 保证不越界；内部槽位仍受同一 scale 约束，缝隙仍≈设置间距。
+ *
  * @param mm 毫米布局（refitPage 输出，顺序对应 placements）
  * @param safeL/safeT/safeR/safeB 安全区像素边界（含边距）
+ * @param opts.center 为 true 时，缩放后布局整体居中于安全区（默认左上对齐，供旋转等已等比布局场景）
  */
 export function fitPageToSafeBox(
   mm: Array<{ x: number; y: number; width: number; height: number } | null>,
   safeL: number, safeT: number, safeR: number, safeB: number,
+  opts?: { center?: boolean },
 ): Array<PxRect | null> {
+  const center = !!opts?.center;
   const BASE = 2; // mm → px 基准缩放（MM_TO_PX）
   if (mm.length === 0) return [];
   // 包围盒只统计有照片的槽位，空槽位（null）不参与缩放，原样透传 null
@@ -257,15 +266,32 @@ export function fitPageToSafeBox(
   let scale = Math.min(safeW / (maxX - minX), safeH / (maxY - minY));
   // 预留像素：抵消向下取整对右/下边缘的逼近，保证绝不越界
   scale = Math.max(0, Math.min(1, scale)) * (1 - 1e-3);
+  // 居中偏移（center=false 时为 0，保持原有左上对齐行为）
+  const offsetX = center ? (safeW - (maxX - minX) * scale) / 2 : 0;
+  const offsetY = center ? (safeH - (maxY - minY) * scale) / 2 : 0;
+  // 整体包围盒缩放后的精确右/下缘（未取整），作为贴边槽位的锚定目标
+  const alignRight = safeL + offsetX + (maxX - minX) * scale;
+  const alignBottom = safeT + offsetY + (maxY - minY) * scale;
+  // 贴边判定容差（像素）：吸收 mm 层浮点误差（0.25mm ≈ 0.5px）
+  const EDGE_EPS = 0.5;
   const out: Array<PxRect | null> = new Array(mm.length);
   for (let i = 0; i < mm.length; i++) {
     const p = mm[i];
     if (!p) { out[i] = null; continue; }
-    const x = safeL + (p.x * BASE - minX) * scale;
-    const y = safeT + (p.y * BASE - minY) * scale;
-    const w = p.width * BASE * scale;
-    const h = p.height * BASE * scale;
-    out[i] = { x: Math.floor(x), y: Math.floor(y), width: Math.floor(w), height: Math.floor(h) };
+    const x = safeL + offsetX + (p.x * BASE - minX) * scale;
+    const y = safeT + offsetY + (p.y * BASE - minY) * scale;
+    const fx = Math.floor(x);
+    const fy = Math.floor(y);
+    // 相对整体包围盒边缘的贴边判定（mm 层，容差吸收浮点误差）：
+    // 贴右 → 宽补齐到整体精确右缘；贴下 → 高补齐到整体精确下缘；左上保持 floor 不越界
+    const stickRight = maxX - (p.x * BASE + p.width * BASE) <= EDGE_EPS;
+    const stickBottom = maxY - (p.y * BASE + p.height * BASE) <= EDGE_EPS;
+    out[i] = {
+      x: fx,
+      y: fy,
+      width: stickRight ? Math.round(alignRight - fx) : Math.floor(p.width * BASE * scale),
+      height: stickBottom ? Math.round(alignBottom - fy) : Math.floor(p.height * BASE * scale),
+    };
   }
   return out;
 }

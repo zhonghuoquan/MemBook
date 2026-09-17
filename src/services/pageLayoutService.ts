@@ -10,7 +10,7 @@ import { useEditorStore } from '../store/editorStore';
 import { usePhotoStore } from '../store/photoStore';
 import { useUIStore } from '../store/uiStore';
 import { useHistoryStore } from '../store/historyStore';
-import { makePlacementMigrator, buildRegenPageData } from '../store/editorStore/helpers';
+import { makePlacementMigrator, buildRegenPageData, fitPageToSafeBox } from '../store/editorStore/helpers';
 import i18n from '../i18n';
 
 const SNAPSHOT_MERGE_MS = 300;
@@ -601,17 +601,29 @@ export const pageLayoutService = {
         resultPhotoByPhotoId.set(pr.photoId, pr);
       }
     }
-    const rotatedPlacements = page.placements.map((pl) => {
+    // 像素化统一走 fitPageToSafeBox：整体等比缩放 + 居中 + 右/下贴安全线 + 左上 floor 不越界。
+    // 替换旧「逐张独立 Math.round」——旧做法各槽位独立取整、间距粗细不一；
+    // refitPageWithRotation 已物理旋转 + 等比缩放 + 居中到内容区，此处仅补安全区像素化。
+    const mmInput = page.placements.map((pl) => {
+      if (pl.photoId == null) return null;
+      const pr = resultPhotoByPhotoId.get(pl.photoId);
+      if (!pr) return null;
+      return { x: pr.x, y: pr.y, width: pr.width, height: pr.height };
+    });
+    const safeL = pageMargin.left * MM;
+    const safeT = pageMargin.top * MM;
+    const safeR = (albumSize.width - pageMargin.right) * MM;
+    const safeB = (albumSize.height - pageMargin.bottom) * MM;
+    const fitted = fitPageToSafeBox(mmInput, safeL, safeT, safeR, safeB, { center: true });
+    const rotatedPlacements = page.placements.map((pl, i) => {
       // 空槽位（extraSlot 产生的占位）：无照片几何可旋转，原样保留
       if (pl.photoId == null) return pl;
       const pr = resultPhotoByPhotoId.get(pl.photoId);
       if (pr) {
-        slotOverrides[pl.slotId] = {
-          x: Math.round(pr.x * MM),
-          y: Math.round(pr.y * MM),
-          width: Math.round(pr.width * MM),
-          height: Math.round(pr.height * MM),
-        };
+        const a = fitted[i];
+        if (a) {
+          slotOverrides[pl.slotId] = { x: a.x, y: a.y, width: a.width, height: a.height };
+        }
         mmLayout.push({ photoId: pr.photoId, x: pr.x, y: pr.y, width: pr.width, height: pr.height });
       }
       // 迁移照片裁切/缩放：旧槽位尺寸 → 旋转后新槽位尺寸

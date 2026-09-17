@@ -24,7 +24,7 @@ function randomTemplateId(): string {
 const CARD_GAP = 14;
 const INSERT_WIDTH = 28;
 const MIN_CARD_H = 60;
-const MAX_CARD_H = 220;
+const MAX_CARD_H = 300;
 const GRID_PADDING = 16;
 const DRAG_ACTIVATE_DIST = 6;
 const DRAG_ACTIVATE_DELAY = 120;
@@ -75,6 +75,16 @@ export function GridView({ onBack }: GridViewProps) {
   const [rowPitch, setRowPitch] = useState(0);
   const startVisibleRef = useRef(0);
 
+  // 自动隐藏滚动条：滚动时显示，停止 ~600ms 后淡出
+  const [scrollbarVisible, setScrollbarVisible] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showScrollbar = useCallback(() => {
+    setScrollbarVisible(true);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setScrollbarVisible(false), 600);
+  }, []);
+  useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({
@@ -105,7 +115,8 @@ export function GridView({ onBack }: GridViewProps) {
   }, [albumSize]);
 
   const cardHeight = useMemo(() => {
-    return Math.round(MIN_CARD_H + (MAX_CARD_H - MIN_CARD_H) * ((gridZoom - 0.5) / 1.5));
+    // gridZoom 0.5 ~ 5.0 线性映射到 60 ~ 300；默认 2.0 → ≈140
+    return Math.round(MIN_CARD_H + (MAX_CARD_H - MIN_CARD_H) * ((gridZoom - 0.5) / (5.0 - 0.5)));
   }, [gridZoom]);
 
   const cardWidth = useMemo(() => {
@@ -152,16 +163,17 @@ export function GridView({ onBack }: GridViewProps) {
     startVisibleRef.current = startVisible;
   }, [startVisible]);
 
-  // 滚动：rAF 节流更新 scrollTop，驱动可见窗口滑动
+  // 滚动：rAF 节流更新 scrollTop，驱动可见窗口滑动；同时点亮旋转时滚动条
   const scrollRafRef = useRef(0);
   const handleScroll = useCallback(() => {
+    showScrollbar();
     const el = containerRef.current;
     if (!el || scrollRafRef.current) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = 0;
       setScrollTop(el.scrollTop);
     });
-  }, []);
+  }, [showScrollbar]);
   useEffect(() => () => { if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current); }, []);
 
   // 测量首个渲染卡片的真实高度 → 校准行距（含页码标签；稳定后不再触发重渲）
@@ -178,6 +190,37 @@ export function GridView({ onBack }: GridViewProps) {
     const max = Math.max(0, c.scrollHeight - c.clientHeight);
     if (c.scrollTop > max) c.scrollTop = max;
   }, [columns, visiblePages.length, totalH]);
+
+  // ═══ 自动隐藏滚动条：拇指几何 + 拖拽/点轨道定位 ═══
+  const scrollHeight = totalH + GRID_PADDING * 2; // 内容总高（含上下 padding）
+  const scrollMax = Math.max(1, scrollHeight - Math.max(1, viewH));
+  const thumbH = Math.max(24, (Math.max(1, viewH) / scrollHeight) * Math.max(1, viewH));
+  const thumbTop = scrollMax > 0 && viewH > 0 ? (scrollTop / scrollMax) * (viewH - thumbH) : 0;
+  const scrollbarDragRef = useRef<{ startY: number; startTop: number } | null>(null);
+  const handleSbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const c = containerRef.current;
+    if (!c) return;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    el.focus({ preventScroll: true });
+    const trackTop = el.getBoundingClientRect().top;
+    const ratio = Math.min(1, Math.max(0, (e.clientY - trackTop) / Math.max(1, viewH)));
+    c.scrollTop = ratio * scrollMax; // 点轨道 → 直接跳到该处
+    scrollbarDragRef.current = { startY: e.clientY, startTop: c.scrollTop };
+    showScrollbar();
+    e.preventDefault();
+  };
+  const handleSbPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const c = containerRef.current;
+    const st = scrollbarDragRef.current;
+    if (!c || !st) return;
+    c.scrollTop = st.startTop + (e.clientY - st.startY) * (scrollMax / Math.max(1, viewH));
+    showScrollbar();
+  };
+  const handleSbPointerEnd = () => {
+    scrollbarDragRef.current = null;
+    showScrollbar(); // 松手后短暂保持，随后自动隐藏
+  };
 
   // 退出网格视图时清空选择，避免状态残留
   useEffect(() => {
@@ -597,7 +640,7 @@ export function GridView({ onBack }: GridViewProps) {
     if (!e.ctrlKey) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const next = Math.max(0.5, Math.min(3.0, gridZoom + delta));
+    const next = Math.max(0.5, Math.min(5.0, gridZoom + delta));
     useUIStore.getState().setGridZoom(Number(next.toFixed(1)));
   }, [gridZoom]);
 
@@ -647,8 +690,10 @@ export function GridView({ onBack }: GridViewProps) {
       {/* ═══ 页面网格 ═══ */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto relative"
+        className="gridview-hide-native flex-1 overflow-y-auto relative"
         style={{
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
           paddingTop: GRID_PADDING / 2,
           paddingRight: GRID_PADDING,
           paddingBottom: GRID_PADDING,
@@ -771,6 +816,26 @@ export function GridView({ onBack }: GridViewProps) {
             </div>
           </>
         )}
+
+        {/* ═══ 自动隐藏滚动条（覆盖层：滚动时淡入，停止后淡出；可点轨道/拖拇指定位） ═══ */}
+        <div
+          className="absolute top-0 bottom-0 right-0 w-3 cursor-pointer outline-none"
+          style={{
+            opacity: scrollbarVisible ? 1 : 0,
+            pointerEvents: scrollbarVisible ? 'auto' : 'none',
+            transition: 'opacity 300ms ease',
+          }}
+          onPointerDown={handleSbPointerDown}
+          onPointerMove={handleSbPointerMove}
+          onPointerUp={handleSbPointerEnd}
+          onPointerCancel={handleSbPointerEnd}
+        >
+          <div
+            className="absolute right-[3px] w-[6px] rounded-full bg-[rgba(0,0,0,0.32)] hover:bg-[rgba(0,0,0,0.45)]"
+            style={{ top: thumbTop, height: thumbH }}
+          />
+        </div>
+        <style>{`.gridview-hide-native::-webkit-scrollbar{width:0;height:0;display:none}`}</style>
       </div>
 
       {/* ═══ 底部控制栏 ═══ */}

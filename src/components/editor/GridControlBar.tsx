@@ -16,7 +16,7 @@ export function GridControlBar({ pageCount, selectedCount, onFullscreen }: GridC
   const setViewMode = useUIStore((s) => s.setViewMode);
 
   const ZOOM_MIN = 0.5;
-  const ZOOM_MAX = 3.0;
+  const ZOOM_MAX = 5.0;
   const ZOOM_RATIO = ZOOM_MAX / ZOOM_MIN;
   const sliderVal = Math.round(Math.log(gridZoom / ZOOM_MIN) / Math.log(ZOOM_RATIO) * 1000);
 
@@ -65,7 +65,7 @@ export function GridControlBar({ pageCount, selectedCount, onFullscreen }: GridC
         <Tooltip text={t('editor.gridControl.resetZoom')}>
           <button
             className="flex items-center gap-1 px-2 py-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-white text-[var(--text-caption)] text-[var(--color-gray-600)] cursor-pointer hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-brand)] hover:border-[var(--color-brand)] transition-colors shrink-0"
-            onClick={() => setGridZoom(1.0)}
+            onClick={() => setGridZoom(2.0)} // 重置回默认 200%
           >
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
               <path d="M2 7a5 5 0 1 0 1.5-3.5" /><path d="M2 2v3h3" />

@@ -10,23 +10,27 @@ import { calcCoverFitWithRotation, computePanForResizedSlot } from '../../utils/
 
 const MM_TO_PX = 2;
 
-/** 将屏幕坐标系下的 XY 偏压转换为基准坐标系下的偏压（与视觉旋转方向一致） */
+/**
+ * 将屏幕坐标系下的 XY 偏压转换为基准坐标系下的偏压。
+ * 90°/270° 为「数学转置」语义（屏幕 x ↔ base y、屏幕 y ↔ base x；270° 额外垂直镜像），
+ * 180° 为物理旋转（双向取反）。
+ */
 function transformBiasToBase(bx: number, by: number, rotation: 0 | 90 | 180 | 270): { bx: number; by: number } {
   switch (rotation) {
     case 0: return { bx, by };
-    case 90: return { bx: -by, by: bx };
+    case 90: return { bx: by, by: bx };
     case 180: return { bx: -bx, by: -by };
-    case 270: return { bx: by, by: -bx };
+    case 270: return { bx: -by, by: bx };
   }
 }
 
-/** 将基准坐标系下的 XY 偏压转换为屏幕坐标系下显示（与视觉旋转方向一致） */
+/** 将基准坐标系下的 XY 偏压转换为屏幕坐标系下显示（transformBiasToBase 的逆变换） */
 function transformBiasFromBase(bx: number, by: number, rotation: 0 | 90 | 180 | 270): { bx: number; by: number } {
   switch (rotation) {
     case 0: return { bx, by };
-    case 90: return { bx: by, by: -bx };
+    case 90: return { bx: by, by: bx };
     case 180: return { bx: -bx, by: -by };
-    case 270: return { bx: -by, by: bx };
+    case 270: return { bx: by, by: -bx };
   }
 }
 

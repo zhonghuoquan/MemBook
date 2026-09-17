@@ -8,7 +8,7 @@
  *
  * 更新服务器需返回 JSON：
  * {
- *   "version": "1.2.4",
+ *   "version": "1.2.5",
  *   "pub_date": "2026-07-23T10:00:00Z",
  *   "notes": "更新说明",
  *   "platforms": {
